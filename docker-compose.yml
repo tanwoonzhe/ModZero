@@ -1,0 +1,20 @@
+version: "3.8"
+services:
+  db:
+    image: postgres:15
+    container_name: modzero_db
+    environment:
+      POSTGRES_USER: modzero
+      POSTGRES_PASSWORD: modzero
+      POSTGRES_DB: modzero
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U modzero -d modzero"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  db_data:
