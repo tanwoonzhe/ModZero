@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ModZero MVP</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      line-height: 1.4;
+    }
+    h1, h2 {
+      margin-top: 24px;
+    }
+    label {
+      display: block;
+      margin-top: 8px;
+    }
+    input[type="text"], textarea {
+      width: 300px;
+    }
+    button {
+      margin-top: 12px;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    table {
+      border-collapse: collapse;
+      margin-top: 16px;
+      width: 100%;
+      max-width: 800px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+    th {
+      background-color: #f2f2f2;
+    }
+    .result {
+      margin-top: 16px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>ModZero MVP</h1>
+
+  <h2>Trust Evaluation</h2>
+  <form id="trust-form">
+    <label>User UPN:<br><input type="text" name="user_upn" required></label>
+    <label>Device ID:<br><input type="text" name="device_id"></label>
+    <label><input type="checkbox" name="compliant"> Device compliant</label>
+    <button type="submit">Evaluate Trust</button>
+  </form>
+  <div id="trust-result" class="result"></div>
+
+  <h2>Access Logs</h2>
+  <button id="refresh-logs">Refresh Logs</button>
+  <table id="logs-table">
+    <thead>
+      <tr><th>ID</th><th>User</th><th>Device</th><th>IP</th><th>Score</th><th>Allowed</th><th>Time</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Templates</h2>
+  <form id="template-form">
+    <label>Name:<br><input type="text" name="name" required></label>
+    <label>Content:<br><textarea name="content" rows="3" required></textarea></label>
+    <button type="submit">Create Template</button>
+  </form>
+  <div id="template-msg" class="result"></div>
+  <table id="templates-table">
+    <thead>
+      <tr><th>ID</th><th>Name</th><th>Content</th><th>Created</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    async function evaluateTrust(e) {
+      e.preventDefault();
+      const form = document.getElementById('trust-form');
+      const data = new FormData(form);
+      const user_upn = data.get('user_upn');
+      const device_id = data.get('device_id') || null;
+      const compliant = data.get('compliant') === 'on';
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      if (compliant) {
+        headers['X-Device-Compliant'] = 'true';
+      }
+      try {
+        const resp = await fetch('/api/trust-evaluate', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ user_upn, device_id })
+        });
+        if (resp.ok) {
+          const json = await resp.json();
+          document.getElementById('trust-result').textContent =
+            'Allowed: ' + json.allowed + ', Total Score: ' + json.total_score.toFixed(2) +
+            ' (Posture: ' + json.posture_score.toFixed(2) + ', Context: ' + json.context_score.toFixed(2) + ')';
+          loadLogs();
+        } else {
+          document.getElementById('trust-result').textContent = 'Error: ' + resp.status + ' ' + resp.statusText;
+        }
+      } catch (err) {
+        document.getElementById('trust-result').textContent = 'Error: ' + err;
+      }
+    }
+
+    async function loadLogs() {
+      try {
+        const resp = await fetch('/api/logs');
+        if (!resp.ok) return;
+        const logs = await resp.json();
+        const tbody = document.getElementById('logs-table').querySelector('tbody');
+        tbody.innerHTML = '';
+        logs.forEach(log => {
+          const tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td>' + log.id + '</td>' +
+            '<td>' + log.user_upn + '</td>' +
+            '<td>' + (log.device_id || '') + '</td>' +
+            '<td>' + log.ip + '</td>' +
+            '<td>' + log.total_score.toFixed(2) + '</td>' +
+            '<td>' + log.allowed + '</td>' +
+            '<td>' + log.ts + '</td>';
+          tbody.appendChild(tr);
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function loadTemplates() {
+      try {
+        const resp = await fetch('/api/templates');
+        if (!resp.ok) return;
+        const templates = await resp.json();
+        const tbody = document.getElementById('templates-table').querySelector('tbody');
+        tbody.innerHTML = '';
+        templates.forEach(t => {
+          const tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td>' + t.id + '</td>' +
+            '<td>' + t.name + '</td>' +
+            '<td>' + t.content + '</td>' +
+            '<td>' + t.created_at + '</td>';
+          tbody.appendChild(tr);
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function createTemplate(e) {
+      e.preventDefault();
+      const form = document.getElementById('template-form');
+      const data = new FormData(form);
+      const payload = {
+        name: data.get('name'),
+        content: data.get('content')
+      };
+      try {
+        const resp = await fetch('/api/templates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const msgEl = document.getElementById('template-msg');
+        if (resp.ok) {
+          msgEl.textContent = 'Template created successfully';
+          form.reset();
+          loadTemplates();
+        } else {
+          const err = await resp.json();
+          msgEl.textContent = 'Error: ' + (err.detail || resp.status + ' ' + resp.statusText);
+        }
+      } catch (err) {
+        document.getElementById('template-msg').textContent = 'Error: ' + err;
+      }
+    }
+
+    document.getElementById('trust-form').addEventListener('submit', evaluateTrust);
+    document.getElementById('template-form').addEventListener('submit', createTemplate);
+    document.getElementById('refresh-logs').addEventListener('click', loadLogs);
+
+    window.addEventListener('load', () => {
+      loadLogs();
+      loadTemplates();
+    });
+
+    // Optional: handle Socket.IO updates for live logs
+    (function() {
+      const script = document.createElement('script');
+      script.src = '/socket.io/socket.io.js';
+      script.onload = () => {
+        const socket = io();
+        socket.on('login_attempt', data => {
+          loadLogs();
+        });
+      };
+      document.body.appendChild(script);
+    })();
+  </script>
+</body>
+</html>

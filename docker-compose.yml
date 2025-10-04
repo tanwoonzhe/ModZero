@@ -2,7 +2,6 @@ version: "3.8"
 services:
   db:
     image: postgres:15
-    container_name: modzero_db
     environment:
       POSTGRES_USER: modzero
       POSTGRES_PASSWORD: modzero
@@ -16,5 +15,22 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  backend:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://modzero:modzero@db:5432/modzero
+      TRUST_WEIGHT_POSTURE: ${TRUST_WEIGHT_POSTURE:-0.7}
+      TRUST_WEIGHT_CONTEXT: ${TRUST_WEIGHT_CONTEXT:-0.3}
+      TRUST_MIN_THRESHOLD: ${TRUST_MIN_THRESHOLD:-70}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+    ports:
+      - "8000:8000"
+
 volumes:
   db_data:
