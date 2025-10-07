@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from .settings import get_settings
 from .db import init_db
 from .routers import api_router
+from .init_superuser import create_initial_superuser
 
 
 settings = get_settings()
@@ -32,6 +33,7 @@ app.include_router(api_router, prefix="/api")
 def on_startup() -> None:
     """Initialize database on startup."""
     init_db()
+    create_initial_superuser()
 
 
 # Serve static frontend files if present (e.g. after `npm run build`)

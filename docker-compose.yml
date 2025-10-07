@@ -4,15 +4,15 @@ services:
   db:
     image: postgres:15
     environment:
-      POSTGRES_USER: modzero
-      POSTGRES_PASSWORD: modzero
-      POSTGRES_DB: modzero
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U modzero -d modzero"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -20,10 +20,16 @@ services:
   backend:
     build: ./backend
     environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:012202twz@db:5432/modzero
-      SECRET_KEY: supersecretkey
-      ACCESS_TOKEN_EXPIRE_MINUTES: 480
-      # placeholder for Azure credentials if needed
+      DATABASE_URL: ${DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+      ENVIRONMENT: ${ENVIRONMENT}
+      DEBUG: ${DEBUG}
+      # Initial superuser credentials
+      INITIAL_SUPERUSER_USERNAME: ${INITIAL_SUPERUSER_USERNAME}
+      INITIAL_SUPERUSER_EMAIL: ${INITIAL_SUPERUSER_EMAIL}
+      INITIAL_SUPERUSER_PASSWORD: ${INITIAL_SUPERUSER_PASSWORD}
+      # Azure credentials (optional)
       AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
       AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
       AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
@@ -38,7 +44,7 @@ services:
   frontend:
     build: ./frontend
     environment:
-      VITE_API_BASE: http://localhost:8000/api
+      VITE_API_BASE: ${VITE_API_BASE}
     depends_on:
       - backend
     ports:
