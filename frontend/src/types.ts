@@ -69,3 +69,29 @@ export interface Resource {
   connector_status: string;
   last_checked?: string;
 }
+
+export interface AzureUser {
+  azure_id: string;
+  display_name: string;
+  email: string;
+  username: string;
+  job_title: string;
+  department: string;
+  office_location: string;
+  mobile_phone: string;
+  business_phones: string[];
+  account_enabled: boolean;
+  is_synced?: boolean;
+}
+
+export interface AzureUsersResponse {
+  total: number;
+  users: AzureUser[];
+}
+
+export interface AzureConnectionTest {
+  success: boolean;
+  message: string;
+  token_acquired: boolean;
+  api_accessible: boolean;
+}
