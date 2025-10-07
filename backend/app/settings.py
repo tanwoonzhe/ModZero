@@ -1,44 +1,47 @@
+"""Application configuration.
+
+This module defines a Pydantic BaseSettings class that loads configuration from
+environment variables.  Values such as database URLs, JWT secrets and other
+sensitive data should be set via environment variables in deployment (e.g.
+.env file loaded by docker-compose).  Default values are provided for
+development convenience only and should be overridden in production.
 """
-Application configuration settings.
 
-This module defines a `Settings` class that loads configuration
-values from environment variables.  These values control database
-connections, trust score weighting, and optional Microsoft
-Graph/Intune integration credentials.  Default values are
-provided for local development and testing.
-"""
+from functools import lru_cache
+from pathlib import Path
+from typing import Optional
 
-import os
-from pydantic import BaseModel
+from pydantic import AnyUrl, Field
+from pydantic_settings import BaseSettings
 
 
-class Settings(BaseModel):
-    """Configuration values loaded from environment variables."""
+class Settings(BaseSettings):
+    # Application
+    project_name: str = "ModZero"
+    environment: str = Field("development", env="ENVIRONMENT")
+    debug: bool = Field(False, env="DEBUG")
 
-    # Database connection string.  Uses PostgreSQL by default.  When
-    # deploying in Docker, this should point at the `db` service
-    # (e.g. "postgresql+psycopg2://modzero:modzero@db:5432/modzero").
-    database_url: str = os.getenv(
-        "DATABASE_URL",
+    # Database
+    database_url: AnyUrl = Field(
         "postgresql+psycopg2://modzero:modzero@localhost:5432/modzero",
+        env="DATABASE_URL",
     )
 
-    # Weight assigned to the device posture component of the trust score.
-    weight_posture: float = float(os.getenv("TRUST_WEIGHT_POSTURE", 0.7))
+    # JWT
+    secret_key: str = Field("changeme", env="SECRET_KEY")
+    jwt_algorithm: str = Field("HS256", env="JWT_ALGORITHM")
+    access_token_expire_minutes: int = Field(60 * 8, env="ACCESS_TOKEN_EXPIRE_MINUTES")
 
-    # Weight assigned to the context component of the trust score.
-    weight_context: float = float(os.getenv("TRUST_WEIGHT_CONTEXT", 0.3))
+    # Azure (placeholders)
+    azure_tenant_id: Optional[str] = Field(None, env="AZURE_TENANT_ID")
+    azure_client_id: Optional[str] = Field(None, env="AZURE_CLIENT_ID")
+    azure_client_secret: Optional[str] = Field(None, env="AZURE_CLIENT_SECRET")
 
-    # Minimum score required to allow access.
-    min_threshold: int = int(os.getenv("TRUST_MIN_THRESHOLD", 70))
-
-    # Placeholders for future Microsoft Graph integration.  These values
-    # are optional for the MVP and remain unused until integration is
-    # implemented.  By defining them here we leave space for later
-    # development without breaking environment parsing.
-    azure_tenant_id: str | None = os.getenv("AZURE_TENANT_ID")
-    azure_client_id: str | None = os.getenv("AZURE_CLIENT_ID")
-    azure_client_secret: str | None = os.getenv("AZURE_CLIENT_SECRET")
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
 
-settings = Settings()
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()

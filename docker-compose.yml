@@ -1,4 +1,5 @@
 version: "3.8"
+
 services:
   db:
     image: postgres:15
@@ -18,19 +19,30 @@ services:
 
   backend:
     build: ./backend
-    depends_on:
-      db:
-        condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+psycopg2://modzero:modzero@db:5432/modzero
-      TRUST_WEIGHT_POSTURE: ${TRUST_WEIGHT_POSTURE:-0.7}
-      TRUST_WEIGHT_CONTEXT: ${TRUST_WEIGHT_CONTEXT:-0.3}
-      TRUST_MIN_THRESHOLD: ${TRUST_MIN_THRESHOLD:-70}
+      DATABASE_URL: postgresql+psycopg2://postgres:012202twz@db:5432/modzero
+      SECRET_KEY: supersecretkey
+      ACCESS_TOKEN_EXPIRE_MINUTES: 480
+      # placeholder for Azure credentials if needed
       AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
       AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
       AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "8000:8000"
+    volumes:
+      - ./frontend/dist:/app/frontend/dist  # mount built frontend for serving static files
+
+  frontend:
+    build: ./frontend
+    environment:
+      VITE_API_BASE: http://localhost:8000/api
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
 
 volumes:
   db_data:
