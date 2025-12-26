@@ -454,3 +454,46 @@ class Template(Base):
 
     def __repr__(self) -> str:
         return f"<Template {self.name}>"
+
+
+class CachedGraphDataTypeEnum(str, Enum):
+    """Types of cached Graph API data."""
+    TENANT_INFO = "tenant_info"
+    USERS = "users"
+    MANAGED_DEVICES = "managed_devices"
+    SIGN_IN_LOGS = "sign_in_logs"
+    RISKY_USERS = "risky_users"
+    CONDITIONAL_ACCESS = "conditional_access"
+    AUTH_METHODS = "auth_methods"
+    OVERVIEW_STATS = "overview_stats"
+    IDENTITY_ASSESSMENT = "identity_assessment"
+    DEVICE_ASSESSMENT = "device_assessment"
+
+
+class CachedGraphData(Base):
+    """Cache table for Microsoft Graph API data.
+    
+    Stores JSON responses from Graph API with expiry tracking.
+    Default expiry is 1 hour.
+    """
+    __tablename__ = "cached_graph_data"
+
+    id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    data_type: CachedGraphDataTypeEnum = Column(
+        PgEnum(CachedGraphDataTypeEnum), nullable=False, unique=True
+    )
+    data_json: dict = Column(JSON, nullable=False)
+    last_synced: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    expires_at: datetime = Column(DateTime(timezone=True), nullable=False)
+    sync_status: str = Column(String(32), default="success")  # success, error, pending
+    error_message: str = Column(Text, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<CachedGraphData {self.data_type} synced={self.last_synced}>"
+    
+    @property
+    def is_expired(self) -> bool:
+        """Check if cached data has expired."""
+        return datetime.utcnow() > self.expires_at

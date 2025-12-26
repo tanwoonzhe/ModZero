@@ -1,0 +1,33 @@
+{
+  "name": "modzero-client",
+  "version": "0.1.0",
+  "description": "ModZero Zero Trust Client - System Tray Application",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-updater": "^2.0.0",
+    "@tauri-apps/plugin-shell": "^2.0.0",
+    "@tauri-apps/plugin-notification": "^2.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-icons": "^4.9.0",
+    "axios": "^1.4.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/react": "^18.2.24",
+    "@types/react-dom": "^18.2.8",
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.2.2",
+    "vite": "^5.0.0",
+    "autoprefixer": "^10.4.13",
+    "postcss": "^8.4.21",
+    "tailwindcss": "^3.3.3"
+  }
+}

@@ -1,16 +1,18 @@
 import React, { ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { FaTachometerAlt, FaHistory, FaUsers, FaDesktop, FaGavel, FaNetworkWired, FaFileAlt, FaCog, FaSignOutAlt } from "react-icons/fa";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { FaTachometerAlt, FaHistory, FaUsers, FaDesktop, FaGavel, FaNetworkWired, FaFileAlt, FaCog, FaSignOutAlt, FaUserShield } from "react-icons/fa";
+import toast from "react-hot-toast";
 
 interface LayoutProps {
   children: ReactNode;
 }
 
 const navItems = [
-  { path: "/", label: "Dashboard", icon: <FaTachometerAlt /> },
+  { path: "/", label: "Overview", icon: <FaTachometerAlt /> },
+  { path: "/identity", label: "Identity", icon: <FaUserShield /> },
+  { path: "/devices", label: "Devices", icon: <FaDesktop /> },
   { path: "/logs", label: "Access Logs", icon: <FaHistory /> },
   { path: "/users", label: "Employees", icon: <FaUsers /> },
-  { path: "/devices", label: "Devices", icon: <FaDesktop /> },
   { path: "/policies", label: "Policies", icon: <FaGavel /> },
   { path: "/resources", label: "Resources", icon: <FaNetworkWired /> },
   { path: "/templates", label: "Templates", icon: <FaFileAlt /> },
@@ -19,10 +21,12 @@ const navItems = [
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
+  const navigate = useNavigate();
 
   const handleLogout = () => {
     localStorage.removeItem("token");
-    window.location.href = "/login";
+    toast.success("Logged out successfully");
+    navigate("/login", { replace: true });
   };
 
   return (

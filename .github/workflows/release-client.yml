@@ -1,0 +1,68 @@
+name: "Release Client App"
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: "windows-latest"
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-action@stable
+        with:
+          toolchain: stable
+
+      - name: Install frontend dependencies
+        working-directory: ./client
+        run: npm install
+
+      - name: Build and release Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: ./client
+          tagName: ${{ github.ref_name }}
+          releaseName: "ModZero Client v__VERSION__"
+          releaseBody: |
+            ## ModZero Client Release
+            
+            ### Features
+            - System tray integration for Windows
+            - Real-time device compliance monitoring
+            - Automatic sync with ModZero server
+            - Trust score calculation
+            
+            ### Installation
+            1. Download the `.msi` installer
+            2. Run the installer
+            3. The app will start automatically and appear in your system tray
+            
+            ### Auto-Update
+            The app will automatically check for updates and notify you when a new version is available.
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}

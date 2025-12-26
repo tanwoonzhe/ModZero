@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from . import auth, users, devices, attempts, policies, templates, resources, azure
+from . import auth, users, devices, attempts, policies, templates, resources, azure, assessment
 
 api_router = APIRouter()
 
@@ -14,3 +14,4 @@ api_router.include_router(policies.router, prefix="/policies", tags=["policies"]
 api_router.include_router(templates.router, prefix="/templates", tags=["templates"])
 api_router.include_router(resources.router, prefix="/resources", tags=["resources"])
 api_router.include_router(azure.router, prefix="/azure", tags=["azure"])
+api_router.include_router(assessment.router, prefix="/assessment", tags=["assessment"])

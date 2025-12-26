@@ -95,3 +95,127 @@ export interface AzureConnectionTest {
   token_acquired: boolean;
   api_accessible: boolean;
 }
+
+// Assessment types
+export interface AssessmentCheck {
+  id: string;
+  name: string;
+  category: string;
+  status: 'pass' | 'fail' | 'investigate' | 'planned' | 'skipped';
+  risk_level: 'high' | 'medium' | 'low';
+  description: string;
+  recommendation: string;
+}
+
+export interface SankeyNode {
+  id: string;
+  label: string;
+}
+
+export interface SankeyLink {
+  source: string;
+  target: string;
+  value: number;
+}
+
+export interface SankeyData {
+  nodes: SankeyNode[];
+  links: SankeyLink[];
+}
+
+export interface TenantInfo {
+  tenant_id: string;
+  display_name: string;
+  verified_domains: string[];
+  primary_domain: string;
+}
+
+export interface AssessmentScore {
+  score: number;
+  tests_passed: number;
+  total_tests: number;
+}
+
+export interface AuthMethodsSummary {
+  total_users: number;
+  mfa_registered: number;
+  passwordless: number;
+  phone_auth: number;
+  authenticator_app: number;
+  fido2: number;
+  windows_hello: number;
+  single_factor: number;
+}
+
+export interface OverviewMetrics {
+  users: number;
+  guests: number;
+  groups: number;
+  apps: number;
+  devices: number;
+  managed_devices: number;
+  compliant_devices: number;
+}
+
+export interface OverviewAssessmentData {
+  data: {
+    tenant: TenantInfo;
+    metrics: OverviewMetrics;
+    assessment_scores: {
+      identity: AssessmentScore;
+      devices: AssessmentScore;
+    };
+    auth_methods_summary: AuthMethodsSummary;
+  };
+  last_synced: string;
+  expires_at: string;
+  is_cached: boolean;
+  error?: string;
+}
+
+export interface IdentityAssessmentData {
+  data: {
+    total_users: number;
+    auth_summary: AuthMethodsSummary;
+    risky_users: any[];
+    risky_user_count: number;
+    ca_policies: any[];
+    ca_policy_count: number;
+    recent_sign_ins: any[];
+    checks: AssessmentCheck[];
+    sankey_data: SankeyData;
+  };
+  last_synced: string;
+  expires_at: string;
+  is_cached: boolean;
+  error?: string;
+}
+
+export interface DeviceAssessmentData {
+  data: {
+    total_devices: number;
+    devices: any[];
+    os_distribution: Record<string, number>;
+    compliance_stats: {
+      compliant: number;
+      noncompliant: number;
+      unknown: number;
+    };
+    compliance_rate: number;
+    ownership_stats: {
+      corporate: number;
+      personal: number;
+    };
+    encryption_stats: {
+      encrypted: number;
+      not_encrypted: number;
+    };
+    encryption_rate: number;
+    checks: AssessmentCheck[];
+    sankey_data: SankeyData;
+  };
+  last_synced: string;
+  expires_at: string;
+  is_cached: boolean;
+  error?: string;
+}
