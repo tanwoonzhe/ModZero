@@ -1,0 +1,17 @@
+.features {
+  display: flex;
+  align-items: center;
+  padding: 2rem 0;
+  width: 100%;
+}
+
+.featureBtn {
+  vertical-align: bottom;
+}
+
+.featureSvg {
+  height: 225px;
+  width: 350px;
+  padding-bottom: 10px;
+  align-self: center;
+}
