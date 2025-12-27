@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from ..deps import get_db, get_current_admin
 
 router = APIRouter()
@@ -21,8 +21,7 @@ class NetworkOut(BaseModel):
     created_at: str
     resources: List[dict]
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.get("/", response_model=List[NetworkOut])

@@ -39,68 +39,79 @@ def get_or_create_cache(
     Returns:
         Cached or fresh data dictionary
     """
-    cache = db.query(CachedGraphData).filter(
-        CachedGraphData.data_type == data_type
-    ).first()
-    
-    now = datetime.utcnow()
-    
-    # Return cached data if valid and not forcing refresh
-    if cache and not force_refresh and cache.expires_at > now:
-        return {
-            "data": cache.data_json,
-            "last_synced": cache.last_synced.isoformat(),
-            "expires_at": cache.expires_at.isoformat(),
-            "is_cached": True
-        }
-    
-    # Fetch fresh data
     try:
-        fresh_data = fetch_func()
-        expires_at = now + timedelta(hours=CACHE_EXPIRY_HOURS)
+        cache = db.query(CachedGraphData).filter(
+            CachedGraphData.data_type == data_type
+        ).first()
         
-        if cache:
-            cache.data_json = fresh_data
-            cache.last_synced = now
-            cache.expires_at = expires_at
-            cache.sync_status = "success"
-            cache.error_message = None
-        else:
-            cache = CachedGraphData(
-                data_type=data_type,
-                data_json=fresh_data,
-                last_synced=now,
-                expires_at=expires_at,
-                sync_status="success"
-            )
-            db.add(cache)
+        now = datetime.utcnow()
         
-        db.commit()
-        
-        return {
-            "data": fresh_data,
-            "last_synced": now.isoformat(),
-            "expires_at": expires_at.isoformat(),
-            "is_cached": False
-        }
-        
-    except Exception as e:
-        logger.error(f"Error fetching {data_type}: {str(e)}")
-        
-        # Return stale cache if available
-        if cache:
-            cache.sync_status = "error"
-            cache.error_message = str(e)
-            db.commit()
+        # Return cached data if valid and not forcing refresh
+        if cache and not force_refresh and cache.expires_at > now:
             return {
                 "data": cache.data_json,
                 "last_synced": cache.last_synced.isoformat(),
                 "expires_at": cache.expires_at.isoformat(),
-                "is_cached": True,
-                "error": str(e)
+                "is_cached": True
             }
         
-        raise HTTPException(status_code=500, detail=f"Failed to fetch data: {str(e)}")
+        # Fetch fresh data
+        try:
+            fresh_data = fetch_func()
+            expires_at = now + timedelta(hours=CACHE_EXPIRY_HOURS)
+            
+            if cache:
+                cache.data_json = fresh_data
+                cache.last_synced = now
+                cache.expires_at = expires_at
+                cache.sync_status = "success"
+                cache.error_message = None
+            else:
+                cache = CachedGraphData(
+                    data_type=data_type,
+                    data_json=fresh_data,
+                    last_synced=now,
+                    expires_at=expires_at,
+                    sync_status="success"
+                )
+                db.add(cache)
+            
+            db.commit()
+            
+            return {
+                "data": fresh_data,
+                "last_synced": now.isoformat(),
+                "expires_at": expires_at.isoformat(),
+                "is_cached": False
+            }
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error fetching {data_type}: {str(e)}")
+            
+            # Re-query cache after rollback
+            cache = db.query(CachedGraphData).filter(
+                CachedGraphData.data_type == data_type
+            ).first()
+            
+            # Return stale cache if available
+            if cache:
+                return {
+                    "data": cache.data_json,
+                    "last_synced": cache.last_synced.isoformat(),
+                    "expires_at": cache.expires_at.isoformat(),
+                    "is_cached": True,
+                    "error": str(e)
+                }
+            
+            raise HTTPException(status_code=500, detail=f"Failed to fetch data: {str(e)}")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Database error for {data_type}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 @router.get("/overview")

@@ -6,8 +6,9 @@ Where possible, omit sensitive fields (e.g. password hashes) from responses.
 
 from datetime import datetime
 from typing import List, Optional, Dict
+from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 
 ## User schemas
@@ -26,12 +27,11 @@ class UserCreate(BaseModel):
 
 
 class UserOut(UserBase):
-    user_id: str
+    user_id: UUID
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 ## Auth schemas
@@ -64,12 +64,11 @@ class DeviceCreate(DeviceBase):
 
 
 class DeviceOut(DeviceBase):
-    device_id: str
-    user_id: str
+    device_id: UUID
+    user_id: UUID
     registered_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 ## Posture checkpoint schemas
@@ -85,23 +84,21 @@ class PostureCheckpointCreate(PostureCheckpointBase):
 
 
 class PostureCheckpointOut(PostureCheckpointBase):
-    checkpoint_id: str
+    checkpoint_id: UUID
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 ## Device posture status schemas
 
 class DevicePostureStatusOut(BaseModel):
-    device_id: str
-    checkpoint_id: str
+    device_id: UUID
+    checkpoint_id: UUID
     status: str
     last_checked: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 ## Access attempt schemas
@@ -114,9 +111,9 @@ class AttemptCreate(BaseModel):
 
 
 class AttemptOut(BaseModel):
-    attempt_id: str
-    user_id: str
-    device_id: Optional[str]
+    attempt_id: UUID
+    user_id: UUID
+    device_id: Optional[UUID]
     ip_address: Optional[str]
     geo_location: Optional[Dict[str, str]]
     timestamp: datetime
@@ -126,19 +123,17 @@ class AttemptOut(BaseModel):
     decision: Optional[str]
     trust_details: Optional[List[Dict[str, float]]]
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 ## Trust factor schemas
 
 class TrustFactorOut(BaseModel):
-    factor_id: str
+    factor_id: UUID
     name: str
     description: Optional[str]
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 ## Policy schemas
@@ -155,15 +150,14 @@ class PolicyCreate(PolicyBase):
 
 
 class PolicyOut(PolicyBase):
-    policy_id: str
-    user_id: str
+    policy_id: UUID
+    user_id: UUID
     created_at: datetime
     updated_at: datetime
     is_active: bool
     weights: Optional[Dict[str, float]] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 ## Template schemas
@@ -180,8 +174,7 @@ class TemplateCreate(TemplateBase):
 
 
 class TemplateOut(TemplateBase):
-    template_id: str
+    template_id: UUID
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

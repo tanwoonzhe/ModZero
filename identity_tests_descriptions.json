@@ -1,0 +1,667 @@
+[
+  {
+    "testId": "21770",
+    "title": "Inactive applications don't have highly privileged Microsoft Graph API permissions",
+    "description": "Attackers might exploit valid but inactive applications that still have elevated privileges. These applications can be used to gain initial access without raising alarm because they're legitimate applications. From there, attackers can use the application privileges to plan or execute other attacks. Attackers might also maintain access by manipulating the inactive application, such as by adding credentials. This persistence ensures that even if their primary access method is detected, they can regain access later."
+  },
+  {
+    "testId": "21771",
+    "title": "Inactive applications don't have highly privileged Microsoft Entra built-in roles",
+    "description": "Attackers might exploit valid but inactive applications that still have elevated privileges. These applications can be used to gain initial access without raising alarm because they're legitimate applications. From there, attackers can use the application privileges to plan or execute other attacks. Attackers might also maintain access by manipulating the inactive application, such as by adding credentials. This persistence ensures that even if their primary access method is detected, they can regain access later."
+  },
+  {
+    "testId": "21772",
+    "title": "Applications don't have secrets configured",
+    "description": "Applications that use client secrets might store them in configuration files, hardcode them in scripts, or risk their exposure in other ways. The complexities of secret management make client secrets susceptible to leaks and attractive to attackers. Client secrets, when exposed, provide attackers with the ability to blend their activities with legitimate operations, making it easier to bypass security controls. If an attacker compromises an application's client secret, they can escalate their privileges within the system, leading to broader access and control, depending on the permissions of the application."
+  },
+  {
+    "testId": "21773",
+    "title": "Application certificates don't have long lifetimes",
+    "description": "Certificates, if not securely stored, can be extracted and exploited by attackers, leading to unauthorized access. Long-lived certificates are more likely to be exposed over time. Credentials, when exposed, provide attackers with the ability to blend their activities with legitimate operations, making it easier to bypass security controls. If an attacker compromises an application's certificate, they can escalate their privileges within the system, leading to broader access and control, depending on the privileges of the application."
+  },
+  {
+    "testId": "21774",
+    "title": "Microsoft services applications don't have credentials configured",
+    "description": "Microsoft services applications that operate in your tenant are identified as service principals with the owner organization ID 'f8cdef31-a31e-4b4a-93e4-5f571e91255a.' When these service principals have credentials configured in your tenant, they might create potential attack vectors that threat actors can exploit. If an administrator added the credentials and they're no longer needed, they can become a target for attackers. Threat actors can use these credentials to authenticate as the service principal, gaining the same permissions and access rights as the Microsoft service application."
+  },
+  {
+    "testId": "21776",
+    "title": "User consent settings are restricted",
+    "description": "Without restricted user consent settings, threat actors can exploit permissive application consent configurations to gain unauthorized access to sensitive organizational data. When user consent is unrestricted, attackers can use social engineering and illicit consent grant attacks to trick users into approving malicious applications, impersonate legitimate services to request broad permissions, obtain legitimate OAuth tokens that bypass perimeter security controls, and establish persistent access to organizational resources."
+  },
+  {
+    "testId": "21777",
+    "title": "App Instance Property Lock is configured for all multitenant applications",
+    "description": "App instance property lock prevents changes to sensitive properties of a multitenant application after the application is provisioned in another tenant. Without a lock, critical properties such as application credentials can be maliciously or unintentionally modified, causing disruptions, increased risk, unauthorized access, or privilege escalations."
+  },
+  {
+    "testId": "21781",
+    "title": "Privileged users sign in with phishing-resistant methods",
+    "description": "Without phishing-resistant authentication methods, privileged users are more vulnerable to phishing attacks. These types of attacks trick users into revealing their credentials to grant unauthorized access to attackers. If non-phishing-resistant authentication methods are used, attackers might intercept credentials and tokens, through methods like adversary-in-the-middle attacks, undermining the security of the privileged account. Once a privileged account or session is compromised due to weak authentication methods, attackers might manipulate the account to maintain long-term access, create other backdoors, or modify user permissions."
+  },
+  {
+    "testId": "21782",
+    "title": "Privileged users have registered phishing-resistant methods",
+    "description": "Without phishing-resistant authentication methods, privileged users are more vulnerable to phishing attacks. These types of attacks trick users into revealing their credentials to grant unauthorized access to attackers. If non-phishing-resistant authentication methods are used, attackers might intercept credentials and tokens, through methods like adversary-in-the-middle attacks, undermining the security of the privileged account."
+  },
+  {
+    "testId": "21783",
+    "title": "Privileged role access is protected with phishing-resistant authentication",
+    "description": "Without phishing-resistant authentication methods, privileged users are more vulnerable to phishing attacks. These types of attacks trick users into revealing their credentials to grant unauthorized access to attackers. If non-phishing-resistant authentication methods are used, attackers might intercept credentials and tokens, through methods like adversary-in-the-middle attacks, undermining the security of the privileged account."
+  },
+  {
+    "testId": "21786",
+    "title": "Token protection is enabled",
+    "description": "A threat actor can intercept or extract authentication tokens from memory, local storage on a legitimate device, or by inspecting network traffic. The attacker might replay those tokens to bypass authentication controls on users and devices, get unauthorized access to sensitive data, or run further attacks. Token protection, also called token binding, helps prevent token theft by making sure a token is usable only from the intended device."
+  },
+  {
+    "testId": "21787",
+    "title": "Permissions to create new tenants is limited to the Tenant Creator role",
+    "description": "A threat actor or a well-intentioned but uninformed employee can create a new Microsoft Entra tenant if there are no restrictions in place. By default, the user who creates a tenant is automatically assigned the Global Administrator role. Without proper controls, this action fractures the identity perimeter by creating a tenant outside the organization's governance and visibility. It introduces risk through a shadow identity platform that can be exploited for token issuance, brand impersonation, consent phishing, or persistent staging infrastructure."
+  },
+  {
+    "testId": "21788",
+    "title": "Global Administrators don't have persistent access to Azure subscriptions",
+    "description": "Global Administrators with persistent access to Azure subscriptions expand the attack surface for threat actors. If a Global Administrator account is compromised, attackers can immediately enumerate resources, modify configurations, assign roles, and exfiltrate sensitive data across all subscriptions. Requiring just-in-time elevation for subscription access introduces detectable signals, slows attacker velocity, and routes high-impact operations through observable control points."
+  },
+  {
+    "testId": "21790",
+    "title": "Outbound cross-tenant access settings are configured",
+    "description": "Allowing unrestricted external collaboration with unverified organizations can increase the risk surface area of the tenant because it allows guest accounts that might not have proper security controls. Threat actors can attempt to gain access by compromising identities in these loosely governed external tenants. Once granted guest access, they can then use legitimate collaboration pathways to infiltrate resources in your tenant and attempt to gain sensitive information."
+  },
+  {
+    "testId": "21791",
+    "title": "Guest invite settings are restricted",
+    "description": "External user accounts are often used to provide access to business partners who belong to organizations that have a business relationship with your enterprise. If these accounts are compromised in their organization, attackers can use the valid credentials to gain initial access to your environment. Allowing external users to onboard other external users increases the risk of unauthorized access."
+  },
+  {
+    "testId": "21792",
+    "title": "Guests have restricted access to directory objects",
+    "description": "External user accounts are often used to provide access to business partners who belong to organizations that have a business relationship with your enterprise. External accounts with permissions to read directory object permissions provide attackers with broader initial access if compromised. These accounts allow attackers to gather additional information from the directory for reconnaissance."
+  },
+  {
+    "testId": "21793",
+    "title": "Tenant restrictions v2 policy is configured",
+    "description": "Tenant Restrictions v2 (TRv2) allows organizations to enforce policies that restrict access to specified Microsoft Entra tenants, preventing unauthorized exfiltration of corporate data to external tenants using local accounts. Without TRv2, threat actors can exploit this vulnerability, which leads to potential data exfiltration and compliance violations, followed by credential harvesting if those external tenants have weaker controls."
+  },
+  {
+    "testId": "21795",
+    "title": "No legacy authentication sign-in activity",
+    "description": "Legacy authentication protocols such as basic authentication for SMTP and IMAP don't support modern security features like multifactor authentication (MFA), which is crucial for protecting against unauthorized access. This lack of protection makes accounts using these protocols vulnerable to password-based attacks, and provides attackers with a means to gain initial access using stolen or guessed credentials."
+  },
+  {
+    "testId": "21796",
+    "title": "Legacy authentication is blocked",
+    "description": "Legacy authentication protocols such as basic authentication for SMTP and IMAP don't support modern security features like multifactor authentication (MFA), which is crucial for protecting against unauthorized access. This lack of protection makes accounts using these protocols vulnerable to password-based attacks, and provides attackers with a means to gain initial access using stolen or guessed credentials."
+  },
+  {
+    "testId": "21797",
+    "title": "Restrict access to high risk users",
+    "description": "Assume high risk users are compromised by threat actors. Without investigation and remediation, threat actors can execute scripts, deploy malicious applications, or manipulate API calls to establish persistence, based on the potentially compromised user's permissions. Threat actors can then exploit misconfigurations or abuse OAuth tokens to move laterally across workloads like documents, SaaS applications, or Azure resources."
+  },
+  {
+    "testId": "21798",
+    "title": "ID Protection notifications are enabled",
+    "description": "If you don't enable ID Protection notifications, your organization loses critical real-time alerts when threat actors compromise user accounts or conduct reconnaissance activities. When Microsoft Entra ID Protection detects accounts at risk, it sends email alerts with 'Users at risk detected' as the subject. Without these notifications, security teams remain unaware of active threats, allowing threat actors to maintain persistence in compromised accounts without being detected."
+  },
+  {
+    "testId": "21799",
+    "title": "Restrict high risk sign-ins",
+    "description": "When high-risk sign-ins are not properly restricted through Conditional Access policies, organizations expose themselves to security vulnerabilities. Threat actors can exploit these gaps for initial access through compromised credentials, credential stuffing attacks, or anomalous sign-in patterns that Microsoft Entra ID Protection identifies as risky behaviors."
+  },
+  {
+    "testId": "21800",
+    "title": "All user sign-in activity uses strong authentication methods",
+    "description": "Attackers might gain access if multifactor authentication (MFA) isn't universally enforced or if there are exceptions in place. Attackers might gain access by exploiting vulnerabilities of weaker MFA methods like SMS and phone calls through social engineering techniques. These techniques might include SIM swapping or phishing, to intercept authentication codes."
+  },
+  {
+    "testId": "21801",
+    "title": "Users have strong authentication methods configured",
+    "description": "Attackers might gain access if multifactor authentication (MFA) isn't universally enforced or if there are exceptions in place. Attackers might gain access by exploiting vulnerabilities of weaker MFA methods like SMS and phone calls through social engineering techniques. These techniques might include SIM swapping or phishing, to intercept authentication codes."
+  },
+  {
+    "testId": "21802",
+    "title": "Authenticator displays sign-in context",
+    "description": "Without sign-in context, threat actors can exploit authentication fatigue by flooding users with push notifications, increasing the chance that a user accidentally approves a malicious request. When users get generic push notifications without the application name or geographic location, they don't have the information they need to make informed approval decisions."
+  },
+  {
+    "testId": "21803",
+    "title": "Migrate from legacy MFA and SSPR policies",
+    "description": "Legacy multifactor authentication (MFA) and self-service password reset (SSPR) policies in Microsoft Entra ID manage authentication methods separately, leading to fragmented configurations and suboptimal user experience. Migrating to the combined Authentication Methods policy consolidates the management of MFA, SSPR, and passwordless authentication methods into a single policy framework."
+  },
+  {
+    "testId": "21804",
+    "title": "SMS and Voice are disabled as authentication methods",
+    "description": "When weak authentication methods like SMS and voice calls remain enabled in Microsoft Entra ID, threat actors can exploit these vulnerabilities through multiple attack vectors. SMS messages can be intercepted through SIM swapping attacks, SS7 network vulnerabilities, or malware on mobile devices, while voice calls are susceptible to voice phishing (vishing) and call forwarding manipulation."
+  },
+  {
+    "testId": "21806",
+    "title": "Secure the MFA registration (My Security Info) page",
+    "description": "Without Conditional Access policies protecting security information registration, threat actors can exploit unprotected registration flows to compromise authentication methods. When users register multifactor authentication and self-service password reset methods without proper controls, threat actors can intercept these registration sessions through adversary-in-the-middle attacks or exploit unmanaged devices accessing registration from untrusted locations."
+  },
+  {
+    "testId": "21807",
+    "title": "Non-privileged users can't create applications",
+    "description": "If nonprivileged users can create applications and service principals, these accounts might be misconfigured or be granted more permissions than necessary, creating new vectors for attackers to gain initial access. Attackers can exploit these accounts to establish valid credentials in the environment and bypass some security controls."
+  },
+  {
+    "testId": "21808",
+    "title": "Device code flow is blocked",
+    "description": "Device code flow is a cross-device authentication flow designed for input-constrained devices. It can be exploited in phishing attacks, where an attacker initiates the flow and tricks a user into completing it on their device, thereby sending the user's tokens to the attacker. Given the security risks and the infrequent legitimate use of device code flow, you should enable a Conditional Access policy to block this flow by default."
+  },
+  {
+    "testId": "21809",
+    "title": "Admin consent workflow is enabled",
+    "description": "Enabling the Admin consent workflow in a Microsoft Entra tenant is a vital security measure that mitigates risks associated with unauthorized application access and privilege escalation. This check ensures that any application requesting elevated permission undergoes a review process by designated administrators before consent is granted."
+  },
+  {
+    "testId": "21810",
+    "title": "Resource-specific consent is restricted",
+    "description": "Letting group owners consent to applications in Microsoft Entra ID creates a lateral escalation path that lets threat actors persist and steal data without admin credentials. If an attacker compromises a group owner account, they can register or use a malicious application and consent to high-privilege Graph API permissions scoped to the group."
+  },
+  {
+    "testId": "21811",
+    "title": "Password expiration is disabled",
+    "description": "When password expiration policies remain enabled, threat actors can exploit the predictable password rotation patterns that users typically follow when forced to change passwords regularly. Users frequently create weaker passwords by making minimal modifications to existing ones, such as incrementing numbers or adding sequential characters."
+  },
+  {
+    "testId": "21812",
+    "title": "Minimize the number of Global Administrators",
+    "description": "An excessive number of Global Administrator accounts creates an expanded attack surface that threat actors can exploit through various initial access vectors. Each extra privileged account represents a potential entry point for threat actors. Microsoft recommends that organizations have no more than eight Global Administrators."
+  },
+  {
+    "testId": "21813",
+    "title": "Low ratio of Global Administrators to privileged users",
+    "description": "When organizations maintain a disproportionately high ratio of Global Administrators relative to their total privileged user population, they expose themselves to significant security risks that threat actors might exploit through various attack vectors. Excessive Global Administrator assignments create multiple high-value targets for threat actors."
+  },
+  {
+    "testId": "21814",
+    "title": "Privileged roles are cloud-only",
+    "description": "If an on-premises account is compromised and is synchronized to Microsoft Entra, the attacker might gain access to the tenant as well. This risk increases because on-premises environments typically have more attack surfaces due to older infrastructure and limited security controls. If privileged cloud accounts are synchronized with on-premises accounts, an attacker who acquires credentials for on-premises can use those same credentials to access cloud resources."
+  },
+  {
+    "testId": "21815",
+    "title": "All privileged role assignments are activated just in time and not permanently active",
+    "description": "Threat actors target privileged accounts because they have access to the data and resources they want. Without a just-in-time (JIT) activation model, administrative privileges remain continuously exposed, providing attackers with an extended window to operate undetected. Just-in-time access mitigates risk by enforcing time-limited privilege activation with extra controls such as approvals, justification, and Conditional Access policy."
+  },
+  {
+    "testId": "21816",
+    "title": "Privileged Microsoft Entra roles are managed with PIM",
+    "description": "Threat actors who compromise a permanently assigned privileged account gain continuous, uninterrupted access to high-impact directory operations. This extended dwell time enables attackers to more easily establish persistent backdoors, delete critical data and security configurations, disable monitoring systems, and register malicious applications for data exfiltration and lateral movement."
+  },
+  {
+    "testId": "21817",
+    "title": "Global Administrator role activation triggers an approval workflow",
+    "description": "Without approval workflows, threat actors who compromise Global Administrator credentials through phishing, credential stuffing, or other authentication bypass techniques can immediately activate the most privileged role in a tenant without any other verification or oversight. Privileged Identity Management (PIM) allows eligible role activations to become active within seconds, so compromised credentials can allow near-instant privilege escalation."
+  },
+  {
+    "testId": "21818",
+    "title": "Alerts for activation of highly privileged roles are enabled",
+    "description": "Organizations without proper activation alerts for highly privileged roles lack visibility into when users access these critical permissions. Threat actors can exploit this monitoring gap to perform privilege escalation by activating highly privileged roles without detection, then establish persistence through admin account creation or security policy modifications."
+  },
+  {
+    "testId": "21819",
+    "title": "Alerts for activation of Global Administrator role are enabled",
+    "description": "Without activation alerts for Global Administrator role assignments, threat actors can perform role activation without detection, allowing them to establish persistence in the environment. When Global Administrator roles are activated without notification mechanisms, threat actors who have compromised accounts can escalate privileges, bypassing security monitoring."
+  },
+  {
+    "testId": "21820",
+    "title": "Alerts for privileged role assignments are enabled",
+    "description": "Without activation alerts for privileged role assignments, threat actors who compromise user credentials through phishing, password attacks, or credential stuffing can activate privileged roles without detection. When privileged roles are activated without notification mechanisms, security teams lack visibility into when elevated permissions are being used."
+  },
+  {
+    "testId": "21821",
+    "title": "Guest access is restricted",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21822",
+    "title": "Guest access is limited to approved tenants",
+    "description": "Without limiting guest access to approved tenants, threat actors can exploit unrestricted guest access to establish initial access through compromised external accounts or by creating accounts in untrusted tenants. Organizations can configure an allowlist or blocklist to control B2B collaboration invitations from specific organizations."
+  },
+  {
+    "testId": "21823",
+    "title": "Guest self-service sign-up is disabled",
+    "description": "When guest self-service sign-up is enabled, threat actors can exploit it to establish unauthorized access by creating legitimate guest accounts without requiring approval from authorized personnel. These accounts can be scoped to specific services to reduce detection and effectively bypass invitation-based controls that validate external user legitimacy."
+  },
+  {
+    "testId": "21824",
+    "title": "Guests don't have long lived sign-in sessions",
+    "description": "Guest accounts with extended sign-in sessions increase the risk surface area that threat actors can exploit. When guest sessions persist beyond necessary timeframes, threat actors often attempt to gain initial access through credential stuffing, password spraying, or social engineering attacks. Once they gain access, they can maintain unauthorized access for extended periods without reauthentication challenges."
+  },
+  {
+    "testId": "21825",
+    "title": "Privileged users don't have long lived sign-in sessions",
+    "description": "When privileged users are allowed to maintain long-lived sign-in sessions without periodic reauthentication, threat actors can gain extended windows of opportunity to exploit compromised credentials or hijack active sessions. Once a privileged account is compromised, extended session timeouts allow threat actors to maintain persistence within the environment for prolonged periods."
+  },
+  {
+    "testId": "21828",
+    "title": "Authentication transfer is blocked",
+    "description": "Blocking authentication transfer in Microsoft Entra ID is a critical security control. It helps protect against token theft and replay attacks by preventing the use of device tokens to silently authenticate on other devices or browsers. When authentication transfer is enabled, a threat actor who gains access to one device can access resources to nonapproved devices, bypassing standard authentication and device compliance checks."
+  },
+  {
+    "testId": "21829",
+    "title": "Federation to on-premises IdP is disabled",
+    "description": "An on-premises federation server introduces a critical attack surface by serving as a central authentication point for cloud applications. Threat actors often gain a foothold by compromising a privileged user through attacks like phishing, credential stuffing, or exploiting weak passwords. Once inside, threat actors can manipulate authentication flows, forge security tokens to impersonate any user, and pivot into cloud environments."
+  },
+  {
+    "testId": "21830",
+    "title": "Privileged role activations are restricted to Privileged Access Workstations",
+    "description": "If privileged role activations aren't restricted to dedicated Privileged Access Workstations (PAWs), threat actors can exploit compromised endpoint devices to perform privileged escalation attacks from unmanaged or noncompliant workstations. Standard productivity workstations often contain attack vectors such as unrestricted web browsing, email clients vulnerable to phishing, and locally installed applications with potential vulnerabilities."
+  },
+  {
+    "testId": "21831",
+    "title": "Protected actions are enabled for high-impact management tasks",
+    "description": "Threat actors who gain privileged access to a tenant can manipulate identity, access, and security configurations. This type of attack can result in environment-wide compromise and loss of control over organizational assets. Protected actions let administrators secure these tasks with extra security controls, such as stronger authentication methods, the use of Privileged Access Workstation (PAW) devices, or shorter session timeouts."
+  },
+  {
+    "testId": "21832",
+    "title": "All groups in Conditional Access policies belong to a restricted management administrative unit",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21833",
+    "title": "Directory Sync account credentials haven't been rotated recently",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21834",
+    "title": "Directory sync account is locked down to specific named location",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21835",
+    "title": "Emergency access accounts are configured",
+    "description": "Microsoft recommends that organizations have two cloud-only emergency access accounts permanently assigned the Global Administrator role. These accounts are highly privileged and aren't assigned to specific individuals. The accounts are limited to emergency or 'break glass' scenarios where normal accounts can't be used or all other administrators are accidentally locked out."
+  },
+  {
+    "testId": "21836",
+    "title": "No workload identities have privileged Microsoft Entra roles",
+    "description": "If administrators assign privileged roles to workload identities, such as service principals or managed identities, the tenant can be exposed to significant risk if those identities are compromised. Threat actors who gain access to a privileged workload identity can perform reconnaissance to enumerate resources, escalate privileges, and manipulate or exfiltrate sensitive data."
+  },
+  {
+    "testId": "21837",
+    "title": "Maximum number of devices per user is limited",
+    "description": "Controlling device proliferation is important. Set a reasonable limit on the number of devices each user can register in your Microsoft Entra ID tenant. Limiting device registration maintains security while allowing business flexibility. Microsoft Entra ID lets users register up to 50 devices by default. Reducing this number to 10 minimizes the attack surface and simplifies device management."
+  },
+  {
+    "testId": "21838",
+    "title": "Security key authentication method is enabled",
+    "description": "Enabling the security key authentication method in Microsoft Entra ID mitigates the risk of credential theft and unauthorized access by requiring hardware-backed, phishing-resistant authentication. If this best practice is not followed, threat actors can exploit weak or reused passwords, perform credential stuffing attacks, and escalate privileges through compromised accounts."
+  },
+  {
+    "testId": "21839",
+    "title": "Passkey authentication method is enabled",
+    "description": "When passkey authentication isn't enabled in Microsoft Entra ID, organizations rely on password-based authentication methods that are vulnerable to phishing, credential theft, and replay attacks. Attackers can use stolen passwords to gain initial access, bypass traditional multifactor authentication through Adversary-in-the-Middle (AiTM) attacks, and establish persistent access through token theft."
+  },
+  {
+    "testId": "21840",
+    "title": "Security key attestation is enforced",
+    "description": "When security key attestation isn't enforced, threat actors can exploit weak or compromised authentication hardware to establish persistent presence within organizational environments. Without attestation validation, malicious actors can register unauthorized or counterfeit FIDO2 security keys that bypass hardware-backed security controls."
+  },
+  {
+    "testId": "21841",
+    "title": "Report suspicious activity is enabled",
+    "description": "Threat actors increasingly rely on prompt bombing and real-time phishing proxies to coerce or trick users into approving fraudulent multifactor authentication (MFA) challenges. Without the Microsoft Authenticator app's 'Report suspicious activity' capability enabled, an attacker can iterate until a fatigued user accepts. This type of attack can lead to privilege escalation, persistence, lateral movement, data exfiltration, or destructive actions."
+  },
+  {
+    "testId": "21842",
+    "title": "Self-service password reset for administrators is disabled",
+    "description": "Self-Service Password Reset (SSPR) for administrators allows password changes to happen without strong secondary authentication factors or administrative oversight. Threat actors who compromise administrative credentials can use this capability to bypass other security controls and maintain persistent access to the environment. Once compromised, attackers can immediately reset the password to lock out legitimate administrators."
+  },
+  {
+    "testId": "21843",
+    "title": "Block legacy Microsoft Online PowerShell module",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21844",
+    "title": "Azure AD PowerShell module is blocked",
+    "description": "Threat actors frequently target legacy management interfaces such as the Azure AD PowerShell module (AzureAD and AzureADPreview), which don't support modern authentication, Conditional Access enforcement, or advanced audit logging. Continued use of these modules exposes the environment to risks including weak authentication, bypass of security controls, and incomplete visibility into administrative actions."
+  },
+  {
+    "testId": "21845",
+    "title": "Temporary access pass is enabled",
+    "description": "Without Temporary Access Pass (TAP) enabled, organizations face significant challenges in securely bootstrapping user credentials, creating a vulnerability where users rely on weaker authentication mechanisms during their initial setup. When users cannot register phishing-resistant credentials like FIDO2 security keys or Windows Hello for Business due to lack of existing strong authentication methods, they remain exposed to credential-based attacks."
+  },
+  {
+    "testId": "21846",
+    "title": "Temporary access pass restricted to one-time use",
+    "description": "When Temporary Access Pass (TAP) is configured to allow multiple uses, threat actors who compromise the credential can reuse it repeatedly during its validity period, extending their unauthorized access window beyond the intended single bootstrapping event. This situation creates an extended opportunity for threat actors to establish persistence by registering additional strong authentication methods."
+  },
+  {
+    "testId": "21847",
+    "title": "Password protection for on-premises is enabled",
+    "description": "When on-premises password protection isn't enabled or enforced, threat actors can use low-and-slow password spray with common variants to gain initial access to Active Directory Domain Services accounts. Domain Controllers can accept weak passwords when the password protection DC agent isn't installed or the setting is disabled or in audit-only mode."
+  },
+  {
+    "testId": "21848",
+    "title": "Custom banned password list is configured",
+    "description": "Organizations that don't populate and enforce the custom banned password list expose themselves to a systematic attack chain where threat actors exploit predictable organizational password patterns. Threat actors typically start with reconnaissance phases, gathering OSINT to identify likely password components, then launch password spray attacks that test organization-specific password variations."
+  },
+  {
+    "testId": "21849",
+    "title": "Smart lockout duration is 60 seconds or more",
+    "description": "When Smart Lockout duration is configured below the default 60 seconds, threat actors can exploit shortened lockout periods to conduct password spray and credential stuffing attacks more effectively. Reduced lockout windows allow attackers to resume authentication attempts more rapidly, increasing their success probability while potentially evading detection systems."
+  },
+  {
+    "testId": "21850",
+    "title": "Smart lockout threshold is 10 or less",
+    "description": "When the smart lockout threshold is set to more than 10, threat actors can exploit the configuration to conduct reconnaissance, identify valid user accounts without triggering lockout protections, and establish initial access without detection. A threshold of more than 10 provides insufficient protection against automated password spray attacks."
+  },
+  {
+    "testId": "21851",
+    "title": "Guest access is protected by strong authentication methods",
+    "description": "External user accounts are often used to provide access to business partners. If these accounts are compromised in their organization, attackers can use the valid credentials to gain initial access to your environment. Attackers might gain access with external user accounts if MFA isn't universally enforced or if there are exceptions in place."
+  },
+  {
+    "testId": "21854",
+    "title": "Planned for future release",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21855",
+    "title": "Planned for future release",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21857",
+    "title": "Guest identities are lifecycle managed with access reviews",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21858",
+    "title": "Inactive guest identities are disabled or removed from the tenant",
+    "description": "When guest identities remain active but unused for extended periods, threat actors can exploit these dormant accounts as entry vectors into the organization. Inactive guest accounts represent a significant attack surface because they often maintain persistent access permissions to resources, applications, and data while remaining unmonitored by security teams."
+  },
+  {
+    "testId": "21859",
+    "title": "GDAP admin least privilege",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21860",
+    "title": "Microsoft Entra logs are sent to a SIEM or Log Analytics workspace",
+    "description": "The activity logs and reports in Microsoft Entra can help detect unauthorized access attempts or identify when tenant configuration changes. When logs are archived or integrated with SIEM tools, security teams can implement powerful monitoring and detection security controls, proactive threat hunting, and incident response processes."
+  },
+  {
+    "testId": "21861",
+    "title": "All high-risk users are triaged",
+    "description": "Users considered at high risk by Microsoft Entra ID Protection have a high probability of compromise by threat actors. Threat actors can gain initial access via compromised valid accounts, where their suspicious activities continue despite triggering risk indicators. A lack of triage of these risky users allows for expanded reconnaissance activities and lateral movement."
+  },
+  {
+    "testId": "21862",
+    "title": "All risky workload identities are triaged",
+    "description": "Compromised workload identities (service principals and applications) allow threat actors to gain persistent access without user interaction or multifactor authentication. Microsoft Entra ID Protection monitors these identities for suspicious activities like leaked credentials, anomalous API traffic, and malicious applications. Unaddressed risky workload identities enable privilege escalation, lateral movement, data exfiltration, and persistent backdoors."
+  },
+  {
+    "testId": "21863",
+    "title": "All high-risk sign-ins are triaged",
+    "description": "Risky sign-ins flagged by Microsoft Entra ID Protection indicate a high probability of unauthorized access attempts. Threat actors use these sign-ins to gain an initial foothold. If these sign-ins remain uninvestigated, adversaries can establish persistence by repeatedly authenticating under the guise of legitimate users."
+  },
+  {
+    "testId": "21864",
+    "title": "All risk detections are triaged",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21865",
+    "title": "Named locations are configured",
+    "description": "Without named locations configured in Microsoft Entra ID, threat actors can exploit the absence of location intelligence to conduct attacks without triggering location-based risk detections or security controls. When organizations fail to define named locations for trusted networks, Microsoft Entra ID Protection can't assess location-based risk signals."
+  },
+  {
+    "testId": "21866",
+    "title": "Address all active Entra recommendations",
+    "description": "Microsoft Entra recommendations give organizations opportunities to implement best practices and optimize their security posture. Not acting on these items might result in an increased attack surface area, suboptimal operations, or poor user experience."
+  },
+  {
+    "testId": "21867",
+    "title": "All enterprise applications have owners",
+    "description": "Without owners, enterprise applications become orphaned assets that threat actors can exploit through credential harvesting and privilege escalation techniques. These applications often retain elevated permissions and access to sensitive resources while lacking proper oversight and security governance."
+  },
+  {
+    "testId": "21868",
+    "title": "Guest users can't own applications",
+    "description": "Without restrictions preventing guest users from registering and owning applications, threat actors can exploit external user accounts to establish persistent backdoor access to organizational resources through application registrations that might evade traditional security monitoring."
+  },
+  {
+    "testId": "21869",
+    "title": "Enterprise applications are restricted to scoped users",
+    "description": "When enterprise applications lack both explicit assignment requirements AND scoped provisioning controls, threat actors can exploit this dual weakness to gain unauthorized access to sensitive applications and data. The highest risk occurs when applications are configured with 'Assignment required' set to 'No' and provisioning isn't required or scoped."
+  },
+  {
+    "testId": "21870",
+    "title": "Enable self-service password reset",
+    "description": "Without Self-Service Password Reset (SSPR) enabled, users with password-related issues must contact help desk support, which can cause operational delays and lost productivity. There are also potential security vulnerabilities during the extended timeframe required for administrative password resets. During these periods, threat actors might exploit locked accounts through social engineering attacks targeting help desk personnel."
+  },
+  {
+    "testId": "21872",
+    "title": "Require multifactor authentication for device join and device registration using user action",
+    "description": "Threat actors can exploit the lack of multifactor authentication during new device registration. Once authenticated, they can register rogue devices, establish persistence, and circumvent security controls tied to trusted endpoints. This foothold enables attackers to exfiltrate sensitive data, deploy malicious applications, or move laterally."
+  },
+  {
+    "testId": "21874",
+    "title": "Inbound cross-tenant access is restricted to approved tenants",
+    "description": "Limiting guest access to a known and approved list of tenants helps to prevent threat actors from exploiting unrestricted guest access to establish initial access through compromised external accounts or by creating accounts in untrusted tenants. Threat actors who gain access through an unrestricted domain can discover internal resources, users, and applications."
+  },
+  {
+    "testId": "21875",
+    "title": "All entitlement management assignment policies that apply to external users require connected organizations",
+    "description": "Access packages configured to allow 'All users' instead of specific connected organizations expose your organization to uncontrolled external access. Threat actors can exploit this by requesting access through compromised external accounts from unauthorized organizations, bypassing the principle of least privilege."
+  },
+  {
+    "testId": "21876",
+    "title": "Use PIM for Microsoft Entra privileged roles",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21877",
+    "title": "Guest accounts have a sponsor",
+    "description": "In the absence of an assigned internal sponsor for each guest, these accounts might persist within the directory without clear accountability. This oversight creates a risk: threat actors could potentially compromise an unused or unmonitored guest account, and then establish an initial foothold within the tenant."
+  },
+  {
+    "testId": "21878",
+    "title": "Entitlement management policies have an expiration date",
+    "description": "Entitlement management policies without expiration dates create persistent access that threat actors can exploit. When user assignments lack time bounds, compromised credentials maintain indefinite access, enabling attackers to establish persistence, escalate privileges through additional access packages, and conduct long-term malicious activities."
+  },
+  {
+    "testId": "21879",
+    "title": "All entitlement management policies that apply to External users require approval",
+    "description": "Without enforced approval on entitlement management policies that allow external users, a threat actor can self-orchestrate initial access by submitting unattended requests that are auto-approved. Each successful request provisions or reuses a guest user object and grants access to resources included in the access package, immediately expanding reconnaissance surface."
+  },
+  {
+    "testId": "21881",
+    "title": "Azure subscriptions used by Identity Governance are secured consistently with Identity Governance roles",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21882",
+    "title": "Planned for future release",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21883",
+    "title": "Workload Identities are configured with risk-based policies",
+    "description": "Set up risk-based Conditional Access policies for workload identities based on risk policy in Microsoft Entra ID to make sure only trusted and verified workloads use sensitive resources. Without these policies, threat actors can compromise workload identities with minimal detection and perform further attacks."
+  },
+  {
+    "testId": "21884",
+    "title": "Workload identities are protected by network-based Conditional Access",
+    "description": "When workload identities operate without network-based Conditional Access restrictions, threat actors can compromise service principal credentials through various methods, such as exposed secrets in code repositories or intercepted authentication tokens. The threat actors can then use these credentials from any location globally."
+  },
+  {
+    "testId": "21885",
+    "title": "Applications don't have insecure redirect URIs",
+    "description": "OAuth applications configured with URLs that include wildcards, or URL shorteners increase the attack surface for threat actors. Insecure redirect URIs (reply URLs) might allow adversaries to manipulate authentication requests, hijack authorization codes, and intercept tokens by directing users to attacker-controlled endpoints."
+  },
+  {
+    "testId": "21886",
+    "title": "Enterprise applications are configured with automated provisioning",
+    "description": "When applications that support both authentication and provisioning through Microsoft Entra aren't configured for automatic provisioning, organizations become vulnerable to identity lifecycle gaps that threat actors can exploit. Without automated provisioning, user accounts might persist in applications after employees leave the organization."
+  },
+  {
+    "testId": "21887",
+    "title": "All registered redirect URIs must have proper DNS records and ownerships",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21888",
+    "title": "Applications don't have redirect URIs with dangling DNS",
+    "description": "Unmaintained or orphaned redirect URIs in app registrations create significant security vulnerabilities when they reference domains that no longer point to active resources. Threat actors can exploit these 'dangling' DNS entries by provisioning resources at abandoned domains, effectively taking control of redirect endpoints."
+  },
+  {
+    "testId": "21890",
+    "title": "Require password reset notifications for user roles",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21891",
+    "title": "Administrator password reset notifications are enabled",
+    "description": "Configuring password reset notifications for administrator roles in Microsoft Entra ID enhances security by notifying privileged administrators when another administrator resets their password. This visibility helps detect unauthorized or suspicious activity that could indicate credential compromise or insider threats."
+  },
+  {
+    "testId": "21892",
+    "title": "All sign-in activity comes from managed devices",
+    "description": "When sign-ins are not restricted to managed devices, threat actors can use unmanaged devices to establish initial access to organizational resources. Unmanaged devices lack organizational security controls, endpoint protection, and compliance verification, creating entry points for threat actors to exploit."
+  },
+  {
+    "testId": "21893",
+    "title": "All users are required to register for MFA",
+    "description": "Require multifactor authentication (MFA) registration for all users. Based on studies, your account is more than 99% less likely to be compromised if you're using MFA. Even if you don't require MFA all the time, this policy ensures your users are ready when it's needed."
+  },
+  {
+    "testId": "21894",
+    "title": "All certificates Microsoft Entra Application Registrations and Service Principals must be issued by an approved certification authority",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21895",
+    "title": "Application Certificate Credentials are managed using HSM",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21896",
+    "title": "Service principals don't have certificates or credentials associated with them",
+    "description": "Service principals without proper authentication credentials (certificates or client secrets) create security vulnerabilities that allow threat actors to impersonate these identities. This can lead to unauthorized access, lateral movement within your environment, privilege escalation, and persistent access that's difficult to detect and remediate."
+  },
+  {
+    "testId": "21897",
+    "title": "All app assignment and group membership is governed",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21898",
+    "title": "All supported access lifecycle resources are managed with entitlement management packages",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21899",
+    "title": "All privileged role assignments have a recipient that can receive notifications",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21912",
+    "title": "Azure resources used by Microsoft Entra only allow access from privileged roles",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21929",
+    "title": "All entitlement management packages that apply to guests have expirations or access reviews configured in their assignment policies",
+    "description": "Access packages for guest users without expiration dates or access reviews allow indefinite access to organizational resources. Compromised or stale guest accounts enable threat actors to maintain persistent, undetected access for lateral movement, privilege escalation, and data exfiltration."
+  },
+  {
+    "testId": "21941",
+    "title": "Token protection policies are configured",
+    "description": "Token protection policies in Entra ID tenants are crucial for safeguarding authentication tokens from misuse and unauthorized access. Without these policies, threat actors can intercept and manipulate tokens, leading to unauthorized access to sensitive resources. This can result in data exfiltration, lateral movement within the network, and potential compromise of privileged accounts."
+  },
+  {
+    "testId": "21953",
+    "title": "Windows LAPS is enabled",
+    "description": "Without Local Admin Password Solution (LAPS) deployed, threat actors exploit static local administrator passwords to establish initial access. After threat actors compromise a single device with a shared local administrator credential, they can move laterally across the environment and authenticate to other systems sharing the same password."
+  },
+  {
+    "testId": "21954",
+    "title": "Non-administrator users can't retrieve BitLocker keys",
+    "description": "When non-administrator users can access their own BitLocker keys, threat actors who compromise user credentials through phishing, credential stuffing, or malware-based keyloggers gain direct access to encryption keys without requiring privilege escalation. This access vector enables threat actors to persist on the compromised device by accessing encrypted volumes."
+  },
+  {
+    "testId": "21955",
+    "title": "Manage the local administrators on Microsoft Entra joined devices",
+    "description": "When local administrators on Microsoft Entra joined devices aren't properly managed, threat actors with compromised credentials can execute device takeover attacks by removing organizational administrators and disabling the device's connection to Microsoft Entra. This lack of control results in complete loss of organizational control."
+  },
+  {
+    "testId": "21964",
+    "title": "Protected actions for Conditional Access policies are configured",
+    "description": "Configure protected actions for Conditional Access policy create, update and delete permissions, and Authentication Context update permission."
+  },
+  {
+    "testId": "21983",
+    "title": "No Active Medium priority Entra recommendations found",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21984",
+    "title": "No Active low priority Entra recommendations found",
+    "description": "Planned for future release - Under construction."
+  },
+  {
+    "testId": "21985",
+    "title": "Turn off Seamless SSO if there is no usage",
+    "description": "Microsoft Entra seamless single sign-on (Seamless SSO) is a legacy authentication feature designed to provide passwordless access for domain-joined devices that are not hybrid Microsoft Entra ID joined. If these legacy systems are no longer present in the environment, continuing to use Seamless SSO introduces unnecessary complexity and potential security exposure."
+  },
+  {
+    "testId": "21992",
+    "title": "Application certificates must be rotated on a regular basis",
+    "description": "If certificates aren't rotated regularly, they can give threat actors an extended window to extract and exploit them, leading to unauthorized access. When credentials like these are exposed, attackers can blend their malicious activities with legitimate operations, making it easier to bypass security controls."
+  },
+  {
+    "testId": "22072",
+    "title": "Self-service password reset doesn't use security questions",
+    "description": "Allowing security questions as a self-service password reset (SSPR) method weakens the password reset process because answers are frequently guessable, reused across sites, or discoverable through open-source intelligence (OSINT). Threat actors enumerate or phish users, derive likely responses (family names, schools, and locations), and then trigger password reset flows to bypass stronger methods."
+  },
+  {
+    "testId": "22098",
+    "title": "Test not available",
+    "description": "This test ID does not exist in the repository."
+  },
+  {
+    "testId": "22099",
+    "title": "Test not available",
+    "description": "This test ID does not exist in the repository."
+  },
+  {
+    "testId": "22100",
+    "title": "Test not available",
+    "description": "This test ID does not exist in the repository."
+  },
+  {
+    "testId": "22101",
+    "title": "Test not available",
+    "description": "This test ID does not exist in the repository."
+  },
+  {
+    "testId": "22102",
+    "title": "Test not available",
+    "description": "This test ID does not exist in the repository."
+  },
+  {
+    "testId": "22124",
+    "title": "No Active high priority Entra recommendations found",
+    "description": "Leaving high-priority Microsoft Entra recommendations unaddressed can create a gap in an organization's security posture, offering threat actors opportunities to exploit known weaknesses. Not acting on these items might result in an increased attack surface area, suboptimal operations, or poor user experience."
+  },
+  {
+    "testId": "22128",
+    "title": "Guest users are not assigned highly privileged directory roles",
+    "description": "When guest users are assigned highly privileged directory roles such as Global Administrator or Privileged Role Administrator, organizations create significant security vulnerabilities that threat actors can exploit for initial access through compromised external accounts or business partner environments. Since guest users originate from external organizations without direct control of security policies, threat actors who compromise these external identities can gain privileged access to the target organization's Microsoft Entra tenant."
+  },
+  {
+    "testId": "22659",
+    "title": "All risky workload identity sign-ins are triaged",
+    "description": "Threat actors increasingly target workload identities (applications, service principals, and managed identities) because they lack human factors and often use long-lived credentials. Microsoft Entra ID Protection continuously generates risky workload identity detections and flags sign-in events with risk state and detail. Risky workload identity sign-ins that aren't triaged can let repeated malicious access, privilege escalation, and token replay to continue unnoticed."
+  },
+  {
+    "testId": "23183",
+    "title": "Applications don't have insecure redirect URIs (localhost, wildcards, shorteners)",
+    "description": "Non-Microsoft and multitenant applications configured with URLs that include wildcards, localhost, or URL shorteners increase the attack surface for threat actors. These insecure redirect URIs (reply URLs) might allow adversaries to manipulate authentication requests, hijack authorization codes, and intercept tokens by directing users to attacker-controlled endpoints."
+  }
+]

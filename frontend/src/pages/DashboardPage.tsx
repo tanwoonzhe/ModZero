@@ -18,18 +18,71 @@ import {
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 
+// Mock data for demo purposes when API is unavailable
+const getMockOverviewData = (): OverviewAssessmentData => ({
+  data: {
+    tenant: {
+      id: "demo-tenant-id",
+      display_name: "Contoso Corporation",
+      primary_domain: "contoso.onmicrosoft.com",
+      verified_domains: ["contoso.com", "contoso.onmicrosoft.com"],
+    },
+    metrics: {
+      users: 2847,
+      guests: 156,
+      groups: 423,
+      apps: 89,
+      devices: 1924,
+      managed_devices: 1687,
+      compliant_devices: 1423,
+    },
+    assessment_scores: {
+      identity: {
+        score: 72,
+        tests_passed: 99,
+        total_tests: 138,
+      },
+      devices: {
+        score: 84,
+        tests_passed: 30,
+        total_tests: 36,
+      },
+    },
+    auth_methods_summary: {
+      total_users: 2847,
+      mfa_registered: 2156,
+      single_factor: 691,
+      passwordless: 847,
+      phone_auth: 1245,
+      authenticator_app: 1834,
+      fido2: 234,
+      windows_hello: 567,
+      email_auth: 423,
+      software_oath: 156,
+    },
+  },
+  last_synced: new Date().toISOString(),
+  expires_at: new Date(Date.now() + 3600000).toISOString(),
+  is_cached: true,
+});
+
 const DashboardPage: React.FC = () => {
   const [data, setData] = useState<OverviewAssessmentData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [usingMockData, setUsingMockData] = useState(false);
 
   const fetchData = async () => {
     try {
       const res = await api.get<OverviewAssessmentData>("/assessment/overview");
       setData(res.data);
+      setUsingMockData(false);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to load overview data");
+      // Use mock data as fallback
+      setData(getMockOverviewData());
+      setUsingMockData(true);
+      toast.error("Using demo data - API unavailable");
     } finally {
       setLoading(false);
     }
@@ -46,9 +99,14 @@ const DashboardPage: React.FC = () => {
         params: { data_type: "overview_stats" },
       });
       await fetchData();
-      toast.success("Data refreshed successfully");
+      if (!usingMockData) {
+        toast.success("Data refreshed successfully");
+      }
     } catch (error) {
-      toast.error("Failed to refresh data");
+      // Use mock data on refresh failure too
+      setData(getMockOverviewData());
+      setUsingMockData(true);
+      toast.error("Using demo data - refresh failed");
     } finally {
       setRefreshing(false);
     }
@@ -62,21 +120,9 @@ const DashboardPage: React.FC = () => {
     );
   }
 
-  if (!data?.data) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-gray-500">No data available</p>
-        <button
-          onClick={handleRefresh}
-          className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-        >
-          Load Data
-        </button>
-      </div>
-    );
-  }
-
-  const { tenant, metrics, assessment_scores, auth_methods_summary } = data.data;
+  // Use mock data if no data available
+  const displayData = data?.data ? data : getMockOverviewData();
+  const { tenant, metrics, assessment_scores, auth_methods_summary } = displayData.data!;
 
   // Prepare Sankey data for authentication flow
   const sankeyData = {
@@ -114,11 +160,18 @@ const DashboardPage: React.FC = () => {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Zero Trust Overview</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold">Zero Trust Overview</h1>
+          {(usingMockData || !data?.data) && (
+            <span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
+              Demo Mode
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-4">
           <span className="text-sm text-gray-500">
-            Last synced: {new Date(data.last_synced).toLocaleString()}
-            {data.is_cached && " (cached)"}
+            Last synced: {new Date(displayData.last_synced).toLocaleString()}
+            {displayData.is_cached && " (cached)"}
           </span>
           <button
             onClick={handleRefresh}

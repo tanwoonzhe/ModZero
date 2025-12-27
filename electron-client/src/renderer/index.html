@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ModZero</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:*; style-src 'self' 'unsafe-inline' http://localhost:*; connect-src 'self' http://localhost:* ws://localhost:*;">
+    <title>ModZero Client</title>
     <script>
       // Immediately apply theme to prevent flash of wrong theme
       (function() {
@@ -15,9 +15,9 @@
         }
       })();
     </script>
-    <script type="module" src="/src/main.tsx"></script>
   </head>
   <body class="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-50">
     <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
   </body>
 </html>

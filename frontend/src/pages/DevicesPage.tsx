@@ -19,6 +19,78 @@ import {
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 
+// Mock data for demo purposes when API is unavailable
+const getMockDeviceData = (): DeviceAssessmentData => ({
+  data: {
+    total_devices: 1924,
+    devices: [
+      { id: "1", name: "DESKTOP-001", os: "Windows 11", compliance: "compliant", ownership: "corporate", user: "john.doe@contoso.com" },
+      { id: "2", name: "LAPTOP-002", os: "Windows 10", compliance: "compliant", ownership: "corporate", user: "jane.smith@contoso.com" },
+      { id: "3", name: "MacBook-003", os: "macOS 14", compliance: "compliant", ownership: "corporate", user: "bob.wilson@contoso.com" },
+      { id: "4", name: "iPhone-004", os: "iOS 17", compliance: "compliant", ownership: "personal", user: "alice.johnson@contoso.com" },
+      { id: "5", name: "Pixel-005", os: "Android 14", compliance: "noncompliant", ownership: "personal", user: "charlie.brown@contoso.com" },
+    ],
+    os_distribution: {
+      "Windows 11": 892,
+      "Windows 10": 456,
+      "macOS": 312,
+      "iOS": 156,
+      "Android": 108,
+    },
+    compliance_stats: {
+      compliant: 1423,
+      noncompliant: 264,
+      unknown: 237,
+    },
+    compliance_rate: 74,
+    ownership_stats: {
+      corporate: 1687,
+      personal: 237,
+    },
+    encryption_stats: {
+      encrypted: 1756,
+      not_encrypted: 168,
+    },
+    encryption_rate: 91,
+    checks: [
+      { id: "D001", name: "Device encryption is enabled", category: "Security", status: "pass", risk_level: "high", description: "BitLocker/FileVault is enabled on all corporate devices", recommendation: "Enable disk encryption on all devices" },
+      { id: "D002", name: "Antivirus is up to date", category: "Security", status: "pass", risk_level: "high", description: "Windows Defender or approved AV is current", recommendation: "Keep antivirus definitions updated" },
+      { id: "D003", name: "OS version is supported", category: "Compliance", status: "fail", risk_level: "medium", description: "Some devices running unsupported OS versions", recommendation: "Upgrade devices to supported OS versions" },
+      { id: "D004", name: "Device is managed by Intune", category: "Management", status: "pass", risk_level: "medium", description: "Device enrollment in MDM", recommendation: "Enroll all corporate devices in Intune" },
+      { id: "D005", name: "Compliance policy assigned", category: "Compliance", status: "pass", risk_level: "high", description: "Device compliance policies are assigned", recommendation: "Assign compliance policies to all device groups" },
+      { id: "D006", name: "Screen lock enabled", category: "Security", status: "investigate", risk_level: "medium", description: "PIN/password lock requirement", recommendation: "Enforce screen lock on all devices" },
+      { id: "D007", name: "Jailbreak/root detection", category: "Security", status: "pass", risk_level: "high", description: "No jailbroken or rooted devices detected", recommendation: "Block jailbroken/rooted devices" },
+      { id: "D008", name: "App protection policies", category: "Data Protection", status: "pass", risk_level: "medium", description: "MAM policies applied to mobile apps", recommendation: "Apply app protection policies" },
+      { id: "D009", name: "Remote wipe capability", category: "Management", status: "pass", risk_level: "high", description: "Devices can be remotely wiped if lost", recommendation: "Enable remote wipe capability" },
+      { id: "D010", name: "Firewall enabled", category: "Security", status: "pass", risk_level: "medium", description: "Host firewall is active", recommendation: "Enable firewall on all devices" },
+    ],
+    sankey_data: {
+      nodes: [
+        { id: "all", label: "All Devices" },
+        { id: "managed", label: "Managed" },
+        { id: "unmanaged", label: "Unmanaged" },
+        { id: "compliant", label: "Compliant" },
+        { id: "noncompliant", label: "Non-compliant" },
+        { id: "corporate", label: "Corporate" },
+        { id: "personal", label: "Personal" },
+      ],
+      links: [
+        { source: "all", target: "managed", value: 1687 },
+        { source: "all", target: "unmanaged", value: 237 },
+        { source: "managed", target: "compliant", value: 1423 },
+        { source: "managed", target: "noncompliant", value: 264 },
+        { source: "compliant", target: "corporate", value: 1356 },
+        { source: "compliant", target: "personal", value: 67 },
+        { source: "noncompliant", target: "corporate", value: 194 },
+        { source: "noncompliant", target: "personal", value: 70 },
+      ],
+    },
+  },
+  last_synced: new Date().toISOString(),
+  expires_at: new Date(Date.now() + 3600000).toISOString(),
+  is_cached: true,
+});
+
 const DevicesPage: React.FC = () => {
   const [data, setData] = useState<DeviceAssessmentData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -26,14 +98,19 @@ const DevicesPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"assessment" | "devices">("assessment");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [usingMockData, setUsingMockData] = useState(false);
 
   const fetchData = async () => {
     try {
       const res = await api.get<DeviceAssessmentData>("/assessment/devices");
       setData(res.data);
+      setUsingMockData(false);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to load device assessment");
+      // Use mock data as fallback
+      setData(getMockDeviceData());
+      setUsingMockData(true);
+      toast.error("Using demo data - API unavailable");
     } finally {
       setLoading(false);
     }
@@ -50,9 +127,14 @@ const DevicesPage: React.FC = () => {
         params: { data_type: "device_assessment" },
       });
       await fetchData();
-      toast.success("Device data refreshed");
+      if (!usingMockData) {
+        toast.success("Device data refreshed");
+      }
     } catch (error) {
-      toast.error("Failed to refresh data");
+      // Use mock data on refresh failure
+      setData(getMockDeviceData());
+      setUsingMockData(true);
+      toast.error("Using demo data - refresh failed");
     } finally {
       setRefreshing(false);
     }
@@ -66,19 +148,8 @@ const DevicesPage: React.FC = () => {
     );
   }
 
-  if (!data?.data) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-gray-500">No device data available</p>
-        <button
-          onClick={handleRefresh}
-          className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-        >
-          Load Data
-        </button>
-      </div>
-    );
-  }
+  // Use mock data if no data available
+  const displayData = data?.data ? data : getMockDeviceData();
 
   const {
     total_devices,
@@ -91,7 +162,7 @@ const DevicesPage: React.FC = () => {
     encryption_rate,
     checks,
     sankey_data,
-  } = data.data;
+  } = displayData.data!;
 
   // Filter checks
   const filteredChecks = checks.filter((check) => {
@@ -135,10 +206,17 @@ const DevicesPage: React.FC = () => {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Device Assessment</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold">Device Assessment</h1>
+          {(usingMockData || !data?.data) && (
+            <span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
+              Demo Mode
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-4">
           <span className="text-sm text-gray-500">
-            Last synced: {new Date(data.last_synced).toLocaleString()}
+            Last synced: {new Date(displayData.last_synced).toLocaleString()}
           </span>
           <button
             onClick={handleRefresh}
