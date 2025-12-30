@@ -470,6 +470,28 @@ class CachedGraphDataTypeEnum(str, Enum):
     DEVICE_ASSESSMENT = "device_assessment"
 
 
+class SecurityTestTypeEnum(str, Enum):
+    """Types of security tests."""
+    IDENTITY = "identity"
+    DEVICES = "devices"
+
+
+class TestStatusEnum(str, Enum):
+    """Status of security tests."""
+    PASSED = "passed"
+    FAILED = "failed"
+    INVESTIGATE = "investigate"
+    SKIPPED = "skipped"
+    PLANNED = "planned"
+
+
+class RiskLevelEnum(str, Enum):
+    """Risk level of security tests."""
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
 class CachedGraphData(Base):
     """Cache table for Microsoft Graph API data.
     
@@ -497,3 +519,233 @@ class CachedGraphData(Base):
     def is_expired(self) -> bool:
         """Check if cached data has expired."""
         return datetime.utcnow() > self.expires_at
+
+
+# ============================================================================
+# SECURITY ASSESSMENT MODELS
+# ============================================================================
+
+class SecurityTestDefinition(Base):
+    """Master definition of security tests from Zero Trust assessment.
+    
+    This table stores the definitions of all available security tests
+    (both identity and devices). These are populated from the official
+    Microsoft Zero Trust assessment data.
+    
+    Note: Regular users can only READ these definitions. Only admins
+    can update/modify the test definitions.
+    """
+    __tablename__ = "security_test_definitions"
+
+    test_id: str = Column(String(32), primary_key=True)  # e.g., "21770", "RMD_001"
+    test_type: SecurityTestTypeEnum = Column(
+        PgEnum(SecurityTestTypeEnum), nullable=False
+    )
+    title: str = Column(String(512), nullable=False)
+    category: str = Column(String(128), nullable=False)
+    sfi_pillar: str = Column(String(256), nullable=True)  # SFI = Secure Future Initiative
+    risk: RiskLevelEnum = Column(PgEnum(RiskLevelEnum), nullable=False)
+    description: str = Column(Text, nullable=False)
+    user_impact: str = Column(String(32), nullable=True)  # High, Medium, Low
+    implementation_cost: str = Column(String(32), nullable=True)  # High, Medium, Low
+    remediation_guidance: str = Column(Text, nullable=True)
+    reference_url: str = Column(String(512), nullable=True)
+    is_active: bool = Column(Boolean, default=True, nullable=False)
+    created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    results = relationship(
+        "SecurityTestResult",
+        back_populates="test_definition",
+        cascade="all, delete-orphan"
+    )
+    overrides = relationship(
+        "SecurityTestOverride",
+        back_populates="test_definition",
+        cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<SecurityTestDefinition {self.test_id} {self.title[:50]}>"
+
+
+class SecurityTestResult(Base):
+    """Results of security tests run against the tenant.
+    
+    Each time an assessment is run, results are stored here. This allows
+    tracking progress over time.
+    
+    Note: Regular users can only READ these results. Only system processes
+    and admins can create/update results.
+    """
+    __tablename__ = "security_test_results"
+
+    result_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    test_id: str = Column(
+        String(32), ForeignKey("security_test_definitions.test_id"), nullable=False
+    )
+    assessment_run_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("assessment_runs.run_id"), nullable=False
+    )
+    status: TestStatusEnum = Column(PgEnum(TestStatusEnum), nullable=False)
+    test_result_detail: str = Column(Text, nullable=True)  # Details about what was found
+    raw_data: dict = Column(JSON, nullable=True)  # Raw API response data
+    evaluated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+    # Relationships
+    test_definition = relationship("SecurityTestDefinition", back_populates="results")
+    assessment_run = relationship("AssessmentRun", back_populates="results")
+
+    def __repr__(self) -> str:
+        return f"<SecurityTestResult {self.test_id} status={self.status}>"
+
+
+class AssessmentRun(Base):
+    """Record of each assessment run.
+    
+    Tracks when assessments were run and by whom.
+    """
+    __tablename__ = "assessment_runs"
+
+    run_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    test_type: SecurityTestTypeEnum = Column(
+        PgEnum(SecurityTestTypeEnum), nullable=False
+    )
+    initiated_by: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
+    )
+    started_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    completed_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    status: str = Column(String(32), default="running")  # running, completed, failed
+    total_tests: int = Column(Numeric, default=0)
+    passed_count: int = Column(Numeric, default=0)
+    failed_count: int = Column(Numeric, default=0)
+    investigate_count: int = Column(Numeric, default=0)
+    error_message: str = Column(Text, nullable=True)
+
+    # Relationships
+    initiated_by_user = relationship("User")
+    results = relationship(
+        "SecurityTestResult",
+        back_populates="assessment_run",
+        cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<AssessmentRun {self.run_id} type={self.test_type} status={self.status}>"
+
+
+class SecurityTestOverride(Base):
+    """Override status or configuration for specific tests.
+    
+    Admins can override test results (e.g., mark as accepted risk,
+    not applicable, etc.). This provides audit trail of such decisions.
+    
+    Note: Only admins can create/modify overrides. Regular users are 
+    READ-ONLY for this table.
+    """
+    __tablename__ = "security_test_overrides"
+
+    override_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    test_id: str = Column(
+        String(32), ForeignKey("security_test_definitions.test_id"), nullable=False
+    )
+    override_status: str = Column(String(64), nullable=False)  # accepted_risk, not_applicable, in_progress
+    justification: str = Column(Text, nullable=False)  # Required explanation
+    created_by: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
+    )
+    approved_by: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
+    )
+    expires_at: datetime = Column(DateTime(timezone=True), nullable=True)  # Optional expiry for temporary overrides
+    created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active: bool = Column(Boolean, default=True, nullable=False)
+
+    # Relationships
+    test_definition = relationship("SecurityTestDefinition", back_populates="overrides")
+    created_by_user = relationship("User", foreign_keys=[created_by])
+    approved_by_user = relationship("User", foreign_keys=[approved_by])
+
+    def __repr__(self) -> str:
+        return f"<SecurityTestOverride {self.test_id} status={self.override_status}>"
+
+
+class SecurityTestComment(Base):
+    """Comments and notes on security tests.
+    
+    Users can add comments to discuss test results, remediation progress,
+    or document decisions.
+    
+    Note: Regular users can READ all comments but can only CREATE comments
+    for viewing. Only admins can DELETE comments.
+    """
+    __tablename__ = "security_test_comments"
+
+    comment_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    test_id: str = Column(
+        String(32), ForeignKey("security_test_definitions.test_id"), nullable=False
+    )
+    user_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
+    )
+    comment: str = Column(Text, nullable=False)
+    created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_deleted: bool = Column(Boolean, default=False, nullable=False)  # Soft delete
+
+    # Relationships
+    user = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<SecurityTestComment {self.test_id} by user={self.user_id}>"
+
+
+class RemediationTask(Base):
+    """Remediation tasks for failed security tests.
+    
+    When tests fail, admins can create remediation tasks to track
+    the work needed to fix the issue.
+    
+    Note: Only admins can CREATE/UPDATE/DELETE tasks. Regular users
+    can only READ tasks assigned to them or in their scope.
+    """
+    __tablename__ = "remediation_tasks"
+
+    task_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    test_id: str = Column(
+        String(32), ForeignKey("security_test_definitions.test_id"), nullable=False
+    )
+    title: str = Column(String(256), nullable=False)
+    description: str = Column(Text, nullable=True)
+    assigned_to: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
+    )
+    created_by: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
+    )
+    priority: str = Column(String(32), default="medium")  # high, medium, low
+    status: str = Column(String(32), default="open")  # open, in_progress, completed, cancelled
+    due_date: datetime = Column(DateTime(timezone=True), nullable=True)
+    completed_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    assigned_to_user = relationship("User", foreign_keys=[assigned_to])
+    created_by_user = relationship("User", foreign_keys=[created_by])
+
+    def __repr__(self) -> str:
+        return f"<RemediationTask {self.task_id} test={self.test_id} status={self.status}>"

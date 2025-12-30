@@ -1,0 +1,222 @@
+import React, { useEffect, useState } from "react";
+import { FaUser, FaEnvelope, FaIdBadge, FaCalendarAlt, FaShieldAlt } from "react-icons/fa";
+import api from "../api";
+import toast from "react-hot-toast";
+
+interface UserProfile {
+  user_id: string;
+  username: string;
+  email: string;
+  role: string;
+  created_at: string;
+  updated_at: string;
+}
+
+const UserProfilePage: React.FC = () => {
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const response = await api.get("/users/me");
+        setProfile(response.data);
+      } catch (error) {
+        console.error("Failed to fetch user profile:", error);
+        toast.error("Failed to load profile");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProfile();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <div className="text-center text-gray-500 dark:text-gray-400 mt-8">
+        Unable to load profile information.
+      </div>
+    );
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const getRoleBadgeColor = (role: string) => {
+    switch (role.toLowerCase()) {
+      case "admin":
+        return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200";
+      case "employee":
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
+      default:
+        return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200";
+    }
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      <h1 className="text-2xl font-bold mb-6">My Profile</h1>
+
+      {/* Profile Card */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 px-6 py-8">
+          <div className="flex items-center">
+            <div className="bg-white dark:bg-gray-800 rounded-full p-4">
+              <FaUser className="w-12 h-12 text-indigo-600" />
+            </div>
+            <div className="ml-6">
+              <h2 className="text-2xl font-bold text-white">
+                {profile.username}
+              </h2>
+              <p className="text-indigo-100">{profile.email}</p>
+              <span
+                className={`inline-block mt-2 px-3 py-1 rounded-full text-xs font-semibold ${getRoleBadgeColor(
+                  profile.role
+                )}`}
+              >
+                {profile.role.toUpperCase()}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Profile Details */}
+        <div className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Email */}
+            <div className="flex items-start space-x-3">
+              <div className="flex-shrink-0">
+                <FaEnvelope className="w-5 h-5 text-gray-400" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Email</p>
+                <p className="font-medium text-gray-900 dark:text-gray-100">
+                  {profile.email}
+                </p>
+              </div>
+            </div>
+
+            {/* User ID */}
+            <div className="flex items-start space-x-3">
+              <div className="flex-shrink-0">
+                <FaIdBadge className="w-5 h-5 text-gray-400" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 dark:text-gray-400">User ID</p>
+                <p className="font-medium text-gray-900 dark:text-gray-100 font-mono text-sm">
+                  {profile.user_id}
+                </p>
+              </div>
+            </div>
+
+            {/* Role */}
+            <div className="flex items-start space-x-3">
+              <div className="flex-shrink-0">
+                <FaShieldAlt className="w-5 h-5 text-gray-400" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Role</p>
+                <p className="font-medium text-gray-900 dark:text-gray-100">
+                  {profile.role === "admin" ? "Administrator" : "Employee"}
+                </p>
+              </div>
+            </div>
+
+            {/* Created At */}
+            <div className="flex items-start space-x-3">
+              <div className="flex-shrink-0">
+                <FaCalendarAlt className="w-5 h-5 text-gray-400" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Member Since</p>
+                <p className="font-medium text-gray-900 dark:text-gray-100">
+                  {formatDate(profile.created_at)}
+                </p>
+              </div>
+            </div>
+
+            {/* Last Updated */}
+            <div className="flex items-start space-x-3">
+              <div className="flex-shrink-0">
+                <FaCalendarAlt className="w-5 h-5 text-gray-400" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Last Updated</p>
+                <p className="font-medium text-gray-900 dark:text-gray-100">
+                  {formatDate(profile.updated_at)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Permissions Info */}
+          <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+              Your Permissions
+            </h3>
+            <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+              {profile.role === "admin" ? (
+                <>
+                  <li className="flex items-center">
+                    <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                    Full access to all features
+                  </li>
+                  <li className="flex items-center">
+                    <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                    Can create, edit, and delete security tests
+                  </li>
+                  <li className="flex items-center">
+                    <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                    Can manage users and permissions
+                  </li>
+                  <li className="flex items-center">
+                    <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                    Can override risk assessments
+                  </li>
+                </>
+              ) : (
+                <>
+                  <li className="flex items-center">
+                    <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
+                    View security test results
+                  </li>
+                  <li className="flex items-center">
+                    <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
+                    Add comments to security tests
+                  </li>
+                  <li className="flex items-center">
+                    <span className="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span>
+                    Cannot modify test definitions
+                  </li>
+                  <li className="flex items-center">
+                    <span className="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span>
+                    Cannot override risk assessments
+                  </li>
+                </>
+              )}
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default UserProfilePage;

@@ -1,6 +1,6 @@
 import React, { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { FaTachometerAlt, FaHistory, FaUsers, FaDesktop, FaGavel, FaNetworkWired, FaFileAlt, FaCog, FaSignOutAlt, FaUserShield } from "react-icons/fa";
+import { FaTachometerAlt, FaHistory, FaUsers, FaDesktop, FaGavel, FaNetworkWired, FaFileAlt, FaCog, FaSignOutAlt, FaUserShield, FaLaptopMedical, FaUserCircle } from "react-icons/fa";
 import toast from "react-hot-toast";
 
 interface LayoutProps {
@@ -10,6 +10,7 @@ interface LayoutProps {
 const navItems = [
   { path: "/", label: "Overview", icon: <FaTachometerAlt /> },
   { path: "/identity", label: "Identity", icon: <FaUserShield /> },
+  { path: "/devices-testing", label: "Devices Testing", icon: <FaLaptopMedical /> },
   { path: "/devices", label: "Devices", icon: <FaDesktop /> },
   { path: "/logs", label: "Access Logs", icon: <FaHistory /> },
   { path: "/users", label: "Employees", icon: <FaUsers /> },
@@ -53,9 +54,20 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             );
           })}
         </nav>
+        {/* User Profile Link */}
+        <Link
+          to="/profile"
+          className={`mx-4 mb-2 flex items-center px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+            location.pathname === "/profile"
+              ? "bg-indigo-100 text-indigo-600 dark:bg-indigo-700 dark:text-white"
+              : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white"
+          }`}
+        >
+          <FaUserCircle className="mr-2" /> My Profile
+        </Link>
         <button
           onClick={handleLogout}
-          className="m-4 mt-auto flex items-center px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+          className="m-4 mt-0 flex items-center px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
         >
           <FaSignOutAlt className="mr-2" /> Logout
         </button>

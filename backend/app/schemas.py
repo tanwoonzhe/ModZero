@@ -178,3 +178,171 @@ class TemplateOut(TemplateBase):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+## Security Test schemas
+
+class SecurityTestDefinitionBase(BaseModel):
+    test_id: str
+    test_type: str
+    title: str
+    category: str
+    sfi_pillar: Optional[str] = None
+    risk: str
+    description: str
+    user_impact: Optional[str] = None
+    implementation_cost: Optional[str] = None
+    remediation_guidance: Optional[str] = None
+    reference_url: Optional[str] = None
+
+
+class SecurityTestDefinitionCreate(SecurityTestDefinitionBase):
+    pass
+
+
+class SecurityTestDefinitionOut(SecurityTestDefinitionBase):
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SecurityTestResultBase(BaseModel):
+    test_id: str
+    status: str
+    test_result_detail: Optional[str] = None
+
+
+class SecurityTestResultCreate(SecurityTestResultBase):
+    assessment_run_id: UUID
+    raw_data: Optional[Dict] = None
+
+
+class SecurityTestResultOut(SecurityTestResultBase):
+    result_id: UUID
+    assessment_run_id: UUID
+    evaluated_at: datetime
+    raw_data: Optional[Dict] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AssessmentRunBase(BaseModel):
+    test_type: str
+
+
+class AssessmentRunCreate(AssessmentRunBase):
+    pass
+
+
+class AssessmentRunOut(AssessmentRunBase):
+    run_id: UUID
+    initiated_by: Optional[UUID] = None
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: str
+    total_tests: int
+    passed_count: int
+    failed_count: int
+    investigate_count: int
+    error_message: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SecurityTestOverrideBase(BaseModel):
+    test_id: str
+    override_status: str
+    justification: str
+    expires_at: Optional[datetime] = None
+
+
+class SecurityTestOverrideCreate(SecurityTestOverrideBase):
+    pass
+
+
+class SecurityTestOverrideOut(SecurityTestOverrideBase):
+    override_id: UUID
+    created_by: UUID
+    approved_by: Optional[UUID] = None
+    created_at: datetime
+    updated_at: datetime
+    is_active: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SecurityTestCommentBase(BaseModel):
+    test_id: str
+    comment: str
+
+
+class SecurityTestCommentCreate(SecurityTestCommentBase):
+    pass
+
+
+class SecurityTestCommentOut(SecurityTestCommentBase):
+    comment_id: UUID
+    user_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    is_deleted: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RemediationTaskBase(BaseModel):
+    test_id: str
+    title: str
+    description: Optional[str] = None
+    priority: Optional[str] = "medium"
+    due_date: Optional[datetime] = None
+
+
+class RemediationTaskCreate(RemediationTaskBase):
+    assigned_to: Optional[UUID] = None
+
+
+class RemediationTaskUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    assigned_to: Optional[UUID] = None
+    priority: Optional[str] = None
+    status: Optional[str] = None
+    due_date: Optional[datetime] = None
+
+
+class RemediationTaskOut(RemediationTaskBase):
+    task_id: UUID
+    assigned_to: Optional[UUID] = None
+    created_by: UUID
+    status: str
+    completed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+## Combined Test Result (for frontend display)
+
+class SecurityTestWithResult(BaseModel):
+    """Combined view of test definition with latest result"""
+    test_id: str
+    test_type: str
+    title: str
+    category: str
+    sfi_pillar: Optional[str] = None
+    risk: str
+    description: str
+    user_impact: Optional[str] = None
+    implementation_cost: Optional[str] = None
+    status: str  # From latest result
+    test_result_detail: Optional[str] = None
+    has_override: bool = False
+    override_status: Optional[str] = None
+    comments_count: int = 0
+    has_remediation_task: bool = False
+
+    model_config = ConfigDict(from_attributes=True)

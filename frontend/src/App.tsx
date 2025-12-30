@@ -7,11 +7,13 @@ import LoginPage from "./pages/LoginPage";
 import LogsPage from "./pages/LogsPage";
 import UsersPage from "./pages/UsersPage";
 import DevicesPage from "./pages/DevicesPage";
+import DevicesTestingPage from "./pages/DevicesTestingPage";
 import PoliciesPage from "./pages/PoliciesPage";
 import ResourcesPage from "./pages/ResourcesPage";
 import TemplatesPage from "./pages/TemplatesPage";
 import SettingsPage from "./pages/SettingsPage";
 import IdentityPage from "./pages/IdentityPage";
+import UserProfilePage from "./pages/UserProfilePage";
 import NotFoundPage from "./pages/NotFoundPage";
 
 function App() {
@@ -53,6 +55,7 @@ function App() {
           <Routes>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/identity" element={<IdentityPage />} />
+            <Route path="/devices-testing" element={<DevicesTestingPage />} />
             <Route path="/devices" element={<DevicesPage />} />
             <Route path="/logs" element={<LogsPage />} />
             <Route path="/users" element={<UsersPage />} />
@@ -60,6 +63,7 @@ function App() {
             <Route path="/resources" element={<ResourcesPage />} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/profile" element={<UserProfilePage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Layout>
