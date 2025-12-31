@@ -11,6 +11,14 @@ from ..deps import get_db, get_current_user, get_current_admin
 router = APIRouter()
 
 
+@router.get("/me", response_model=schemas.UserOut)
+def get_current_user_profile(
+    current_user: models.User = Depends(get_current_user),
+) -> Any:
+    """Return the current authenticated user's profile."""
+    return current_user
+
+
 @router.get("/", response_model=List[schemas.UserOut])
 def list_users(
     db: Session = Depends(get_db), current_admin: models.User = Depends(get_current_admin)

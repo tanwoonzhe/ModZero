@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
   FaSync,
   FaSearch,
@@ -20,46 +20,24 @@ import {
   FaExternalLinkAlt,
   FaChevronUp,
   FaChevronDown,
-  FaMobileAlt,
-  FaLaptop,
-  FaCloud,
-  FaApple,
-  FaWindows,
+  FaChartBar,
+  FaCog,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
-import { allDevicesTests, DeviceTest } from "../data/devicesTestsIndex";
+import { devicesTests, SecurityTest, getTestStats, getUniqueSfiPillars } from "../data/securityTestsIndex";
 
-type SecurityCheck = DeviceTest;
-
-// SFI Pillar icons and colors
+// SFI Pillar icons configuration
 const sfiPillarConfig: Record<string, { icon: React.ElementType; color: string; bgColor: string }> = {
-  "Accelerate response and remediation": { icon: FaBolt, color: "text-orange-600", bgColor: "bg-orange-50 hover:bg-orange-100" },
-  "Monitor and detect cyberthreats": { icon: FaEye, color: "text-purple-600", bgColor: "bg-purple-50 hover:bg-purple-100" },
-  "Protect engineering systems": { icon: FaWrench, color: "text-blue-600", bgColor: "bg-blue-50 hover:bg-blue-100" },
-  "Protect identities and secrets": { icon: FaLock, color: "text-indigo-600", bgColor: "bg-indigo-50 hover:bg-indigo-100" },
-  "Protect tenants and isolate production systems": { icon: FaBuilding, color: "text-green-600", bgColor: "bg-green-50 hover:bg-green-100" },
-  "Protect networks": { icon: FaNetworkWired, color: "text-cyan-600", bgColor: "bg-cyan-50 hover:bg-cyan-100" },
-};
-
-// Category icons and colors
-const categoryConfig: Record<string, { icon: React.ElementType; color: string; bgColor: string }> = {
-  "MAM": { icon: FaMobileAlt, color: "text-pink-600", bgColor: "bg-pink-50 hover:bg-pink-100" },
-  "MDM": { icon: FaLaptop, color: "text-blue-600", bgColor: "bg-blue-50 hover:bg-blue-100" },
-  "macOS": { icon: FaApple, color: "text-gray-600", bgColor: "bg-gray-50 hover:bg-gray-100" },
-  "Windows": { icon: FaWindows, color: "text-blue-500", bgColor: "bg-blue-50 hover:bg-blue-100" },
-  "Windows 365": { icon: FaCloud, color: "text-sky-600", bgColor: "bg-sky-50 hover:bg-sky-100" },
-  "RBAC": { icon: FaLock, color: "text-indigo-600", bgColor: "bg-indigo-50 hover:bg-indigo-100" },
-  "Compliance": { icon: FaCheckCircle, color: "text-green-600", bgColor: "bg-green-50 hover:bg-green-100" },
-  "Device Security": { icon: FaShieldAlt, color: "text-red-600", bgColor: "bg-red-50 hover:bg-red-100" },
-  "Network Security": { icon: FaNetworkWired, color: "text-cyan-600", bgColor: "bg-cyan-50 hover:bg-cyan-100" },
+  "Accelerate response and remediation": { icon: FaBolt, color: "text-orange-600", bgColor: "bg-orange-50 hover:bg-orange-100 dark:bg-orange-900/20" },
+  "Monitor and detect cyberthreats": { icon: FaEye, color: "text-purple-600", bgColor: "bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/20" },
+  "Protect engineering systems": { icon: FaWrench, color: "text-blue-600", bgColor: "bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20" },
+  "Protect identities and secrets": { icon: FaLock, color: "text-indigo-600", bgColor: "bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/20" },
+  "Protect tenants and isolate production systems": { icon: FaBuilding, color: "text-green-600", bgColor: "bg-green-50 hover:bg-green-100 dark:bg-green-900/20" },
+  "Protect networks": { icon: FaNetworkWired, color: "text-cyan-600", bgColor: "bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-900/20" },
 };
 
 const getSfiPillarConfig = (pillar: string) => {
-  return sfiPillarConfig[pillar] || { icon: FaShieldAlt, color: "text-gray-600", bgColor: "bg-gray-50 hover:bg-gray-100" };
-};
-
-const getCategoryConfig = (category: string) => {
-  return categoryConfig[category] || { icon: FaShieldAlt, color: "text-gray-600", bgColor: "bg-gray-50 hover:bg-gray-100" };
+  return sfiPillarConfig[pillar] || { icon: FaShieldAlt, color: "text-gray-600", bgColor: "bg-gray-50 hover:bg-gray-100 dark:bg-gray-700" };
 };
 
 const getRiskConfig = (risk: string) => {
@@ -74,118 +52,77 @@ const getRiskConfig = (risk: string) => {
 const getStatusConfig = (status: string) => {
   switch (status) {
     case "Passed": 
-      return { 
-        icon: FaCheckCircle, 
-        color: "text-green-600", 
-        bgColor: "bg-green-100", 
-        textColor: "text-green-800",
-        borderColor: "border-green-200"
-      };
+      return { icon: FaCheckCircle, color: "text-green-600", bgColor: "bg-green-100", textColor: "text-green-800" };
     case "Failed": 
-      return { 
-        icon: FaTimesCircle, 
-        color: "text-red-600", 
-        bgColor: "bg-red-100", 
-        textColor: "text-red-800",
-        borderColor: "border-red-200"
-      };
+      return { icon: FaTimesCircle, color: "text-red-600", bgColor: "bg-red-100", textColor: "text-red-800" };
     case "Investigate": 
-      return { 
-        icon: FaExclamationTriangle, 
-        color: "text-amber-500", 
-        bgColor: "bg-amber-100", 
-        textColor: "text-amber-800",
-        borderColor: "border-amber-200"
-      };
-    case "Skipped": 
-      return { 
-        icon: FaClock, 
-        color: "text-gray-500", 
-        bgColor: "bg-gray-100", 
-        textColor: "text-gray-700",
-        borderColor: "border-gray-200"
-      };
+      return { icon: FaExclamationTriangle, color: "text-amber-500", bgColor: "bg-amber-100", textColor: "text-amber-800" };
+    case "Skipped":
+    case "Planned":
+      return { icon: FaClock, color: "text-gray-500", bgColor: "bg-gray-100", textColor: "text-gray-700" };
     default: 
-      return { 
-        icon: FaClock, 
-        color: "text-blue-500", 
-        bgColor: "bg-blue-100", 
-        textColor: "text-blue-800",
-        borderColor: "border-blue-200"
-      };
+      return { icon: FaClock, color: "text-blue-500", bgColor: "bg-blue-100", textColor: "text-blue-800" };
   }
 };
 
 const DevicesTestingPage: React.FC = () => {
-  const [checks, setChecks] = useState<SecurityCheck[]>([]);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [selectedSfiPillars, setSelectedSfiPillars] = useState<string[]>([]);
   const [selectedRisks, setSelectedRisks] = useState<string[]>([]);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
-  const [selectedCheck, setSelectedCheck] = useState<SecurityCheck | null>(null);
+  const [selectedTest, setSelectedTest] = useState<SecurityTest | null>(null);
   const [showDetail, setShowDetail] = useState(false);
-  const [sortConfig, setSortConfig] = useState<{ key: keyof SecurityCheck; direction: 'asc' | 'desc' } | null>(null);
+  const [sortConfig, setSortConfig] = useState<{ key: keyof SecurityTest; direction: 'asc' | 'desc' } | null>(null);
+  const [activeTab, setActiveTab] = useState<'results' | 'config'>('results');
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      setTimeout(() => {
-        setChecks(allDevicesTests as SecurityCheck[]);
-        setLoading(false);
-      }, 300);
-    } catch (error) {
-      console.error("Error fetching devices data:", error);
-      setChecks(allDevicesTests as SecurityCheck[]);
-      setLoading(false);
-    }
-  };
+  const tests = devicesTests;
+  const stats = useMemo(() => getTestStats(tests), [tests]);
+  const uniqueSfiPillars = useMemo(() => getUniqueSfiPillars(tests), [tests]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    try {
-      await fetchData();
-      toast.success("Devices assessment refreshed");
-    } catch {
-      toast.error("Failed to refresh data");
-    } finally {
-      setRefreshing(false);
-    }
+    await new Promise(r => setTimeout(r, 500));
+    toast.success("Devices assessment refreshed");
+    setRefreshing(false);
   };
 
-  // Filter logic
-  const filteredChecks = useMemo(() => {
-    let result = checks;
+  // Filtered tests
+  const filteredTests = useMemo(() => {
+    let result = tests;
 
+    // Search filter
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      result = result.filter(check =>
-        check.title.toLowerCase().includes(term) ||
-        check.category.toLowerCase().includes(term)
+      result = result.filter(t =>
+        t.title.toLowerCase().includes(term) ||
+        t.category.toLowerCase().includes(term) ||
+        t.testId.includes(term)
       );
     }
 
-    if (selectedCategories.length > 0) {
-      result = result.filter(check => selectedCategories.includes(check.category));
+    // SFI Pillar filter
+    if (selectedSfiPillars.length > 0) {
+      result = result.filter(t => selectedSfiPillars.includes(t.sfiPillar));
     }
 
+    // Risk filter
     if (selectedRisks.length > 0) {
-      result = result.filter(check => selectedRisks.includes(check.risk));
+      result = result.filter(t => selectedRisks.includes(t.risk));
     }
 
+    // Status filter (exclude Planned by default if no filters)
     if (selectedStatuses.length > 0) {
-      result = result.filter(check => selectedStatuses.includes(check.status));
+      result = result.filter(t => selectedStatuses.includes(t.status));
+    } else {
+      result = result.filter(t => t.status !== "Planned");
     }
 
+    // Sort
     if (sortConfig) {
       result = [...result].sort((a, b) => {
-        const aVal = a[sortConfig.key];
-        const bVal = b[sortConfig.key];
+        const aVal = a[sortConfig.key as keyof SecurityTest];
+        const bVal = b[sortConfig.key as keyof SecurityTest];
         if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
         if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
@@ -193,43 +130,14 @@ const DevicesTestingPage: React.FC = () => {
     }
 
     return result;
-  }, [checks, searchTerm, selectedCategories, selectedRisks, selectedStatuses, sortConfig]);
+  }, [tests, searchTerm, selectedSfiPillars, selectedRisks, selectedStatuses, sortConfig]);
 
-  const uniqueCategories = useMemo(() => 
-    Array.from(new Set(checks.map(c => c.category).filter(Boolean))).sort(),
-    [checks]
-  );
-
-  const uniqueRisks = ["High", "Medium", "Low"];
-  const uniqueStatuses = ["Passed", "Failed", "Investigate", "Skipped"];
-
-  // Stats
-  const stats = useMemo(() => {
-    const total = checks.length;
-    const passed = checks.filter(c => c.status === "Passed").length;
-    const failed = checks.filter(c => c.status === "Failed").length;
-    const investigate = checks.filter(c => c.status === "Investigate").length;
-    const highRisk = checks.filter(c => c.risk === "High").length;
-    return { total, passed, failed, investigate, highRisk };
-  }, [checks]);
-
-  const toggleFilter = (
-    value: string, 
-    selected: string[], 
-    setSelected: React.Dispatch<React.SetStateAction<string[]>>
-  ) => {
-    setSelected(prev => prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]);
+  const toggleFilter = (value: string, selected: string[], setSelected: React.Dispatch<React.SetStateAction<string[]>>) => {
+    setSelected((prev: string[]) => prev.includes(value) ? prev.filter((v: string) => v !== value) : [...prev, value]);
   };
 
-  const clearAllFilters = () => {
-    setSelectedCategories([]);
-    setSelectedRisks([]);
-    setSelectedStatuses([]);
-    setSearchTerm("");
-  };
-
-  const handleSort = (key: keyof SecurityCheck) => {
-    setSortConfig(prev => {
+  const handleSort = (key: keyof SecurityTest) => {
+    setSortConfig((prev: { key: keyof SecurityTest; direction: 'asc' | 'desc' } | null) => {
       if (prev?.key === key) {
         return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
       }
@@ -237,22 +145,12 @@ const DevicesTestingPage: React.FC = () => {
     });
   };
 
-  const hasActiveFilters = selectedCategories.length > 0 || selectedRisks.length > 0 || selectedStatuses.length > 0 || searchTerm;
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       {/* Page Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Devices Testing</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Devices</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Zero Trust device security assessment based on Microsoft Intune best practices
           </p>
@@ -267,250 +165,218 @@ const DevicesTestingPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
-          <div className="text-3xl font-bold text-gray-900 dark:text-white">{stats.total}</div>
-          <div className="text-sm text-gray-500">Total Tests</div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-green-100 dark:border-green-900">
-          <div className="text-3xl font-bold text-green-600">{stats.passed}</div>
-          <div className="text-sm text-gray-500">Passed</div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-red-100 dark:border-red-900">
-          <div className="text-3xl font-bold text-red-600">{stats.failed}</div>
-          <div className="text-sm text-gray-500">Failed</div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-amber-100 dark:border-amber-900">
-          <div className="text-3xl font-bold text-amber-500">{stats.investigate}</div>
-          <div className="text-sm text-gray-500">Investigate</div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-purple-100 dark:border-purple-900">
-          <div className="text-3xl font-bold text-purple-600">{stats.highRisk}</div>
-          <div className="text-sm text-gray-500">High Risk</div>
+      {/* Tab Navigation */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div className="grid grid-cols-2">
+          <button
+            onClick={() => setActiveTab('results')}
+            className={`flex items-center justify-center gap-2 py-3 px-4 text-sm font-medium transition-colors
+              ${activeTab === 'results'
+                ? 'bg-white dark:bg-gray-800 text-indigo-600 border-b-2 border-indigo-600'
+                : 'bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+              }`}
+          >
+            <FaChartBar size={14} />
+            Assessment results
+          </button>
+          <button
+            onClick={() => setActiveTab('config')}
+            className={`flex items-center justify-center gap-2 py-3 px-4 text-sm font-medium transition-colors
+              ${activeTab === 'config'
+                ? 'bg-white dark:bg-gray-800 text-indigo-600 border-b-2 border-indigo-600'
+                : 'bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+              }`}
+          >
+            <FaCog size={14} />
+            Config
+          </button>
         </div>
       </div>
 
-      {/* Main Content Card */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-        {/* Card Header */}
-        <div className="p-6 border-b border-gray-100 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Assessment results</h2>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            The results presented below are based on Microsoft Intune device management best practices and{" "}
-            <a
-              href="https://learn.microsoft.com/en-us/mem/intune/fundamentals/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-indigo-600 hover:text-indigo-700 hover:underline inline-flex items-center gap-1"
-            >
-              Zero Trust device security guidelines
-              <FaExternalLinkAlt size={10} />
-            </a>{" "}
-            including MDM, MAM, macOS, Windows, and Windows 365 configurations.
-          </p>
-        </div>
+      {/* Tab Content: Assessment Results */}
+      {activeTab === 'results' && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+          {/* Card Header */}
+          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Assessment results</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              The results presented below are based on the security principles detailed in the{" "}
+              <a
+                href="https://learn.microsoft.com/intune/intune-service/protect/zero-trust-configure-security"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-indigo-600 font-medium underline underline-offset-4 hover:text-indigo-700"
+              >
+                Configuring Microsoft Intune for increased security
+              </a>
+              {" "}guide.
+            </p>
+          </div>
 
-        <div className="p-6">
-          {/* Filters Section */}
-          <div className="space-y-4 mb-6">
-            {/* Search & Quick Filters Row */}
-            <div className="flex flex-wrap items-center gap-4">
-              {/* Search */}
-              <div className="relative flex-1 min-w-[250px] max-w-md">
+          {/* Filters */}
+          <div className="p-4 border-b border-gray-200 dark:border-gray-700 space-y-4">
+            {/* Search and toggles */}
+            <div className="flex flex-wrap gap-4 items-center">
+              <div className="relative flex-1 min-w-[200px]">
                 <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
                 <input
                   type="text"
                   placeholder="Search by name..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
 
-              {/* Risk Filter Pills */}
+              {/* Risk Toggles */}
               <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Risk:</span>
-                <div className="flex gap-1">
-                  {uniqueRisks.map(risk => {
-                    const isSelected = selectedRisks.includes(risk);
-                    return (
-                      <button
-                        key={risk}
-                        onClick={() => toggleFilter(risk, selectedRisks, setSelectedRisks)}
-                        className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
-                          isSelected
-                            ? "bg-indigo-600 text-white shadow-sm"
-                            : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-                        }`}
-                      >
-                        {risk}
-                      </button>
-                    );
-                  })}
-                </div>
+                <span className="text-sm text-gray-500">Risk:</span>
+                {["High", "Medium", "Low"].map(risk => (
+                  <button
+                    key={risk}
+                    onClick={() => toggleFilter(risk, selectedRisks, setSelectedRisks)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors
+                      ${selectedRisks.includes(risk)
+                        ? 'bg-indigo-100 border-indigo-300 text-indigo-700 dark:bg-indigo-900/50 dark:border-indigo-600 dark:text-indigo-300'
+                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-300'
+                      }`}
+                  >
+                    {risk}
+                  </button>
+                ))}
               </div>
 
-              {/* Status Filter Pills */}
+              {/* Status Toggles */}
               <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Status:</span>
-                <div className="flex gap-1">
-                  {uniqueStatuses.map(status => {
-                    const isSelected = selectedStatuses.includes(status);
-                    const config = getStatusConfig(status);
-                    return (
-                      <button
-                        key={status}
-                        onClick={() => toggleFilter(status, selectedStatuses, setSelectedStatuses)}
-                        className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
-                          isSelected
-                            ? `${config.bgColor} ${config.textColor} ring-1 ${config.borderColor}`
-                            : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-                        }`}
-                      >
-                        {status}
-                      </button>
-                    );
-                  })}
-                </div>
+                <span className="text-sm text-gray-500">Status:</span>
+                {["Passed", "Failed"].map(status => (
+                  <button
+                    key={status}
+                    onClick={() => toggleFilter(status, selectedStatuses, setSelectedStatuses)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors
+                      ${selectedStatuses.includes(status)
+                        ? 'bg-indigo-100 border-indigo-300 text-indigo-700 dark:bg-indigo-900/50 dark:border-indigo-600 dark:text-indigo-300'
+                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-300'
+                      }`}
+                  >
+                    {status}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Category Filters */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Filter by Category:</span>
-                {hasActiveFilters && (
+            {/* SFI Pillar Filters */}
+            <div className="flex flex-wrap gap-2">
+              <span className="text-sm text-gray-500 self-center mr-2">Filter by SFI Pillar:</span>
+              {uniqueSfiPillars.map((pillar: string) => {
+                const config = getSfiPillarConfig(pillar);
+                const Icon = config.icon;
+                const isSelected = selectedSfiPillars.includes(pillar);
+                return (
                   <button
-                    onClick={clearAllFilters}
-                    className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
-                  >
-                    Clear all filters
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {uniqueCategories.map(category => {
-                  const isSelected = selectedCategories.includes(category);
-                  const config = getCategoryConfig(category);
-                  const Icon = config.icon;
-                  return (
-                    <button
-                      key={category}
-                      onClick={() => toggleFilter(category, selectedCategories, setSelectedCategories)}
-                      className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
-                        isSelected
-                          ? "bg-indigo-600 text-white shadow-sm"
-                          : `${config.bgColor} ${config.color} dark:bg-gray-700 dark:text-gray-300`
+                    key={pillar}
+                    onClick={() => toggleFilter(pillar, selectedSfiPillars, setSelectedSfiPillars)}
+                    className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-full border transition-colors
+                      ${isSelected
+                        ? `${config.bgColor} border-current ${config.color}`
+                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-300'
                       }`}
-                    >
-                      <Icon size={12} />
-                      <span className="whitespace-nowrap">{category}</span>
-                    </button>
-                  );
-                })}
-              </div>
+                  >
+                    <Icon size={12} className={isSelected ? config.color : ''} />
+                    {pillar}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Results Count */}
-            <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700">
-              <span className="text-sm text-gray-500">
-                Showing <span className="font-medium text-gray-900 dark:text-white">{filteredChecks.length}</span> of{" "}
-                <span className="font-medium text-gray-900 dark:text-white">{checks.length}</span> tests
-              </span>
+            <div className="text-sm text-gray-500">
+              Showing {filteredTests.length} of {tests.length} tests
             </div>
           </div>
 
-          {/* Results Table */}
-          <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-900">
+          {/* Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 dark:bg-gray-700/50">
                 <tr>
-                  <th
-                    className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                    onClick={() => handleSort('title')}
-                  >
-                    <div className="flex items-center gap-2">
+                  <th className="px-4 py-3 text-left">
+                    <button
+                      onClick={() => handleSort('title')}
+                      className="flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider hover:text-gray-700"
+                    >
                       Name
                       {sortConfig?.key === 'title' && (
                         sortConfig.direction === 'asc' ? <FaChevronUp size={10} /> : <FaChevronDown size={10} />
                       )}
-                    </div>
+                    </button>
                   </th>
-                  <th
-                    className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors w-36"
-                    onClick={() => handleSort('category')}
-                  >
-                    <div className="flex items-center gap-2">
+                  <th className="px-4 py-3 text-left">
+                    <button
+                      onClick={() => handleSort('category')}
+                      className="flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider hover:text-gray-700"
+                    >
                       Category
                       {sortConfig?.key === 'category' && (
                         sortConfig.direction === 'asc' ? <FaChevronUp size={10} /> : <FaChevronDown size={10} />
                       )}
-                    </div>
+                    </button>
                   </th>
-                  <th
-                    className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors w-28"
-                    onClick={() => handleSort('risk')}
-                  >
-                    <div className="flex items-center gap-2">
+                  <th className="px-4 py-3 text-left">
+                    <button
+                      onClick={() => handleSort('risk')}
+                      className="flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider hover:text-gray-700"
+                    >
                       Risk
                       {sortConfig?.key === 'risk' && (
                         sortConfig.direction === 'asc' ? <FaChevronUp size={10} /> : <FaChevronDown size={10} />
                       )}
-                    </div>
+                    </button>
                   </th>
-                  <th
-                    className="px-6 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors w-32"
-                    onClick={() => handleSort('status')}
-                  >
-                    <div className="flex items-center gap-2">
+                  <th className="px-4 py-3 text-left">
+                    <button
+                      onClick={() => handleSort('status')}
+                      className="flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider hover:text-gray-700"
+                    >
                       Status
                       {sortConfig?.key === 'status' && (
                         sortConfig.direction === 'asc' ? <FaChevronUp size={10} /> : <FaChevronDown size={10} />
                       )}
-                    </div>
+                    </button>
                   </th>
                 </tr>
               </thead>
-              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">
-                {filteredChecks.map((check) => {
-                  const riskConfig = getRiskConfig(check.risk);
-                  const statusConfig = getStatusConfig(check.status);
-                  const categoryConfig = getCategoryConfig(check.category);
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                {filteredTests.map((test: SecurityTest) => {
+                  const riskConfig = getRiskConfig(test.risk);
+                  const statusConfig = getStatusConfig(test.status);
                   const StatusIcon = statusConfig.icon;
                   const RiskIcon = riskConfig.icon;
-                  const CategoryIcon = categoryConfig.icon;
-                  
+
                   return (
                     <tr
-                      key={check.id}
-                      className="hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer transition-colors group"
-                      onClick={() => {
-                        setSelectedCheck(check);
-                        setShowDetail(true);
-                      }}
+                      key={test.id}
+                      onClick={() => { setSelectedTest(test); setShowDetail(true); }}
+                      className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
                     >
-                      <td className="px-6 py-4">
-                        <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400 group-hover:underline">
-                          {check.title}
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline font-medium">
+                          {test.title}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <CategoryIcon className={categoryConfig.color} size={14} />
-                          <span className="text-sm text-gray-700 dark:text-gray-300">{check.category}</span>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                        {test.category}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <RiskIcon className={riskConfig.color} size={12} />
+                          <span className={`text-sm ${riskConfig.color}`}>{test.risk}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <RiskIcon className={riskConfig.color} size={14} />
-                          <span className="text-sm text-gray-700 dark:text-gray-300">{check.risk}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full ${statusConfig.bgColor} ${statusConfig.textColor}`}>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${statusConfig.bgColor} ${statusConfig.textColor}`}>
                           <StatusIcon size={12} />
-                          {check.status}
+                          {test.status}
                         </span>
                       </td>
                     </tr>
@@ -518,122 +384,323 @@ const DevicesTestingPage: React.FC = () => {
                 })}
               </tbody>
             </table>
-
-            {filteredChecks.length === 0 && (
-              <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-                <FaSearch size={32} className="mx-auto mb-3 opacity-50" />
-                <p className="font-medium">No results found</p>
-                <p className="text-sm mt-1">Try adjusting your filters or search term</p>
-              </div>
-            )}
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Detail Slide-over Panel */}
-      {showDetail && selectedCheck && (
+      {/* Tab Content: Config */}
+      {activeTab === 'config' && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Device Configuration</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Device configuration settings and options from your Microsoft Intune environment.
+            </p>
+          </div>
+          <div className="p-6">
+            <DevicesConfigContent />
+          </div>
+        </div>
+      )}
+
+      {/* Detail Panel */}
+      {showDetail && selectedTest && (
         <div className="fixed inset-0 z-50 overflow-hidden">
-          <div 
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity" 
-            onClick={() => setShowDetail(false)} 
-          />
-          <div className="absolute inset-y-0 right-0 w-full max-w-2xl bg-white dark:bg-gray-800 shadow-2xl transform transition-transform">
-            <div className="h-full flex flex-col">
-              {/* Panel Header */}
-              <div className="flex items-start justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowDetail(false)} />
+          <div className="absolute right-0 top-0 h-full w-full max-w-xl bg-white dark:bg-gray-800 shadow-xl overflow-y-auto">
+            {/* Panel Header */}
+            <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-6 z-10">
+              <div className="flex justify-between items-start">
                 <div className="flex-1 pr-4">
-                  <h2 className="text-xl font-semibold text-gray-900 dark:text-white leading-tight">
-                    {selectedCheck.title}
-                  </h2>
+                  <h2 className="text-xl font-bold text-gray-900 dark:text-white">{selectedTest.title}</h2>
+                  <p className="text-sm text-gray-500 mt-1">Test ID: {selectedTest.testId}</p>
                 </div>
-                <button
-                  onClick={() => setShowDetail(false)}
-                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                >
-                  <FaTimes className="text-gray-500" />
+                <button onClick={() => setShowDetail(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                  <FaTimes size={18} className="text-gray-500" />
                 </button>
               </div>
-
-              {/* Panel Content */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                {/* Metadata Pills */}
-                <div className="flex flex-wrap gap-4 text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-500">Risk:</span>
-                    <div className="flex items-center gap-1">
-                      {React.createElement(getRiskConfig(selectedCheck.risk).icon, { 
-                        className: getRiskConfig(selectedCheck.risk).color, 
-                        size: 14 
-                      })}
-                      <span className="font-semibold">{selectedCheck.risk}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-500">User Impact:</span>
-                    <span className="font-semibold">{selectedCheck.userImpact}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-500">Implementation Cost:</span>
-                    <span className="font-semibold">{selectedCheck.implementationCost}</span>
-                  </div>
-                </div>
-
-                {/* Test Result Card */}
-                <div className={`rounded-xl p-5 border ${getStatusConfig(selectedCheck.status).borderColor} ${getStatusConfig(selectedCheck.status).bgColor}`}>
-                  <div className="flex items-center gap-3 mb-3">
-                    <span className="font-semibold text-gray-900 dark:text-white">Test result →</span>
-                    {React.createElement(getStatusConfig(selectedCheck.status).icon, { 
-                      className: getStatusConfig(selectedCheck.status).color, 
-                      size: 18 
-                    })}
-                    <span className={`px-2.5 py-0.5 text-sm font-medium rounded-full ${getStatusConfig(selectedCheck.status).bgColor} ${getStatusConfig(selectedCheck.status).textColor}`}>
-                      {selectedCheck.status}
+              
+              {/* Status and Risk */}
+              <div className="flex items-center gap-3 mt-4">
+                {(() => {
+                  const statusConfig = getStatusConfig(selectedTest.status);
+                  const StatusIcon = statusConfig.icon;
+                  return (
+                    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${statusConfig.bgColor} ${statusConfig.textColor}`}>
+                      <StatusIcon size={14} />
+                      {selectedTest.status}
                     </span>
-                  </div>
-                  <p className="text-gray-700 dark:text-gray-300">{selectedCheck.testResult}</p>
-                </div>
+                  );
+                })()}
+                {(() => {
+                  const riskConfig = getRiskConfig(selectedTest.risk);
+                  const RiskIcon = riskConfig.icon;
+                  return (
+                    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-gray-100 dark:bg-gray-700 ${riskConfig.color}`}>
+                      <RiskIcon size={14} />
+                      {selectedTest.risk} Risk
+                    </span>
+                  );
+                })()}
+              </div>
+            </div>
 
-                {/* What was checked */}
-                <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-5 border border-gray-100 dark:border-gray-700">
-                  <h3 className="font-semibold text-gray-900 dark:text-white mb-3">What was checked</h3>
-                  <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{selectedCheck.description}</p>
-                </div>
-
-                {/* Remediation Action */}
-                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-5 border border-blue-100 dark:border-blue-800">
-                  <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Remediation action</h3>
-                  <p className="text-gray-700 dark:text-gray-300 text-sm mb-3">
-                    Review the test results and follow Microsoft Intune best practices for device management.
-                  </p>
-                  <a
-                    href="https://learn.microsoft.com/en-us/mem/intune/fundamentals/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 font-medium"
-                  >
-                    View Intune documentation
-                    <FaExternalLinkAlt size={10} />
-                  </a>
-                </div>
+            {/* Panel Content */}
+            <div className="p-6 space-y-6">
+              <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-5 border border-gray-100 dark:border-gray-700">
+                <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Description</h3>
+                <p className="text-gray-700 dark:text-gray-300 leading-relaxed text-sm">{selectedTest.description}</p>
               </div>
 
-              {/* Panel Footer */}
-              <div className="p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <FaShieldAlt size={14} />
-                  <span>SFI Pillar: <span className="font-medium text-gray-700 dark:text-gray-300">{selectedCheck.sfiPillar}</span></span>
+              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-5 border border-blue-100 dark:border-blue-800">
+                <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Remediation action</h3>
+                <p className="text-gray-700 dark:text-gray-300 text-sm mb-3">
+                  Review the test results and follow Microsoft Intune best practices for device management.
+                </p>
+                <a
+                  href="https://learn.microsoft.com/mem/intune/fundamentals/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                >
+                  View Intune documentation
+                  <FaExternalLinkAlt size={10} />
+                </a>
+              </div>
+
+              {/* Details Grid */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">Category</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">{selectedTest.category}</p>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-gray-500 mt-2">
-                  <span>Category: <span className="font-medium text-gray-700 dark:text-gray-300">{selectedCheck.category}</span></span>
+                <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">SFI Pillar</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">{selectedTest.sfiPillar || 'N/A'}</p>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-gray-500 mt-2">
-                  <span>Test ID: <span className="font-medium text-gray-700 dark:text-gray-300">{selectedCheck.id}</span></span>
+                <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">User Impact</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">{selectedTest.userImpact}</p>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">Implementation Cost</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">{selectedTest.implementationCost}</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+// DevicesConfig Component - Shows configuration data like the original zerotrustassessment
+const DevicesConfigContent: React.FC = () => {
+  // Mock data for demonstration - in production this would come from the API
+  const enrollmentData = [
+    { Type: "MDM", PolicyName: "Windows Automatic Enrollment", AppliesTo: "All", Groups: "All Users" },
+  ];
+
+  const enrollmentRestrictions = [
+    { Platform: "Windows", Priority: "1", Name: "Default", MDM: "Allowed", MinVer: "-", MaxVer: "-", PersonallyOwned: "Blocked", BlockedManufacturers: "-", Scope: "All users", AssignedTo: "All users" },
+    { Platform: "macOS", Priority: "1", Name: "Default", MDM: "Allowed", MinVer: "13.0", MaxVer: "-", PersonallyOwned: "Allowed", BlockedManufacturers: "-", Scope: "All users", AssignedTo: "All users" },
+    { Platform: "iOS/iPadOS", Priority: "1", Name: "Default", MDM: "Allowed", MinVer: "15.0", MaxVer: "-", PersonallyOwned: "Blocked", BlockedManufacturers: "-", Scope: "All users", AssignedTo: "All users" },
+  ];
+
+  const compliancePolicies = [
+    { PolicyName: "Windows Corporate", Platform: "Windows", DefenderForEndPoint: "Enabled", MinOsVersion: "10.0.19044", MaxOsVersion: "-", RequirePswd: "Yes", MinPswdLength: "8", PasswordType: "Alphanumeric", RequireEncryption: "Yes", Scope: "Corporate devices" },
+    { PolicyName: "macOS Standard", Platform: "macOS", DefenderForEndPoint: "Enabled", MinOsVersion: "13.0", MaxOsVersion: "-", RequirePswd: "Yes", MinPswdLength: "6", PasswordType: "Numeric", RequireEncryption: "Yes", Scope: "All users" },
+  ];
+
+  const appProtectionPolicies = [
+    { Name: "iOS MAM Policy", Platform: "iOS/iPadOS", AppsPublic: "All", AppsCustom: "None", BackupToCloud: "Block", SendToOtherApps: "Policy managed apps", ReceiveFromOtherApps: "Policy managed apps", RootedJailbroken: "Block", Scope: "All users" },
+    { Name: "Android MAM Policy", Platform: "Android", AppsPublic: "All", AppsCustom: "None", BackupToCloud: "Block", SendToOtherApps: "Policy managed apps", ReceiveFromOtherApps: "Policy managed apps", RootedJailbroken: "Block", Scope: "All users" },
+  ];
+
+  return (
+    <div className="space-y-8">
+      {/* Windows automatic enrollment */}
+      <div>
+        <h3 className="text-md font-semibold text-gray-900 dark:text-white mb-2">Windows automatic enrollment</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Configure Windows devices to enroll when they join or register with Azure Active Directory. We recommend setting this to all instead of selected groups and using enrollment restrictions to configure the intake of users.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="min-w-full border border-gray-200 dark:border-gray-700 rounded-lg">
+            <thead className="bg-gray-50 dark:bg-gray-700/50">
+              <tr>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Type</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Policy Name</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Applies To</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Groups</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {enrollmentData.map((row, idx) => (
+                <tr key={idx}>
+                  <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-300">{row.Type}</td>
+                  <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-300">{row.PolicyName}</td>
+                  <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-300">{row.AppliesTo}</td>
+                  <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-300">{row.Groups}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Enrollment device platform restrictions */}
+      <div>
+        <h3 className="text-md font-semibold text-gray-900 dark:text-white mb-2">Enrollment device platform restrictions</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Device enrollment restrictions let you restrict devices from enrolling in Intune based on certain device attributes. Device platform restrictions restrict devices based on device platform, version, manufacturer, or ownership type.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="min-w-full border border-gray-200 dark:border-gray-700 rounded-lg">
+            <thead className="bg-gray-50 dark:bg-gray-700/50">
+              <tr>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Platform</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Priority</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Name</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">MDM</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Min Ver</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Personally owned</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Scope</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {enrollmentRestrictions.map((row, idx) => (
+                <tr key={idx}>
+                  <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{row.Platform}</td>
+                  <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{row.Priority}</td>
+                  <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{row.Name}</td>
+                  <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{row.MDM}</td>
+                  <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{row.MinVer}</td>
+                  <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{row.PersonallyOwned}</td>
+                  <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{row.Scope}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Compliance policies */}
+      <div>
+        <h3 className="text-md font-semibold text-gray-900 dark:text-white mb-2">Compliance policies</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Device compliance policies define the rules and settings that devices must meet to be considered compliant. These policies help ensure that devices accessing organizational resources meet minimum security requirements.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="min-w-full border border-gray-200 dark:border-gray-700 rounded-lg">
+            <thead className="bg-gray-50 dark:bg-gray-700/50">
+              <tr>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Setting</th>
+                {compliancePolicies.map((p, i) => (
+                  <th key={i} className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">{p.PolicyName}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              <tr>
+                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-300">Platform</td>
+                {compliancePolicies.map((p, i) => (
+                  <td key={i} className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{p.Platform}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-300">Defender ATP</td>
+                {compliancePolicies.map((p, i) => (
+                  <td key={i} className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{p.DefenderForEndPoint}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-300">Min OS Version</td>
+                {compliancePolicies.map((p, i) => (
+                  <td key={i} className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{p.MinOsVersion}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-300">Require Password</td>
+                {compliancePolicies.map((p, i) => (
+                  <td key={i} className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{p.RequirePswd}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-300">Require Encryption</td>
+                {compliancePolicies.map((p, i) => (
+                  <td key={i} className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{p.RequireEncryption}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-300">Scope</td>
+                {compliancePolicies.map((p, i) => (
+                  <td key={i} className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{p.Scope}</td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* App protection policies */}
+      <div>
+        <h3 className="text-md font-semibold text-gray-900 dark:text-white mb-2">App protection policies</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          App protection policies (APP) are rules that ensure an organization's data remains safe or contained in a managed app. A policy can be a rule that is enforced when the user attempts to access or move "corporate" data, or a set of actions that are prohibited or monitored when the user is inside the app.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="min-w-full border border-gray-200 dark:border-gray-700 rounded-lg">
+            <thead className="bg-gray-50 dark:bg-gray-700/50">
+              <tr>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Setting</th>
+                {appProtectionPolicies.map((p, i) => (
+                  <th key={i} className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">{p.Name}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              <tr>
+                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-300">Platform</td>
+                {appProtectionPolicies.map((p, i) => (
+                  <td key={i} className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{p.Platform}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-300">Public Apps</td>
+                {appProtectionPolicies.map((p, i) => (
+                  <td key={i} className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{p.AppsPublic}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-300">Backup to Cloud</td>
+                {appProtectionPolicies.map((p, i) => (
+                  <td key={i} className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{p.BackupToCloud}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-300">Send to Other Apps</td>
+                {appProtectionPolicies.map((p, i) => (
+                  <td key={i} className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{p.SendToOtherApps}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-300">Rooted/Jailbroken</td>
+                {appProtectionPolicies.map((p, i) => (
+                  <td key={i} className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{p.RootedJailbroken}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-300">Scope</td>
+                {appProtectionPolicies.map((p, i) => (
+                  <td key={i} className="px-3 py-2 text-sm text-gray-900 dark:text-gray-300">{p.Scope}</td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 };
