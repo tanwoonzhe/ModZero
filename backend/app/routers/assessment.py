@@ -4,7 +4,7 @@ Provides endpoints for overview, identity, and device assessments
 with cached Graph API data and manual refresh capability.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 import logging
 
@@ -44,16 +44,21 @@ def get_or_create_cache(
             CachedGraphData.data_type == data_type
         ).first()
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         # Return cached data if valid and not forcing refresh
-        if cache and not force_refresh and cache.expires_at > now:
-            return {
-                "data": cache.data_json,
-                "last_synced": cache.last_synced.isoformat(),
-                "expires_at": cache.expires_at.isoformat(),
-                "is_cached": True
-            }
+        if cache and not force_refresh:
+            # Handle both timezone-aware and naive datetimes
+            cache_expires = cache.expires_at
+            if cache_expires.tzinfo is None:
+                cache_expires = cache_expires.replace(tzinfo=timezone.utc)
+            if cache_expires > now:
+                return {
+                    "data": cache.data_json,
+                    "last_synced": cache.last_synced.isoformat(),
+                    "expires_at": cache.expires_at.isoformat(),
+                    "is_cached": True
+                }
         
         # Fetch fresh data
         try:

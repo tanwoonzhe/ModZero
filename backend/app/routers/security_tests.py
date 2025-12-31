@@ -228,21 +228,35 @@ def trigger_assessment_run(
     """Trigger a new assessment run.
     
     ADMIN ONLY: Regular users cannot trigger assessments.
+    This will connect to Microsoft Graph API and evaluate the tenant configuration.
     """
-    run = AssessmentRun(
-        test_type=run_data.test_type,
-        initiated_by=current_user.user_id,
-        status="running"
-    )
+    from ..security_assessment_runner import SecurityAssessmentRunner
+    import asyncio
     
-    db.add(run)
-    db.commit()
-    db.refresh(run)
-    
-    # TODO: Trigger actual assessment job asynchronously
-    # For now, just create the run record
-    
-    return run
+    try:
+        runner = SecurityAssessmentRunner(db)
+        # Run the assessment synchronously for now
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        run = loop.run_until_complete(
+            runner.run_assessment(run_data.test_type, str(current_user.user_id))
+        )
+        loop.close()
+        return run
+    except Exception as e:
+        # Create a failed run record
+        run = AssessmentRun(
+            test_type=run_data.test_type,
+            initiated_by=current_user.user_id,
+            status="failed"
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Assessment failed: {str(e)}"
+        )
 
 
 # ============================================================================
