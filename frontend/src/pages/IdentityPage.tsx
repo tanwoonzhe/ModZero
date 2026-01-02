@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
+import api from "../api";
 import {
   FaSync,
   FaSearch,
@@ -22,6 +23,7 @@ import {
   FaChevronUp,
   FaChevronDown,
   FaCog,
+  FaCloud,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 import { identityTests, SecurityTest, getTestStats, getUniqueSfiPillars, getTestRemediation } from "../data/securityTestsIndex";
@@ -129,6 +131,44 @@ interface IdentityAssessmentData {
   is_cached: boolean;
 }
 
+// Live test result from /api/identity-tests
+interface LiveTestResult {
+  testId: string;
+  name: string;
+  description: string;
+  status: "pass" | "fail" | "warning" | "error" | "not_applicable";
+  details: string;
+  data: any;
+  recommendation: string;
+  timestamp: string;
+}
+
+interface LiveTestsResponse {
+  category: string;
+  timestamp: string;
+  summary: {
+    total: number;
+    passed: number;
+    failed: number;
+    warnings: number;
+    errors: number;
+    score: number;
+  };
+  tests: LiveTestResult[];
+}
+
+// Map live API status to UI status
+const mapLiveStatus = (status: string): string => {
+  switch (status) {
+    case "pass": return "Passed";
+    case "fail": return "Failed";
+    case "warning": return "Investigate";
+    case "error": return "Failed";
+    case "not_applicable": return "Skipped";
+    default: return "Investigate";
+  }
+};
+
 const IdentityPage: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -141,11 +181,17 @@ const IdentityPage: React.FC = () => {
   const [sortConfig, setSortConfig] = useState<{ key: keyof SecurityTest; direction: 'asc' | 'desc' } | null>(null);
   const [apiData, setApiData] = useState<IdentityAssessmentData | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
+  
+  // Live tests state
+  const [activeTab, setActiveTab] = useState<"assessment" | "live-tests">("assessment");
+  const [liveTests, setLiveTests] = useState<LiveTestsResponse | null>(null);
+  const [liveTestsLoading, setLiveTestsLoading] = useState(false);
+  const [selectedLiveTest, setSelectedLiveTest] = useState<LiveTestResult | null>(null);
 
   // Fetch real assessment data from API
   const fetchAssessment = async () => {
     try {
-      const res = await import("../api").then(m => m.default.get<IdentityAssessmentData>("/assessment/identity"));
+      const res = await api.get<IdentityAssessmentData>("/assessment/identity");
       console.log("API Response:", res.data);
       console.log("Has detailed_test_results:", !!res.data?.data?.detailed_test_results);
       if (res.data?.data?.detailed_test_results) {
@@ -163,6 +209,25 @@ const IdentityPage: React.FC = () => {
   useEffect(() => {
     fetchAssessment();
   }, []);
+
+  // Fetch live identity tests from Graph API
+  const fetchLiveTests = async () => {
+    setLiveTestsLoading(true);
+    try {
+      const res = await api.get<LiveTestsResponse>("/identity-tests");
+      setLiveTests(res.data);
+      toast.success(`Live tests completed: ${res.data.summary.score}% score`);
+    } catch (error: any) {
+      console.error("Failed to fetch live identity tests:", error);
+      if (error.response?.status === 503) {
+        toast.error("Azure credentials not configured. Please set up AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET.");
+      } else {
+        toast.error("Failed to run live identity tests");
+      }
+    } finally {
+      setLiveTestsLoading(false);
+    }
+  };
 
   // Get detailed test result from API data
   const getDetailedTestResult = (testId: string): DetailedTestResult | null => {
@@ -362,30 +427,251 @@ const IdentityPage: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Identity</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Zero Trust identity security assessment based on Microsoft Entra best practices
-            {lastSynced && (
+            {lastSynced && activeTab === "assessment" && (
               <span className="ml-2 text-xs text-indigo-600">
                 • Last synced: {new Date(lastSynced).toLocaleString()}
+              </span>
+            )}
+            {liveTests && activeTab === "live-tests" && (
+              <span className="ml-2 text-xs text-green-600">
+                • Live test at: {new Date(liveTests.timestamp).toLocaleString()}
               </span>
             )}
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {apiData?.data?.total_users !== undefined && (
+          {activeTab === "assessment" && apiData?.data?.total_users !== undefined && (
             <span className="px-3 py-1 text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-full">
               {apiData.data.total_users} users • {apiData.data.ca_policy_count || 0} CA policies
             </span>
           )}
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
-          >
-            <FaSync className={refreshing ? "animate-spin" : ""} size={14} />
-            <span>Refresh</span>
-          </button>
+          {activeTab === "live-tests" && liveTests && (
+            <span className="px-3 py-1 text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded-full">
+              Score: {liveTests.summary.score}% • {liveTests.summary.passed}/{liveTests.summary.total} passed
+            </span>
+          )}
+          {activeTab === "assessment" ? (
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+            >
+              <FaSync className={refreshing ? "animate-spin" : ""} size={14} />
+              <span>Refresh</span>
+            </button>
+          ) : (
+            <button
+              onClick={fetchLiveTests}
+              disabled={liveTestsLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors shadow-sm"
+            >
+              <FaCloud className={liveTestsLoading ? "animate-pulse" : ""} size={14} />
+              <span>{liveTestsLoading ? "Running Tests..." : "Run Live Tests"}</span>
+            </button>
+          )}
         </div>
       </div>
 
+      {/* Tab Selector */}
+      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg w-fit">
+        <button
+          onClick={() => setActiveTab("assessment")}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === "assessment"
+              ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+              : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+          }`}
+        >
+          <FaShieldAlt className="inline mr-2" size={14} />
+          Assessment Tests
+        </button>
+        <button
+          onClick={() => { setActiveTab("live-tests"); if (!liveTests) fetchLiveTests(); }}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === "live-tests"
+              ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
+              : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+          }`}
+        >
+          <FaCloud className="inline mr-2" size={14} />
+          Live Graph API Tests
+        </button>
+      </div>
+
+      {/* Live Tests Tab Content */}
+      {activeTab === "live-tests" && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Real-time Graph API Tests</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Live security tests executed directly against Microsoft Graph API. Results reflect the current state of your tenant.
+            </p>
+          </div>
+
+          {liveTestsLoading && (
+            <div className="flex items-center justify-center h-64">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+                <p className="text-gray-500">Running live tests against Graph API...</p>
+              </div>
+            </div>
+          )}
+
+          {!liveTestsLoading && liveTests && (
+            <>
+              {/* Summary Cards */}
+              <div className="grid grid-cols-5 gap-4 p-6 border-b border-gray-200 dark:border-gray-700">
+                <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white">{liveTests.summary.total}</p>
+                  <p className="text-xs text-gray-500 uppercase">Total</p>
+                </div>
+                <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-green-600">{liveTests.summary.passed}</p>
+                  <p className="text-xs text-green-600 uppercase">Passed</p>
+                </div>
+                <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-red-600">{liveTests.summary.failed}</p>
+                  <p className="text-xs text-red-600 uppercase">Failed</p>
+                </div>
+                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-amber-600">{liveTests.summary.warnings}</p>
+                  <p className="text-xs text-amber-600 uppercase">Warnings</p>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-gray-500">{liveTests.summary.errors}</p>
+                  <p className="text-xs text-gray-500 uppercase">Errors</p>
+                </div>
+              </div>
+
+              {/* Test Results Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 dark:bg-gray-700/50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Test ID</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                    {liveTests.tests.map((test) => {
+                      const statusConfig = getStatusConfig(mapLiveStatus(test.status));
+                      const StatusIcon = statusConfig.icon;
+                      return (
+                        <tr
+                          key={test.testId}
+                          onClick={() => setSelectedLiveTest(test)}
+                          className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
+                        >
+                          <td className="px-4 py-3 text-sm font-mono text-gray-600 dark:text-gray-400">{test.testId}</td>
+                          <td className="px-4 py-3">
+                            <p className="text-sm font-medium text-gray-900 dark:text-white">{test.name}</p>
+                            <p className="text-xs text-gray-500 truncate max-w-md">{test.description}</p>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${statusConfig.bgColor} ${statusConfig.textColor}`}>
+                              <StatusIcon size={12} />
+                              {mapLiveStatus(test.status)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 max-w-md truncate">
+                            {test.details}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {!liveTestsLoading && !liveTests && (
+            <div className="flex items-center justify-center h-64">
+              <div className="text-center">
+                <FaCloud className="mx-auto text-gray-300 mb-4" size={48} />
+                <p className="text-gray-500 mb-4">Click "Run Live Tests" to execute real-time security checks against your tenant.</p>
+                <button
+                  onClick={fetchLiveTests}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  Run Live Tests
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Live Test Detail Modal */}
+      {selectedLiveTest && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+            <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-start">
+              <div>
+                <span className="text-xs font-mono text-gray-500 dark:text-gray-400">{selectedLiveTest.testId}</span>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white mt-1">{selectedLiveTest.name}</h2>
+              </div>
+              <button
+                onClick={() => setSelectedLiveTest(null)}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <FaTimes />
+              </button>
+            </div>
+            <div className="p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-100px)]">
+              {/* Status Badge */}
+              <div>
+                {(() => {
+                  const config = getStatusConfig(mapLiveStatus(selectedLiveTest.status));
+                  const Icon = config.icon;
+                  return (
+                    <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${config.bgColor} ${config.textColor}`}>
+                      <Icon size={14} />
+                      {mapLiveStatus(selectedLiveTest.status)}
+                    </span>
+                  );
+                })()}
+              </div>
+
+              {/* Description */}
+              <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-5">
+                <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Description</h3>
+                <p className="text-gray-700 dark:text-gray-300 text-sm">{selectedLiveTest.description}</p>
+              </div>
+
+              {/* Details */}
+              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-5">
+                <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Test Result Details</h3>
+                <p className="text-gray-700 dark:text-gray-300 text-sm">{selectedLiveTest.details}</p>
+              </div>
+
+              {/* Recommendation */}
+              {selectedLiveTest.recommendation && (
+                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-5">
+                  <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Recommendation</h3>
+                  <p className="text-gray-700 dark:text-gray-300 text-sm">{selectedLiveTest.recommendation}</p>
+                </div>
+              )}
+
+              {/* Data */}
+              {selectedLiveTest.data && Object.keys(selectedLiveTest.data).length > 0 && (
+                <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-5">
+                  <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Raw Data</h3>
+                  <pre className="text-xs text-gray-600 dark:text-gray-400 overflow-auto max-h-48 bg-gray-100 dark:bg-gray-800 p-3 rounded-lg">
+                    {JSON.stringify(selectedLiveTest.data, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assessment Tab Content */}
+      {activeTab === "assessment" && (
+      <>
       {/* Main Card */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
         {/* Card Header */}
@@ -762,6 +1048,8 @@ const IdentityPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
       </>
       )}
