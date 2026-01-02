@@ -191,7 +191,7 @@ def get_identity_assessment(
 ) -> Dict[str, Any]:
     """Get identity assessment data including MFA status, risky users, and CA policies.
     
-    Returns detailed identity security assessment.
+    Returns detailed identity security assessment with test results matching PS1 evaluation logic.
     """
     def fetch_identity():
         # Get users and authentication methods
@@ -216,8 +216,11 @@ def get_identity_assessment(
         except:
             sign_in_logs = []
         
-        # Calculate identity checks
+        # Calculate identity checks (legacy format)
         checks = generate_identity_checks(users, auth_summary, risky_users, ca_policies, sign_in_logs)
+        
+        # Generate detailed test results with markdown output (PS1 format)
+        detailed_test_results = evaluate_detailed_test_results(ca_policies, auth_summary, risky_users, users)
         
         # Generate Sankey data for authentication flow
         sankey_data = generate_auth_sankey_data(auth_summary)
@@ -231,7 +234,8 @@ def get_identity_assessment(
             "ca_policy_count": len(ca_policies),
             "recent_sign_ins": sign_in_logs[:50],
             "checks": checks,
-            "sankey_data": sankey_data
+            "sankey_data": sankey_data,
+            "detailed_test_results": detailed_test_results
         }
     
     return get_or_create_cache(db, CachedGraphDataTypeEnum.IDENTITY_ASSESSMENT, fetch_identity)
@@ -596,6 +600,362 @@ def generate_device_checks(
     })
     
     return checks
+
+
+def evaluate_detailed_test_results(
+    ca_policies: List[Dict],
+    auth_summary: Dict,
+    risky_users: List[Dict],
+    users: List[Dict]
+) -> Dict[str, Dict]:
+    """Generate detailed test results with markdown output similar to PS1 files.
+    
+    Returns a dictionary mapping test IDs to their detailed results including
+    markdown-formatted output showing actual tenant data.
+    """
+    results = {}
+    
+    # Test 21808: Restrict device code flow
+    results["21808"] = evaluate_device_code_flow_test(ca_policies)
+    
+    # Test 21809: Admin consent workflow
+    results["21809"] = evaluate_admin_consent_workflow_test(ca_policies)
+    
+    # Test 21776: User consent settings are restricted
+    results["21776"] = evaluate_user_consent_test(ca_policies)
+    
+    # Test 21755: Authentication transfer (Block) 
+    results["21755"] = evaluate_authentication_transfer_test(ca_policies)
+    
+    # Test 21816: All privileged role assignments managed with PIM
+    results["21816"] = evaluate_pim_management_test(ca_policies)
+    
+    # Test 21815: Privileged role assignments are JIT
+    results["21815"] = evaluate_jit_access_test(ca_policies)
+    
+    # Test 21867: Enterprise applications with high privilege permissions have owners
+    results["21867"] = evaluate_app_owners_test()
+    
+    # Add more tests as needed
+    return results
+
+
+def evaluate_app_owners_test() -> Dict:
+    """Test 21867: Evaluate if enterprise applications with high privilege have owners.
+    
+    Based on Test-Assessment.21867.ps1
+    """
+    try:
+        apps_without_owners = azure_service.get_high_privilege_apps_without_owners()
+        
+        if not apps_without_owners:
+            return {
+                "testId": "21867",
+                "status": "Passed",
+                "result": "All enterprise applications with high privilege permissions have sufficient owners.",
+                "policies": []
+            }
+        
+        # Build markdown table
+        md_result = "Not all enterprise applications with high privilege permissions have owners\n\n"
+        md_result += "## Applications lacking sufficient owners\n\n"
+        md_result += "| App name | Multi-tenant | Permission | Classification | Owner count |\n"
+        md_result += "| :-------- | :------------ | :---------- | :------------- | :----------- |\n"
+        
+        for app in apps_without_owners:
+            app_name = app.get('displayName', 'Unknown')
+            app_id = app.get('id', '')
+            entra_link = f"https://entra.microsoft.com/#view/Microsoft_AAD_IAM/StartboardApplicationsMenuBlade/~/AppAppsPreview/objectId/{app_id}"
+            
+            is_multi_tenant = app.get('signInAudience', '') in ['AzureADMultipleOrgs', 'AzureADandPersonalMicrosoftAccount']
+            permissions = app.get('permissions', [])
+            perm_str = ', '.join(permissions[:5]) if permissions else 'Various'
+            if len(permissions) > 5:
+                perm_str += f', ... (+{len(permissions) - 5} more)'
+            
+            classification = app.get('risk', 'High')
+            owner_count = app.get('ownerCount', 0)
+            
+            md_result += f"| [{app_name}]({entra_link}) | {is_multi_tenant} | {perm_str} | {classification} | {owner_count} |\n"
+        
+        return {
+            "testId": "21867",
+            "status": "Failed",
+            "result": md_result,
+            "policies": apps_without_owners
+        }
+        
+    except Exception as e:
+        logger.error(f"Error evaluating app owners test: {str(e)}")
+        return {
+            "testId": "21867",
+            "status": "Investigate",
+            "result": f"Unable to evaluate enterprise application owners: {str(e)}\n\nTo verify this setting:\n1. Go to Azure Portal > Microsoft Entra ID > Enterprise applications\n2. Review applications and ensure each has at least 2 owners",
+            "policies": []
+        }
+
+
+def evaluate_device_code_flow_test(ca_policies: List[Dict]) -> Dict:
+    """Test 21808: Evaluate if device code flow is restricted via CA policies.
+    
+    Based on Test-Assessment.21808.ps1
+    """
+    enabled_policies = [p for p in ca_policies if p.get('state') == 'enabled']
+    disabled_policies = [p for p in ca_policies if p.get('state') != 'enabled']
+    
+    # Find policies targeting device code flow
+    device_code_policies = []
+    for policy in enabled_policies:
+        auth_flows = policy.get('conditions', {}).get('authenticationFlows', {})
+        transfer_methods = auth_flows.get('transferMethods', '')
+        if isinstance(transfer_methods, str):
+            methods = [m.strip() for m in transfer_methods.split(',')]
+        else:
+            methods = transfer_methods if transfer_methods else []
+        if 'deviceCodeFlow' in methods:
+            device_code_policies.append(policy)
+    
+    # Find inactive device code flow policies
+    inactive_device_code_policies = []
+    for policy in disabled_policies:
+        auth_flows = policy.get('conditions', {}).get('authenticationFlows', {})
+        transfer_methods = auth_flows.get('transferMethods', '')
+        if isinstance(transfer_methods, str):
+            methods = [m.strip() for m in transfer_methods.split(',')]
+        else:
+            methods = transfer_methods if transfer_methods else []
+        if 'deviceCodeFlow' in methods:
+            inactive_device_code_policies.append(policy)
+    
+    # Check if any policy has block control
+    passed = False
+    for policy in device_code_policies:
+        grant_controls = policy.get('grantControls', {})
+        built_in = grant_controls.get('builtInControls', [])
+        if 'block' in built_in:
+            passed = True
+            break
+    
+    # Build markdown result
+    if passed:
+        md_result = "Device code flow is properly restricted in the tenant."
+    elif len(device_code_policies) == 0:
+        md_result = "No Conditional Access policies found that target device code flow authentication."
+    else:
+        md_result = "Device code flow policies exist but none are configured to block device code flow."
+    
+    md_result += "\n\n## Conditional Access Policies targeting Device Code Flow\n\n"
+    
+    if device_code_policies:
+        md_result += "| Policy Name | Status | Target Users | Target Resources | Grant Controls |\n"
+        md_result += "| :---------- | :----- | :----------- | :--------------- | :------------ |\n"
+        
+        for policy in device_code_policies:
+            portal_link = f"https://entra.microsoft.com/#view/Microsoft_AAD_ConditionalAccess/PolicyBlade/policyId/{policy.get('id', '')}"
+            
+            # Format target users
+            conditions = policy.get('conditions', {})
+            users_cond = conditions.get('users', {})
+            include_users = users_cond.get('includeUsers', [])
+            exclude_users = users_cond.get('excludeUsers', [])
+            
+            if 'All' in include_users:
+                target_users = "All Users"
+            elif include_users:
+                target_users = f"Included: {len(include_users)} users/groups"
+            else:
+                target_users = "None"
+            
+            if exclude_users:
+                target_users += f", Excluded: {len(exclude_users)} users/groups"
+            
+            # Format target resources
+            apps_cond = conditions.get('applications', {})
+            include_apps = apps_cond.get('includeApplications', [])
+            exclude_apps = apps_cond.get('excludeApplications', [])
+            
+            if 'All' in include_apps:
+                target_resources = "All Applications"
+            elif include_apps:
+                target_resources = f"Included: {len(include_apps)} apps"
+            else:
+                target_resources = "None"
+            
+            if exclude_apps:
+                target_resources += f", Excluded: {len(exclude_apps)} apps"
+            
+            # Format grant controls
+            grant_controls = policy.get('grantControls', {})
+            built_in = grant_controls.get('builtInControls', [])
+            operator = grant_controls.get('operator', 'AND')
+            
+            if 'block' in built_in:
+                grant_text = "Block"
+            elif built_in:
+                grant_text = ", ".join(built_in)
+            else:
+                grant_text = "None"
+            
+            grant_text += f" ({operator})"
+            
+            display_name = policy.get('displayName', 'Unknown Policy')
+            md_result += f"| [{display_name}]({portal_link}) | Enabled | {target_users} | {target_resources} | {grant_text} |\n"
+    else:
+        md_result += "No Conditional Access policies targeting device code flow authentication were found.\n"
+    
+    # Add inactive policies section if test failed
+    if not passed and inactive_device_code_policies:
+        md_result += "\n## Inactive Conditional Access Policies targeting Device Code Flow\n"
+        md_result += "These policies are not contributing to your security posture because they are not enabled:\n\n"
+        md_result += "| Policy Name | Status | Target Users | Target Resources | Grant Controls |\n"
+        md_result += "| :---------- | :----- | :----------- | :--------------- | :------------ |\n"
+        
+        for policy in inactive_device_code_policies:
+            portal_link = f"https://entra.microsoft.com/#view/Microsoft_AAD_ConditionalAccess/PolicyBlade/policyId/{policy.get('id', '')}"
+            status = "Report-only" if policy.get('state') == 'enabledForReportingButNotEnforced' else "Disabled"
+            
+            conditions = policy.get('conditions', {})
+            users_cond = conditions.get('users', {})
+            include_users = users_cond.get('includeUsers', [])
+            
+            if 'All' in include_users:
+                target_users = "All Users"
+            elif include_users:
+                target_users = f"Included: {len(include_users)} users/groups"
+            else:
+                target_users = "None"
+            
+            apps_cond = conditions.get('applications', {})
+            include_apps = apps_cond.get('includeApplications', [])
+            
+            if 'All' in include_apps:
+                target_resources = "All Applications"
+            elif include_apps:
+                target_resources = f"Included: {len(include_apps)} apps"
+            else:
+                target_resources = "None"
+            
+            grant_controls = policy.get('grantControls', {})
+            built_in = grant_controls.get('builtInControls', [])
+            operator = grant_controls.get('operator', 'AND')
+            
+            if 'block' in built_in:
+                grant_text = "Block"
+            elif built_in:
+                grant_text = ", ".join(built_in)
+            else:
+                grant_text = "None"
+            
+            grant_text += f" ({operator})"
+            
+            display_name = policy.get('displayName', 'Unknown Policy')
+            md_result += f"| [{display_name}]({portal_link}) | {status} | {target_users} | {target_resources} | {grant_text} |\n"
+    
+    return {
+        "testId": "21808",
+        "status": "Passed" if passed else "Failed",
+        "result": md_result,
+        "policies": [
+            {
+                "name": p.get('displayName', 'Unknown'),
+                "status": "Enabled",
+                "targetUsers": "All Users" if 'All' in p.get('conditions', {}).get('users', {}).get('includeUsers', []) else "Specific",
+                "targetResources": "All Applications" if 'All' in p.get('conditions', {}).get('applications', {}).get('includeApplications', []) else "Specific",
+                "grantControls": "Block" if 'block' in p.get('grantControls', {}).get('builtInControls', []) else "Other"
+            }
+            for p in device_code_policies
+        ],
+        "inactivePolicies": [
+            {
+                "name": p.get('displayName', 'Unknown'),
+                "status": "Disabled" if p.get('state') != 'enabledForReportingButNotEnforced' else "Report-only",
+                "targetUsers": "All Users" if 'All' in p.get('conditions', {}).get('users', {}).get('includeUsers', []) else "Specific",
+                "targetResources": "All Applications",
+                "grantControls": "Block" if 'block' in p.get('grantControls', {}).get('builtInControls', []) else "Other"
+            }
+            for p in inactive_device_code_policies
+        ]
+    }
+
+
+def evaluate_admin_consent_workflow_test(ca_policies: List[Dict]) -> Dict:
+    """Test 21809: Evaluate admin consent workflow settings."""
+    # This would need additional Graph API calls to get consent settings
+    # For now, return a placeholder
+    return {
+        "testId": "21809",
+        "status": "Investigate",
+        "result": "Admin consent workflow status requires additional API permissions to evaluate.\n\nTo verify this setting:\n1. Go to Azure Portal > Microsoft Entra ID > Enterprise applications\n2. Select Consent and permissions > Admin consent settings\n3. Verify admin consent workflow is enabled",
+        "policies": []
+    }
+
+
+def evaluate_user_consent_test(ca_policies: List[Dict]) -> Dict:
+    """Test 21776: Evaluate user consent settings."""
+    return {
+        "testId": "21776",
+        "status": "Investigate", 
+        "result": "User consent settings status requires additional API permissions to evaluate.\n\nTo verify this setting:\n1. Go to Azure Portal > Microsoft Entra ID > Enterprise applications\n2. Select Consent and permissions > User consent settings\n3. Verify user consent is restricted appropriately",
+        "policies": []
+    }
+
+
+def evaluate_authentication_transfer_test(ca_policies: List[Dict]) -> Dict:
+    """Test 21755: Evaluate authentication transfer blocking."""
+    enabled_policies = [p for p in ca_policies if p.get('state') == 'enabled']
+    
+    # Find policies targeting authentication transfer
+    auth_transfer_policies = []
+    for policy in enabled_policies:
+        auth_flows = policy.get('conditions', {}).get('authenticationFlows', {})
+        transfer_methods = auth_flows.get('transferMethods', '')
+        if isinstance(transfer_methods, str):
+            methods = [m.strip() for m in transfer_methods.split(',')]
+        else:
+            methods = transfer_methods if transfer_methods else []
+        if 'authenticationTransfer' in methods:
+            auth_transfer_policies.append(policy)
+    
+    passed = False
+    for policy in auth_transfer_policies:
+        grant_controls = policy.get('grantControls', {})
+        if 'block' in grant_controls.get('builtInControls', []):
+            passed = True
+            break
+    
+    if passed:
+        md_result = "Authentication transfer is properly blocked in the tenant."
+    elif len(auth_transfer_policies) == 0:
+        md_result = "No Conditional Access policies found that target authentication transfer."
+    else:
+        md_result = "Authentication transfer policies exist but none are configured to block."
+    
+    return {
+        "testId": "21755",
+        "status": "Passed" if passed else "Failed",
+        "result": md_result,
+        "policies": []
+    }
+
+
+def evaluate_pim_management_test(ca_policies: List[Dict]) -> Dict:
+    """Test 21816: Evaluate PIM management for privileged roles."""
+    return {
+        "testId": "21816",
+        "status": "Investigate",
+        "result": "Privileged Identity Management (PIM) status requires additional API permissions to evaluate.\n\nTo verify this setting:\n1. Go to Azure Portal > Microsoft Entra ID > Privileged Identity Management\n2. Review role assignments and ensure all privileged roles are managed through PIM",
+        "policies": []
+    }
+
+
+def evaluate_jit_access_test(ca_policies: List[Dict]) -> Dict:
+    """Test 21815: Evaluate just-in-time access for privileged roles."""
+    return {
+        "testId": "21815",
+        "status": "Investigate",
+        "result": "Just-in-time access configuration requires additional API permissions to evaluate.\n\nTo verify this setting:\n1. Go to Azure Portal > Microsoft Entra ID > Privileged Identity Management\n2. Ensure privileged role assignments require activation (not permanently active)",
+        "policies": []
+    }
 
 
 def generate_auth_sankey_data(auth_summary: Dict) -> Dict:

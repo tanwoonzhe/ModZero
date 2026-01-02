@@ -1,6 +1,7 @@
 // Auto-generated index file for security tests
-export { identityTests, type SecurityTest } from './identityTests';
+export { identityTests, type SecurityTest, getRemediation } from './identityTests';
 export { devicesTests } from './devicesTests';
+export { testRemediations, getTestRemediation, type TestRemediation } from './testRemediations';
 
 import { identityTests } from './identityTests';
 import { devicesTests } from './devicesTests';

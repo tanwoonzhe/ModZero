@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
+import ReactMarkdown from "react-markdown";
 import api from "../api";
 import { DeviceAssessmentData, AssessmentCheck } from "../types";
 import { ResponsiveSankey } from "@nivo/sankey";
@@ -16,8 +17,81 @@ import {
   FaWindows,
   FaAndroid,
   FaSearch,
+  FaClock,
+  FaArrowUp,
+  FaArrowRight,
+  FaArrowDown,
+  FaShieldAlt,
+  FaEye,
+  FaWrench,
+  FaBuilding,
+  FaBolt,
+  FaNetworkWired,
+  FaTimes,
+  FaExternalLinkAlt,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
+import { devicesTests, SecurityTest } from "../data/devicesTests";
+import { getTestRemediation } from "../data/securityTestsIndex";
+
+// Markdown components for styling
+const markdownComponents = {
+  a: ({ href, children }: any) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 underline">
+      {children}
+    </a>
+  ),
+  ul: ({ children }: any) => <ul className="list-disc list-inside space-y-1">{children}</ul>,
+  ol: ({ children }: any) => <ol className="list-decimal list-inside space-y-1">{children}</ol>,
+  li: ({ children }: any) => <li className="text-gray-700 dark:text-gray-300">{children}</li>,
+  p: ({ children }: any) => <p className="mb-2 last:mb-0">{children}</p>,
+  strong: ({ children }: any) => <strong className="font-semibold">{children}</strong>,
+  table: ({ children }: any) => <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">{children}</table>,
+  thead: ({ children }: any) => <thead className="bg-gray-50 dark:bg-gray-800">{children}</thead>,
+  tbody: ({ children }: any) => <tbody className="divide-y divide-gray-200 dark:divide-gray-700">{children}</tbody>,
+  tr: ({ children }: any) => <tr>{children}</tr>,
+  th: ({ children }: any) => <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">{children}</th>,
+  td: ({ children }: any) => <td className="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">{children}</td>,
+};
+
+// SFI Pillar icons configuration
+const sfiPillarConfig: Record<string, { icon: React.ElementType; color: string; bgColor: string }> = {
+  "Accelerate response and remediation": { icon: FaBolt, color: "text-orange-600", bgColor: "bg-orange-50 hover:bg-orange-100 dark:bg-orange-900/20" },
+  "Monitor and detect cyberthreats": { icon: FaEye, color: "text-purple-600", bgColor: "bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/20" },
+  "Protect engineering systems": { icon: FaWrench, color: "text-blue-600", bgColor: "bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20" },
+  "Protect identities and secrets": { icon: FaLock, color: "text-indigo-600", bgColor: "bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/20" },
+  "Protect tenants and isolate production systems": { icon: FaBuilding, color: "text-green-600", bgColor: "bg-green-50 hover:bg-green-100 dark:bg-green-900/20" },
+  "Protect networks": { icon: FaNetworkWired, color: "text-cyan-600", bgColor: "bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-900/20" },
+};
+
+const getSfiPillarConfig = (pillar: string) => {
+  return sfiPillarConfig[pillar] || { icon: FaShieldAlt, color: "text-gray-600", bgColor: "bg-gray-50 hover:bg-gray-100 dark:bg-gray-700" };
+};
+
+const getRiskConfig = (risk: string) => {
+  switch (risk) {
+    case "High": return { icon: FaArrowUp, color: "text-red-600", label: "High" };
+    case "Medium": return { icon: FaArrowRight, color: "text-amber-500", label: "Medium" };
+    case "Low": return { icon: FaArrowDown, color: "text-green-600", label: "Low" };
+    default: return { icon: FaArrowRight, color: "text-gray-500", label: risk };
+  }
+};
+
+const getStatusConfig = (status: string) => {
+  switch (status) {
+    case "Passed": 
+      return { icon: FaCheckCircle, color: "text-green-600", bgColor: "bg-green-100", textColor: "text-green-800" };
+    case "Failed": 
+      return { icon: FaTimesCircle, color: "text-red-600", bgColor: "bg-red-100", textColor: "text-red-800" };
+    case "Investigate": 
+      return { icon: FaExclamationTriangle, color: "text-amber-500", bgColor: "bg-amber-100", textColor: "text-amber-800" };
+    case "Skipped":
+    case "Planned":
+      return { icon: FaClock, color: "text-gray-500", bgColor: "bg-gray-100", textColor: "text-gray-700" };
+    default: 
+      return { icon: FaClock, color: "text-blue-500", bgColor: "bg-blue-100", textColor: "text-blue-800" };
+  }
+};
 
 // Mock data for demo purposes when API is unavailable
 const getMockDeviceData = (): DeviceAssessmentData => ({
@@ -95,10 +169,140 @@ const DevicesPage: React.FC = () => {
   const [data, setData] = useState<DeviceAssessmentData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<"assessment" | "devices">("assessment");
+  const [activeTab, setActiveTab] = useState<"assessment" | "devices" | "security-tests">("assessment");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [usingMockData, setUsingMockData] = useState(false);
+  const [selectedSfiPillars, setSelectedSfiPillars] = useState<string[]>([]);
+  const [selectedRisks, setSelectedRisks] = useState<string[]>([]);
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
+  const [selectedTest, setSelectedTest] = useState<SecurityTest | null>(null);
+  const [showDetail, setShowDetail] = useState(false);
+
+  // Evaluate test status based on tenant device data
+  const evaluateDeviceTestStatus = (test: SecurityTest, deviceData: DeviceAssessmentData['data'] | undefined): string => {
+    if (!deviceData) return test.status;
+    
+    const { 
+      total_devices, 
+      compliance_stats, 
+      compliance_rate, 
+      encryption_stats, 
+      encryption_rate, 
+      os_distribution, 
+      ownership_stats 
+    } = deviceData;
+    
+    const totalDevices = total_devices || 1;
+    const complianceRate = compliance_rate / 100;
+    const encryptionRate = encryption_rate / 100;
+    
+    // Windows compliance policies
+    if (test.title.toLowerCase().includes('compliance polic') && test.title.toLowerCase().includes('windows')) {
+      return complianceRate >= 0.9 ? "Passed" : complianceRate >= 0.6 ? "Investigate" : "Failed";
+    }
+    
+    // macOS compliance policies
+    if (test.title.toLowerCase().includes('compliance polic') && test.title.toLowerCase().includes('macos')) {
+      const hasMac = os_distribution && (os_distribution['macOS'] > 0 || os_distribution['Mac OS'] > 0);
+      if (!hasMac) return "Skipped";
+      return complianceRate >= 0.9 ? "Passed" : complianceRate >= 0.6 ? "Investigate" : "Failed";
+    }
+    
+    // iOS/iPadOS compliance policies
+    if (test.title.toLowerCase().includes('compliance polic') && (test.title.toLowerCase().includes('ios') || test.title.toLowerCase().includes('ipad'))) {
+      const hasIOS = os_distribution && (os_distribution['iOS'] > 0 || os_distribution['iPadOS'] > 0);
+      if (!hasIOS) return "Skipped";
+      return complianceRate >= 0.85 ? "Passed" : complianceRate >= 0.5 ? "Investigate" : "Failed";
+    }
+    
+    // Android compliance policies
+    if (test.title.toLowerCase().includes('compliance polic') && test.title.toLowerCase().includes('android')) {
+      const hasAndroid = os_distribution && os_distribution['Android'] > 0;
+      if (!hasAndroid) return "Skipped";
+      return complianceRate >= 0.85 ? "Passed" : complianceRate >= 0.5 ? "Investigate" : "Failed";
+    }
+    
+    // BitLocker / Encryption tests
+    if (test.title.toLowerCase().includes('bitlocker') || test.title.toLowerCase().includes('encryption')) {
+      return encryptionRate >= 0.95 ? "Passed" : encryptionRate >= 0.7 ? "Investigate" : "Failed";
+    }
+    
+    // Firewall tests
+    if (test.title.toLowerCase().includes('firewall')) {
+      // Assume firewall is part of compliance
+      return complianceRate >= 0.8 ? "Passed" : "Investigate";
+    }
+    
+    // Windows Hello for Business
+    if (test.title.toLowerCase().includes('windows hello')) {
+      // Check if we have Windows devices
+      const hasWindows = os_distribution && (os_distribution['Windows 11'] > 0 || os_distribution['Windows 10'] > 0);
+      if (!hasWindows) return "Skipped";
+      return complianceRate >= 0.5 ? "Investigate" : "Planned";
+    }
+    
+    // Windows Update policies
+    if (test.title.toLowerCase().includes('update polic') || test.title.toLowerCase().includes('patch')) {
+      return complianceRate >= 0.9 ? "Passed" : complianceRate >= 0.7 ? "Investigate" : "Failed";
+    }
+    
+    // Automatic enrollment tests
+    if (test.title.toLowerCase().includes('enrollment') || test.title.toLowerCase().includes('enroll')) {
+      const managedRate = (ownership_stats?.corporate || 0) / Math.max(totalDevices, 1);
+      return managedRate >= 0.8 ? "Passed" : managedRate >= 0.5 ? "Investigate" : "Failed";
+    }
+    
+    // App protection policies
+    if (test.title.toLowerCase().includes('app protection') || test.title.toLowerCase().includes('app polic')) {
+      return complianceRate >= 0.7 ? "Passed" : complianceRate >= 0.4 ? "Investigate" : "Planned";
+    }
+    
+    // Corporate device tests
+    if (test.title.toLowerCase().includes('corporate') && test.title.toLowerCase().includes('device')) {
+      const corpRate = (ownership_stats?.corporate || 0) / Math.max(totalDevices, 1);
+      return corpRate >= 0.8 ? "Passed" : corpRate >= 0.5 ? "Investigate" : "Failed";
+    }
+    
+    // Personal/BYOD device tests
+    if (test.title.toLowerCase().includes('personal') || test.title.toLowerCase().includes('byod')) {
+      const personalDevices = ownership_stats?.personal || 0;
+      if (personalDevices === 0) return "Skipped";
+      return complianceRate >= 0.7 ? "Passed" : "Investigate";
+    }
+    
+    // Zero devices case
+    if (totalDevices === 0) {
+      return "Skipped";
+    }
+    
+    // Default: use compliance rate as general indicator
+    if (complianceRate >= 0.9) return test.status === "Failed" ? "Investigate" : test.status;
+    
+    return test.status;
+  };
+
+  // Dynamically evaluated device tests
+  const evaluatedTests = useMemo(() => {
+    return devicesTests.map(test => ({
+      ...test,
+      status: evaluateDeviceTestStatus(test, data?.data) as SecurityTest['status']
+    }));
+  }, [data]);
+
+  // Test statistics
+  const testStats = useMemo(() => {
+    const passed = evaluatedTests.filter(t => t.status === "Passed").length;
+    const failed = evaluatedTests.filter(t => t.status === "Failed").length;
+    const investigate = evaluatedTests.filter(t => t.status === "Investigate").length;
+    const skipped = evaluatedTests.filter(t => t.status === "Skipped" || t.status === "Planned").length;
+    return { passed, failed, investigate, skipped, total: evaluatedTests.length };
+  }, [evaluatedTests]);
+
+  // Get unique SFI pillars for filtering
+  const uniqueSfiPillars = useMemo(() => {
+    return [...new Set(evaluatedTests.map(t => t.sfiPillar))].filter(Boolean);
+  }, [evaluatedTests]);
 
   const fetchData = async () => {
     try {
@@ -137,6 +341,48 @@ const DevicesPage: React.FC = () => {
       toast.error("Using demo data - refresh failed");
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  // Filter security tests based on current filters
+  const filteredSecurityTests = useMemo(() => {
+    let result = evaluatedTests;
+
+    // Search filter
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      result = result.filter(t =>
+        t.title.toLowerCase().includes(term) ||
+        t.category.toLowerCase().includes(term) ||
+        t.testId.includes(term)
+      );
+    }
+
+    // SFI Pillar filter
+    if (selectedSfiPillars.length > 0) {
+      result = result.filter(t => selectedSfiPillars.includes(t.sfiPillar));
+    }
+
+    // Risk filter
+    if (selectedRisks.length > 0) {
+      result = result.filter(t => selectedRisks.includes(t.risk));
+    }
+
+    // Status filter (exclude Planned/Skipped by default if no filters)
+    if (selectedStatuses.length > 0) {
+      result = result.filter(t => selectedStatuses.includes(t.status));
+    } else {
+      result = result.filter(t => t.status !== "Planned" && t.status !== "Skipped");
+    }
+
+    return result;
+  }, [evaluatedTests, searchTerm, selectedSfiPillars, selectedRisks, selectedStatuses]);
+
+  const toggleFilter = (value: string, selected: string[], setSelected: React.Dispatch<React.SetStateAction<string[]>>) => {
+    if (selected.includes(value)) {
+      setSelected(selected.filter(v => v !== value));
+    } else {
+      setSelected([...selected, value]);
     }
   };
 
@@ -241,6 +487,16 @@ const DevicesPage: React.FC = () => {
             }`}
           >
             Assessment Results
+          </button>
+          <button
+            onClick={() => setActiveTab("security-tests")}
+            className={`py-2 px-4 border-b-2 font-medium text-sm ${
+              activeTab === "security-tests"
+                ? "border-indigo-600 text-indigo-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            Security Tests ({testStats.total})
           </button>
           <button
             onClick={() => setActiveTab("devices")}
@@ -478,6 +734,354 @@ const DevicesPage: React.FC = () => {
               </table>
             </div>
           </div>
+        </>
+      ) : activeTab === "security-tests" ? (
+        /* Security Tests Tab */
+        <>
+          {/* Stats Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
+                  <FaCheckCircle className="text-green-600 text-xl" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-green-600">{testStats.passed}</p>
+                  <p className="text-sm text-gray-500">Passed</p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/30">
+                  <FaTimesCircle className="text-red-600 text-xl" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-red-600">{testStats.failed}</p>
+                  <p className="text-sm text-gray-500">Failed</p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30">
+                  <FaExclamationTriangle className="text-amber-500 text-xl" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-amber-500">{testStats.investigate}</p>
+                  <p className="text-sm text-gray-500">Investigate</p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-700">
+                  <FaClock className="text-gray-500 text-xl" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-gray-500">{testStats.skipped}</p>
+                  <p className="text-sm text-gray-500">Skipped</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Filters */}
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+            <div className="flex flex-wrap gap-4 items-center">
+              {/* Search */}
+              <div className="relative flex-1 min-w-[200px]">
+                <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search tests..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                />
+              </div>
+
+              {/* SFI Pillar Filter */}
+              <div className="flex flex-wrap gap-2">
+                {uniqueSfiPillars.slice(0, 4).map(pillar => {
+                  const config = getSfiPillarConfig(pillar);
+                  const IconComponent = config.icon;
+                  const isSelected = selectedSfiPillars.includes(pillar);
+                  return (
+                    <button
+                      key={pillar}
+                      onClick={() => toggleFilter(pillar, selectedSfiPillars, setSelectedSfiPillars)}
+                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
+                        isSelected ? `${config.bgColor} ${config.color}` : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
+                      }`}
+                      title={pillar}
+                    >
+                      <IconComponent className="text-sm" />
+                      <span className="hidden sm:inline">{pillar.split(' ').slice(0, 2).join(' ')}...</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Risk Filter */}
+              <div className="flex gap-1">
+                {["High", "Medium", "Low"].map(risk => {
+                  const config = getRiskConfig(risk);
+                  const isSelected = selectedRisks.includes(risk);
+                  return (
+                    <button
+                      key={risk}
+                      onClick={() => toggleFilter(risk, selectedRisks, setSelectedRisks)}
+                      className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${
+                        isSelected ? `bg-gray-800 text-white` : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700'
+                      }`}
+                    >
+                      <config.icon className={config.color} />
+                      {risk}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Status Filter */}
+              <div className="flex gap-1">
+                {["Passed", "Failed", "Investigate", "Skipped"].map(status => {
+                  const config = getStatusConfig(status);
+                  const isSelected = selectedStatuses.includes(status);
+                  return (
+                    <button
+                      key={status}
+                      onClick={() => toggleFilter(status, selectedStatuses, setSelectedStatuses)}
+                      className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${
+                        isSelected ? `${config.bgColor} ${config.textColor}` : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700'
+                      }`}
+                    >
+                      <config.icon className={`text-xs ${config.color}`} />
+                      {status}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Clear Filters */}
+              {(selectedSfiPillars.length > 0 || selectedRisks.length > 0 || selectedStatuses.length > 0 || searchTerm) && (
+                <button
+                  onClick={() => {
+                    setSelectedSfiPillars([]);
+                    setSelectedRisks([]);
+                    setSelectedStatuses([]);
+                    setSearchTerm("");
+                  }}
+                  className="text-xs text-indigo-600 hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Tests List */}
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+            <div className="px-4 py-3 border-b dark:border-gray-700">
+              <p className="text-sm text-gray-500">
+                Showing {filteredSecurityTests.length} of {testStats.total} tests
+              </p>
+            </div>
+            <div className="divide-y dark:divide-gray-700 max-h-[600px] overflow-y-auto">
+              {filteredSecurityTests.map((test) => {
+                const statusConfig = getStatusConfig(test.status);
+                const riskConfig = getRiskConfig(test.risk);
+                const pillarConfig = getSfiPillarConfig(test.sfiPillar);
+                const PillarIcon = pillarConfig.icon;
+                const StatusIcon = statusConfig.icon;
+                const RiskIcon = riskConfig.icon;
+                
+                return (
+                  <div
+                    key={test.id}
+                    className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
+                    onClick={() => { setSelectedTest(test); setShowDetail(true); }}
+                  >
+                    <div className="flex items-start gap-4">
+                      <div className={`p-2 rounded-lg ${statusConfig.bgColor}`}>
+                        <StatusIcon className={`text-lg ${statusConfig.color}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs text-gray-400">{test.testId}</span>
+                          <span className={`flex items-center gap-1 text-xs ${riskConfig.color}`}>
+                            <RiskIcon className="text-xs" />
+                            {test.risk}
+                          </span>
+                        </div>
+                        <h4 className="font-medium text-gray-900 dark:text-white">{test.title}</h4>
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded ${pillarConfig.bgColor} ${pillarConfig.color}`}>
+                            <PillarIcon className="text-xs" />
+                            {test.sfiPillar}
+                          </span>
+                          <span className="text-xs text-gray-500">{test.category}</span>
+                        </div>
+                      </div>
+                      <FaExternalLinkAlt className="text-gray-400 text-sm flex-shrink-0" />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Test Detail Panel */}
+          {showDetail && selectedTest && (
+            <div className="fixed inset-0 z-50 overflow-hidden">
+              <div className="absolute inset-0 bg-black/50" onClick={() => setShowDetail(false)} />
+              <div className="absolute right-0 top-0 h-full w-full max-w-xl bg-white dark:bg-gray-800 shadow-xl overflow-y-auto">
+                {/* Panel Header */}
+                <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-6 z-10">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1 pr-4">
+                      <h2 className="text-xl font-bold text-gray-900 dark:text-white">{selectedTest.title}</h2>
+                      <p className="text-sm text-gray-500 mt-1">Test ID: {selectedTest.testId}</p>
+                    </div>
+                    <button onClick={() => setShowDetail(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                      <FaTimes size={18} className="text-gray-500" />
+                    </button>
+                  </div>
+                  
+                  {/* Status and Risk */}
+                  <div className="flex items-center gap-3 mt-4">
+                    {(() => {
+                      const statusConfig = getStatusConfig(selectedTest.status);
+                      const StatusIcon = statusConfig.icon;
+                      return (
+                        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${statusConfig.bgColor} ${statusConfig.textColor}`}>
+                          <StatusIcon size={14} />
+                          {selectedTest.status}
+                        </span>
+                      );
+                    })()}
+                    {(() => {
+                      const riskConfig = getRiskConfig(selectedTest.risk);
+                      const RiskIcon = riskConfig.icon;
+                      return (
+                        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-gray-100 dark:bg-gray-700 ${riskConfig.color}`}>
+                          <RiskIcon size={14} />
+                          {selectedTest.risk} Risk
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Panel Content */}
+                <div className="p-6 space-y-6">
+                  {/* Test Result Section */}
+                  <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-5 border border-gray-100 dark:border-gray-700">
+                    <div className="flex items-center gap-2 mb-4">
+                      <h3 className="font-semibold text-gray-900 dark:text-white">Test result</h3>
+                      <span className="text-gray-500 dark:text-gray-400">→</span>
+                      {(() => {
+                        const statusConfig = getStatusConfig(selectedTest.status);
+                        return (
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusConfig.bgColor} ${statusConfig.textColor}`}>
+                            {selectedTest.status}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                    <p className="text-gray-700 dark:text-gray-300 text-sm mb-4">
+                      {selectedTest.status === "Passed" 
+                        ? `${selectedTest.title.replace(/don''t|don't/gi, "").replace(/are |is /gi, "")} check completed successfully.`
+                        : selectedTest.status === "Failed"
+                        ? `${selectedTest.title.replace(/don''t|don't/gi, "").replace(/are |is /gi, "")} requires attention.`
+                        : `${selectedTest.title} needs further investigation.`}
+                    </p>
+
+                    {/* Settings Table */}
+                    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                      <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                        <h4 className="text-sm font-medium text-gray-900 dark:text-white">Configuration settings</h4>
+                      </div>
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-gray-200 dark:border-gray-700">
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Setting</th>
+                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr className="border-b border-gray-100 dark:border-gray-700">
+                            <td className="px-4 py-3 text-sm text-indigo-600 dark:text-indigo-400">
+                              {selectedTest.title}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right">
+                              <span className={`${selectedTest.status === "Passed" ? "text-green-600" : selectedTest.status === "Failed" ? "text-red-600" : "text-amber-600"}`}>
+                                {selectedTest.status === "Passed" ? "Enabled" : selectedTest.status === "Failed" ? "Not configured" : "Needs review"}
+                              </span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* What was checked */}
+                  <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-5 border border-gray-100 dark:border-gray-700">
+                    <h3 className="font-semibold text-gray-900 dark:text-white mb-3">What was checked</h3>
+                    {(() => {
+                      const remediation = getTestRemediation(selectedTest.testId);
+                      const description = remediation?.description || selectedTest.description;
+                      return (
+                        <div className="text-gray-700 dark:text-gray-300 leading-relaxed text-sm prose prose-sm dark:prose-invert max-w-none">
+                          <ReactMarkdown components={markdownComponents}>{description}</ReactMarkdown>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Remediation Action - Dynamic based on test ID from MD files */}
+                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-5 border border-blue-100 dark:border-blue-800">
+                    <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Remediation action</h3>
+                    {(() => {
+                      const remediation = getTestRemediation(selectedTest.testId);
+                      if (remediation && remediation.remediation) {
+                        return (
+                          <div className="text-gray-700 dark:text-gray-300 text-sm prose prose-sm dark:prose-invert max-w-none">
+                            <ReactMarkdown components={markdownComponents}>{remediation.remediation}</ReactMarkdown>
+                          </div>
+                        );
+                      }
+                      return (
+                        <p className="text-gray-500 dark:text-gray-400 text-sm italic">
+                          No specific remediation guidance available for this test.
+                        </p>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Details Grid */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+                      <p className="text-xs text-gray-500 uppercase tracking-wider">Category</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">{selectedTest.category}</p>
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+                      <p className="text-xs text-gray-500 uppercase tracking-wider">SFI Pillar</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">{selectedTest.sfiPillar || 'N/A'}</p>
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+                      <p className="text-xs text-gray-500 uppercase tracking-wider">User Impact</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">{selectedTest.userImpact}</p>
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+                      <p className="text-xs text-gray-500 uppercase tracking-wider">Implementation Cost</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">{selectedTest.implementationCost}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       ) : (
         /* Device List Tab */

@@ -40,6 +40,7 @@ services:
       - "8000:8000"
     volumes:
       - ./frontend/dist:/app/frontend/dist  # mount built frontend for serving static files
+      - ./backend/app:/app/app  # mount backend code for hot reload
 
   frontend:
     build: ./frontend

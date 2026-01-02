@@ -13,6 +13,158 @@ export interface SecurityTest {
   implementationCost: string;
   status: "Passed" | "Failed" | "Investigate" | "Skipped" | "Planned";
   tenantType: string[];
+  remediation?: string;
+  docLink?: string;
+}
+
+// Remediation actions mapped by test title keywords
+export const remediationMap: Record<string, { text: string; link: string; linkText: string }> = {
+  "inactive applications": {
+    text: "Review and remove inactive applications with privileged permissions. Use Microsoft Entra app governance to identify and remediate overprivileged or inactive apps.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/manage-application-permissions",
+    linkText: "Manage application permissions"
+  },
+  "client secret": {
+    text: "Migrate applications from client secrets to certificate-based authentication or managed identities where possible.",
+    link: "https://learn.microsoft.com/en-us/entra/identity-platform/howto-create-service-principal-portal#option-1-recommended-create-and-upload-a-self-signed-certificate",
+    linkText: "Configure certificate-based authentication"
+  },
+  "certificate": {
+    text: "Review certificate validity periods and implement certificate rotation policies. Use short-lived certificates where possible.",
+    link: "https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials",
+    linkText: "Certificate credentials configuration"
+  },
+  "conditional access": {
+    text: "Create and configure Conditional Access policies to enforce access controls based on conditions like user, device, location, and risk.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/conditional-access/howto-conditional-access-policy-all-users-mfa",
+    linkText: "Configure Conditional Access policies"
+  },
+  "mfa": {
+    text: "Enable multi-factor authentication for all users. Consider using phishing-resistant MFA methods like FIDO2 security keys or Windows Hello for Business.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/authentication/howto-mfa-getstarted",
+    linkText: "Enable MFA in your organization"
+  },
+  "phishing-resistant": {
+    text: "Deploy phishing-resistant authentication methods such as FIDO2 security keys, Windows Hello for Business, or certificate-based authentication.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/authentication/concept-authentication-strengths",
+    linkText: "Configure authentication strengths"
+  },
+  "privileged": {
+    text: "Implement Privileged Identity Management (PIM) for just-in-time access to privileged roles. Review and minimize permanent privileged role assignments.",
+    link: "https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-configure",
+    linkText: "Configure Privileged Identity Management"
+  },
+  "pim": {
+    text: "Enable Microsoft Entra Privileged Identity Management to provide just-in-time privileged access to Azure AD and Azure resources.",
+    link: "https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-configure",
+    linkText: "Configure Privileged Identity Management"
+  },
+  "laps": {
+    text: "Deploy Windows Local Administrator Password Solution (LAPS) to automatically manage and rotate local administrator passwords on Azure AD joined devices.",
+    link: "https://learn.microsoft.com/en-us/windows-server/identity/laps/laps-overview",
+    linkText: "Configure Windows Local Administrator Password Solution"
+  },
+  "password": {
+    text: "Implement strong password policies and consider moving to passwordless authentication methods.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/authentication/howto-authentication-passwordless-deployment",
+    linkText: "Deploy passwordless authentication"
+  },
+  "legacy authentication": {
+    text: "Block legacy authentication protocols that don't support modern security features like MFA.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/conditional-access/block-legacy-authentication",
+    linkText: "Block legacy authentication"
+  },
+  "guest": {
+    text: "Review and configure guest user access settings. Implement guest access reviews and limit guest permissions.",
+    link: "https://learn.microsoft.com/en-us/entra/external-id/what-is-b2b",
+    linkText: "Configure B2B guest access"
+  },
+  "access review": {
+    text: "Configure access reviews to regularly verify that users still need their access to groups, applications, and roles.",
+    link: "https://learn.microsoft.com/en-us/entra/id-governance/access-reviews-overview",
+    linkText: "Configure access reviews"
+  },
+  "entitlement": {
+    text: "Use entitlement management to automate access request workflows, access assignments, reviews, and expiration.",
+    link: "https://learn.microsoft.com/en-us/entra/id-governance/entitlement-management-overview",
+    linkText: "Configure entitlement management"
+  },
+  "token": {
+    text: "Configure token protection policies to bind tokens to specific devices and reduce token theft risks.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-token-protection",
+    linkText: "Configure token protection"
+  },
+  "bitlocker": {
+    text: "Enable BitLocker encryption on all Windows devices and configure recovery key backup to Azure AD.",
+    link: "https://learn.microsoft.com/en-us/mem/intune/protect/encrypt-devices",
+    linkText: "Configure BitLocker with Intune"
+  },
+  "risk": {
+    text: "Configure risk-based Conditional Access policies to respond to sign-in and user risk detections.",
+    link: "https://learn.microsoft.com/en-us/entra/id-protection/howto-identity-protection-configure-risk-policies",
+    linkText: "Configure risk-based policies"
+  },
+  "sspr": {
+    text: "Configure self-service password reset with appropriate authentication methods and security requirements.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/authentication/howto-sspr-deployment",
+    linkText: "Deploy self-service password reset"
+  },
+  "device code": {
+    text: "Restrict device code flow authentication to prevent phishing attacks that exploit this authentication method.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/conditional-access/how-to-policy-authentication-flows",
+    linkText: "Restrict authentication flows"
+  },
+  "consent": {
+    text: "Configure user consent settings to prevent users from granting permissions to malicious applications.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/configure-user-consent",
+    linkText: "Configure user consent settings"
+  },
+  "cross-tenant": {
+    text: "Configure cross-tenant access settings to control how users collaborate with other Azure AD organizations.",
+    link: "https://learn.microsoft.com/en-us/entra/external-id/cross-tenant-access-overview",
+    linkText: "Configure cross-tenant access"
+  },
+  "seamless sso": {
+    text: "Review Seamless SSO usage and disable if not actively used to reduce attack surface.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/hybrid/connect/how-to-connect-sso",
+    linkText: "Configure Seamless SSO"
+  },
+  "authentication transfer": {
+    text: "Block authentication transfer to prevent attackers from transferring authenticated sessions to other devices.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/conditional-access/how-to-policy-authentication-flows",
+    linkText: "Configure authentication transfer blocking"
+  },
+  "security key": {
+    text: "Enable FIDO2 security key authentication for phishing-resistant passwordless authentication.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/authentication/howto-authentication-passwordless-security-key",
+    linkText: "Enable FIDO2 security keys"
+  },
+  "cloud authentication": {
+    text: "Use cloud authentication (Password Hash Sync or Pass-through Authentication) instead of federation for better security and resilience.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/hybrid/connect/choose-ad-authn",
+    linkText: "Choose authentication method"
+  },
+  "administrator": {
+    text: "Secure administrator accounts with strong authentication, dedicated accounts, and privileged access workstations.",
+    link: "https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/security-planning",
+    linkText: "Secure privileged access"
+  },
+  "default": {
+    text: "Review the test results and follow Microsoft Entra best practices for identity security.",
+    link: "https://learn.microsoft.com/en-us/entra/fundamentals/",
+    linkText: "View Entra documentation"
+  }
+};
+
+// Get remediation for a test based on title
+export function getRemediation(title: string): { text: string; link: string; linkText: string } {
+  const lowerTitle = title.toLowerCase();
+  for (const [keyword, remediation] of Object.entries(remediationMap)) {
+    if (keyword !== "default" && lowerTitle.includes(keyword)) {
+      return remediation;
+    }
+  }
+  return remediationMap.default;
 }
 
 export const identityTests: SecurityTest[] = [

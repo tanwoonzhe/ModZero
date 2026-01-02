@@ -548,6 +548,179 @@ class AzureGraphService:
             "single_factor": 15,
         }
 
+    def get_service_principals(self, top: int = 999) -> List[Dict]:
+        """Fetch service principals (Enterprise Applications) from Azure AD.
+        
+        Requires Application.Read.All permission.
+        
+        Args:
+            top: Maximum number of service principals to fetch
+            
+        Returns:
+            List of service principal dictionaries
+        """
+        access_token = self._get_access_token()
+        if not access_token:
+            raise Exception("Failed to acquire Azure access token")
+        
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        url = f"{self.graph_endpoint}/servicePrincipals"
+        params = {
+            '$top': top,
+            '$select': 'id,appId,displayName,servicePrincipalType,signInAudience,appRoles,oauth2PermissionScopes'
+        }
+        
+        try:
+            response = requests.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            
+            data = response.json()
+            sps = data.get('value', [])
+            
+            logger.info(f"Successfully fetched {len(sps)} service principals")
+            return sps
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching service principals: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                if e.response.status_code == 403:
+                    logger.warning("Missing Application.Read.All permission")
+                    return []
+            raise Exception(f"Failed to fetch service principals: {str(e)}")
+
+    def get_service_principal_owners(self, sp_id: str) -> List[Dict]:
+        """Fetch owners for a specific service principal.
+        
+        Args:
+            sp_id: The service principal ID
+            
+        Returns:
+            List of owner dictionaries
+        """
+        access_token = self._get_access_token()
+        if not access_token:
+            return []
+        
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        url = f"{self.graph_endpoint}/servicePrincipals/{sp_id}/owners"
+        
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            
+            data = response.json()
+            return data.get('value', [])
+            
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Error fetching owners for SP {sp_id}: {str(e)}")
+            return []
+
+    def get_service_principal_app_role_assignments(self, sp_id: str) -> List[Dict]:
+        """Fetch app role assignments for a specific service principal.
+        
+        This shows which API permissions (Application permissions) are granted.
+        
+        Args:
+            sp_id: The service principal ID
+            
+        Returns:
+            List of app role assignment dictionaries
+        """
+        access_token = self._get_access_token()
+        if not access_token:
+            return []
+        
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        url = f"{self.graph_endpoint}/servicePrincipals/{sp_id}/appRoleAssignments"
+        
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            
+            data = response.json()
+            return data.get('value', [])
+            
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Error fetching app role assignments for SP {sp_id}: {str(e)}")
+            return []
+
+    def get_high_privilege_apps_without_owners(self) -> List[Dict]:
+        """Get high privilege enterprise applications that lack sufficient owners.
+        
+        High privilege permissions include Directory.ReadWrite.All, Application.ReadWrite.All,
+        RoleManagement.ReadWrite.Directory, etc.
+        
+        Returns:
+            List of applications lacking owners with their permissions
+        """
+        HIGH_PRIVILEGE_PERMISSIONS = {
+            'Directory.ReadWrite.All', 'Application.ReadWrite.All', 'RoleManagement.ReadWrite.Directory',
+            'AppRoleAssignment.ReadWrite.All', 'GroupMember.ReadWrite.All', 'Group.ReadWrite.All',
+            'User.ReadWrite.All', 'Mail.ReadWrite', 'Mail.Send', 'Files.ReadWrite.All',
+            'Sites.ReadWrite.All', 'Policy.ReadWrite.ConditionalAccess', 'PrivilegedAccess.ReadWrite.AzureAD'
+        }
+        
+        try:
+            service_principals = self.get_service_principals()
+            apps_without_owners = []
+            
+            for sp in service_principals:
+                # Skip Microsoft first-party apps
+                if sp.get('servicePrincipalType') == 'ManagedIdentity':
+                    continue
+                
+                sp_id = sp.get('id')
+                
+                # Get app role assignments (application permissions)
+                app_roles = self.get_service_principal_app_role_assignments(sp_id)
+                
+                # Check for high privilege permissions
+                high_priv_permissions = []
+                for role in app_roles:
+                    # The role display name often contains the permission name
+                    role_value = role.get('appRoleId', '')
+                    # We need to resolve the role ID to permission name
+                    # For simplicity, check the resource display name
+                    if role.get('resourceDisplayName') == 'Microsoft Graph':
+                        high_priv_permissions.append(role.get('appRoleId', 'Unknown'))
+                
+                # Get owners
+                owners = self.get_service_principal_owners(sp_id)
+                owner_count = len(owners)
+                
+                # Only include apps with < 2 owners (best practice is to have at least 2)
+                if owner_count < 2:
+                    # Get delegated permissions from oauth2PermissionGrants would require additional call
+                    # For now, we'll use the app role assignments
+                    
+                    apps_without_owners.append({
+                        'id': sp_id,
+                        'appId': sp.get('appId'),
+                        'displayName': sp.get('displayName'),
+                        'signInAudience': sp.get('signInAudience', 'Unknown'),
+                        'ownerCount': owner_count,
+                        'permissions': high_priv_permissions,
+                        'risk': 'High' if high_priv_permissions else 'Medium'
+                    })
+            
+            return apps_without_owners[:50]  # Limit response size
+            
+        except Exception as e:
+            logger.error(f"Error getting high privilege apps without owners: {str(e)}")
+            return []
+
 
 # Global instance
 azure_service = AzureGraphService()

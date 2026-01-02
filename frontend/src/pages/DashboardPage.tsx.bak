@@ -4,7 +4,6 @@ import { OverviewAssessmentData } from "../types";
 import { ResponsiveSankey } from "@nivo/sankey";
 import { ResponsivePie } from "@nivo/pie";
 import { ResponsiveRadialBar } from "@nivo/radial-bar";
-import { ResponsiveBar } from "@nivo/bar";
 import {
   FaBuilding,
   FaUsers,
@@ -27,19 +26,12 @@ import toast from "react-hot-toast";
 
 // Colors matching Zero Trust Assessment
 const chartColors = {
-  // Primary colors
-  primary: "#3b82f6",     // blue
-  success: "#22c55e",     // green
-  danger: "#ef4444",      // red
-  warning: "#f59e0b",     // amber
-  info: "#06b6d4",        // cyan
-  // Named colors
   identity: "#3b82f6",    // blue
   devices: "#8b5cf6",     // purple  
   data: "#06b6d4",        // cyan
   passed: "#22c55e",      // green
   failed: "#ef4444",      // red
-  // Additional colors
+  warning: "#f59e0b",     // amber
   blue: "#3b82f6",
   indigo: "#6366f1",
   purple: "#8b5cf6",
@@ -47,8 +39,6 @@ const chartColors = {
   orange: "#f97316",
   emerald: "#10b981",
   rose: "#f43f5e",
-  teal: "#14b8a6",
-  cyan: "#06b6d4",
 };
 
 const DashboardPage: React.FC = () => {
@@ -194,78 +184,45 @@ const DashboardPage: React.FC = () => {
           <MetricCard icon={<FaShieldAlt />} label="Managed" value={metrics.managed_devices} color="green" />
         </div>
 
-        {/* Assessment Score Card with Radial Chart */}
+        {/* Assessment Score Card */}
         <div className="lg:col-span-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <FaShieldAlt className="text-green-500" />
+              <FaCheckCircle className="text-green-500" />
               <h2 className="font-semibold text-gray-900 dark:text-white">Assessment</h2>
             </div>
             <button
               onClick={handleRefresh}
               disabled={refreshing}
-              className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors"
-              title="Refresh data"
+              className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
             >
               <FaSync className={refreshing ? "animate-spin" : ""} size={14} />
             </button>
           </div>
-          <div className="flex gap-4">
-            {/* Left side - Test counts */}
-            <div className="flex flex-col gap-2">
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Identity</p>
-                <p className="text-xl font-bold text-gray-900 dark:text-white tabular-nums">
-                  {assessment_scores.identity.tests_passed}/{assessment_scores.identity.total_tests}
-                  <span className="text-xs text-gray-400 ml-1 font-normal">tests</span>
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Devices</p>
-                <p className="text-xl font-bold text-gray-900 dark:text-white tabular-nums">
-                  {assessment_scores.devices.tests_passed}/{assessment_scores.devices.total_tests}
-                  <span className="text-xs text-gray-400 ml-1 font-normal">tests</span>
-                </p>
-              </div>
+          <div className="flex items-center gap-4">
+            <div className="flex-1">
+              <p className="text-xs text-gray-500">Identity</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-white">
+                {assessment_scores.identity.tests_passed}/{assessment_scores.identity.total_tests}
+                <span className="text-xs text-gray-400 ml-1">tests</span>
+              </p>
+              <p className="text-xs text-gray-500 mt-2">Devices</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-white">
+                {assessment_scores.devices.tests_passed}/{assessment_scores.devices.total_tests}
+                <span className="text-xs text-gray-400 ml-1">tests</span>
+              </p>
             </div>
-            {/* Right side - Radial chart */}
-            <div className="flex-1 h-28">
-              <ResponsiveRadialBar
-                data={[
-                  {
-                    id: "Devices",
-                    data: [{ x: "Devices", y: assessment_scores.devices.total_tests > 0 
-                      ? Math.round((assessment_scores.devices.tests_passed / assessment_scores.devices.total_tests) * 100) 
-                      : 0 }]
-                  },
-                  {
-                    id: "Identity",
-                    data: [{ x: "Identity", y: assessment_scores.identity.total_tests > 0 
-                      ? Math.round((assessment_scores.identity.tests_passed / assessment_scores.identity.total_tests) * 100) 
-                      : 0 }]
-                  },
-                ]}
-                valueFormat=">-.0f"
-                maxValue={100}
-                startAngle={-90}
-                endAngle={270}
-                innerRadius={0.4}
-                padding={0.3}
-                cornerRadius={2}
-                colors={[chartColors.purple, chartColors.identity]}
-                tracksColor="rgba(0,0,0,0.1)"
-                enableRadialGrid={false}
-                enableCircularGrid={false}
-                radialAxisStart={null}
-                circularAxisOuter={null}
+            <div className="w-20 h-20">
+              <ResponsivePie
+                data={assessmentPieData}
+                innerRadius={0.7}
+                enableArcLabels={false}
+                enableArcLinkLabels={false}
+                colors={[chartColors.success, "#e5e7eb"]}
                 isInteractive={false}
-                motionConfig="gentle"
               />
             </div>
           </div>
-          <p className="text-xs text-gray-400 mt-2">
-            Last synced: {new Date(data.last_synced).toLocaleTimeString()}
-          </p>
         </div>
       </div>
 
