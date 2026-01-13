@@ -166,6 +166,51 @@ class AzureGraphService:
                 "api_accessible": False
             }
     
+    def get_entra_devices(self, top: int = 100) -> List[Dict]:
+        """Fetch all devices from Azure AD/Entra ID via Microsoft Graph API.
+        
+        This returns all registered devices (Entra joined, Entra registered, Hybrid joined).
+        Requires Device.Read.All permission.
+        
+        Args:
+            top: Maximum number of devices to fetch
+            
+        Returns:
+            List of device dictionaries with Entra ID device data
+        """
+        access_token = self._get_access_token()
+        if not access_token:
+            raise Exception("Failed to acquire Azure access token")
+        
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        url = f"{self.graph_endpoint}/devices"
+        params = {
+            '$top': top,
+            '$select': 'id,displayName,operatingSystem,operatingSystemVersion,trustType,isManaged,isCompliant,deviceId,registrationDateTime,approximateLastSignInDateTime,manufacturer,model,mdmAppId'
+        }
+        
+        try:
+            response = requests.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            
+            data = response.json()
+            devices = data.get('value', [])
+            
+            logger.info(f"Successfully fetched {len(devices)} devices from Entra ID")
+            return devices
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching Entra devices: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                if e.response.status_code == 403:
+                    logger.warning("Missing Device.Read.All permission")
+                    return []
+            raise Exception(f"Failed to fetch Entra devices: {str(e)}")
+    
     def get_managed_devices(self, top: int = 100) -> List[Dict]:
         """Fetch managed devices from Intune via Microsoft Graph API.
         
@@ -393,7 +438,29 @@ class AzureGraphService:
             return 0
     
     def get_device_count(self) -> int:
-        """Get total managed device count from Intune."""
+        """Get total device count from Azure AD/Entra ID (includes all registered devices)."""
+        access_token = self._get_access_token()
+        if not access_token:
+            return 0
+        
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json',
+            'ConsistencyLevel': 'eventual'
+        }
+        
+        # Use /devices endpoint to get all Entra ID devices (not just Intune managed)
+        url = f"{self.graph_endpoint}/devices/$count"
+        
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            return int(response.text)
+        except:
+            return 0
+    
+    def get_managed_device_count(self) -> int:
+        """Get total Intune managed device count."""
         access_token = self._get_access_token()
         if not access_token:
             return 0

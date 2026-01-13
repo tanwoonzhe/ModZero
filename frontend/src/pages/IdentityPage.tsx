@@ -172,6 +172,7 @@ const mapLiveStatus = (status: string): string => {
 const IdentityPage: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSfiPillars, setSelectedSfiPillars] = useState<string[]>([]);
   const [selectedRisks, setSelectedRisks] = useState<string[]>([]);
@@ -189,7 +190,9 @@ const IdentityPage: React.FC = () => {
   const [selectedLiveTest, setSelectedLiveTest] = useState<LiveTestResult | null>(null);
 
   // Fetch real assessment data from API
-  const fetchAssessment = async () => {
+  const fetchAssessment = async (showLoadingState = true) => {
+    if (showLoadingState) setLoading(true);
+    setLoadError(null);
     try {
       const res = await api.get<IdentityAssessmentData>("/assessment/identity");
       console.log("API Response:", res.data);
@@ -199,8 +202,16 @@ const IdentityPage: React.FC = () => {
       }
       setApiData(res.data);
       setLastSynced(res.data.last_synced);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to fetch identity assessment:", error);
+      const errorMessage = error.response?.status === 401 
+        ? "Authentication required. Please log in again."
+        : error.response?.status === 503
+        ? "Azure credentials not configured. Showing local test definitions."
+        : error.message || "Failed to load assessment data. Showing local test definitions.";
+      setLoadError(errorMessage);
+      // Don't block UI - show tests with default status
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -338,15 +349,20 @@ const IdentityPage: React.FC = () => {
 
   const handleRefresh = async () => {
     setRefreshing(true);
+    setLoadError(null);
     try {
       const api = await import("../api").then(m => m.default);
       await api.post("/assessment/refresh", null, {
         params: { data_type: "identity_assessment" },
       });
-      await fetchAssessment();
+      await fetchAssessment(false);
       toast.success("Identity assessment refreshed");
-    } catch (error) {
-      toast.error("Failed to refresh assessment");
+    } catch (error: any) {
+      const errorMessage = error.response?.status === 503
+        ? "Azure credentials not configured"
+        : "Failed to refresh assessment";
+      toast.error(errorMessage);
+      setLoadError(errorMessage);
     } finally {
       setRefreshing(false);
     }
@@ -415,12 +431,33 @@ const IdentityPage: React.FC = () => {
       {/* Loading State */}
       {loading && (
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+            <p className="text-gray-500 dark:text-gray-400">Loading identity assessment...</p>
+            <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">This may take a moment if fetching from Azure</p>
+          </div>
         </div>
       )}
 
       {!loading && (
         <>
+      {/* Error Banner */}
+      {loadError && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 flex items-start gap-3">
+          <FaExclamationTriangle className="text-amber-500 mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-amber-800 dark:text-amber-200 font-medium">Limited Data Available</p>
+            <p className="text-amber-700 dark:text-amber-300 text-sm mt-1">{loadError}</p>
+          </div>
+          <button
+            onClick={() => setLoadError(null)}
+            className="text-amber-500 hover:text-amber-700 p-1"
+          >
+            <FaTimes size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Page Header */}
       <div className="flex justify-between items-center">
         <div>

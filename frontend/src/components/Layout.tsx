@@ -9,12 +9,12 @@ interface LayoutProps {
 
 const navItems = [
   { path: "/", label: "Overview", icon: <FaTachometerAlt /> },
-  { path: "/identity", label: "Identity", icon: <FaUserShield /> },
-  { path: "/devices-testing", label: "Devices Testing", icon: <FaLaptopMedical /> },
+  { path: "/identity-testing", label: "Identity Testing", icon: <FaUserShield /> },
+  { path: "/devices-testing-new", label: "Devices Testing", icon: <FaLaptopMedical /> },
   { path: "/devices", label: "Devices", icon: <FaDesktop /> },
   { path: "/logs", label: "Access Logs", icon: <FaHistory /> },
   { path: "/users", label: "Employees", icon: <FaUsers /> },
-  { path: "/policies", label: "Policies", icon: <FaGavel /> },
+  { path: "/zero-trust-policies", label: "ZT Policies", icon: <FaGavel /> },
   { path: "/resources", label: "Resources", icon: <FaNetworkWired /> },
   { path: "/templates", label: "Templates", icon: <FaFileAlt /> },
   { path: "/settings", label: "Settings", icon: <FaCog /> },

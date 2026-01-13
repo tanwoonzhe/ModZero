@@ -15,6 +15,7 @@ import {
   FaExternalLinkAlt,
   FaEdit,
   FaTrash,
+  FaTimes,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 import api from "../api";
@@ -56,67 +57,78 @@ const resourceIcons: Record<string, React.ComponentType<{ size?: number; classNa
 const ResourcesPage: React.FC = () => {
   const [networks, setNetworks] = useState<Network[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedNetworks, setExpandedNetworks] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
+  const [showAddNetworkModal, setShowAddNetworkModal] = useState(false);
+  const [showAddResourceModal, setShowAddResourceModal] = useState(false);
+  const [selectedNetworkForResource, setSelectedNetworkForResource] = useState<string | null>(null);
+
+  // Mock data for demo
+  const getMockNetworks = (): Network[] => [
+    {
+      network_id: "1",
+      name: "Corporate HQ Network",
+      cidr_range: "10.0.0.0/16",
+      connector_health: "green",
+      location: "New York, US",
+      last_check: new Date().toISOString(),
+      resources: [
+        { resource_id: "r1", name: "DC-Primary", type: "server", connector_status: "online", ip_address: "10.0.1.10", port: 443 },
+        { resource_id: "r2", name: "SQL-Prod", type: "database", connector_status: "online", ip_address: "10.0.2.20", port: 1433 },
+        { resource_id: "r3", name: "File-Server", type: "server", connector_status: "online", ip_address: "10.0.1.30", port: 445 },
+      ],
+    },
+    {
+      network_id: "2",
+      name: "Azure Cloud VNet",
+      cidr_range: "172.16.0.0/12",
+      connector_health: "green",
+      location: "East US 2",
+      last_check: new Date().toISOString(),
+      resources: [
+        { resource_id: "r4", name: "Azure-VM-Web", type: "cloud", connector_status: "online", ip_address: "172.16.1.50", port: 443 },
+        { resource_id: "r5", name: "Azure-SQL-DB", type: "database", connector_status: "online", ip_address: "172.16.2.10", port: 1433 },
+      ],
+    },
+    {
+      network_id: "3",
+      name: "Remote Office - London",
+      cidr_range: "192.168.10.0/24",
+      connector_health: "amber",
+      location: "London, UK",
+      last_check: new Date(Date.now() - 300000).toISOString(),
+      resources: [
+        { resource_id: "r6", name: "LON-DC-01", type: "server", connector_status: "degraded", ip_address: "192.168.10.10" },
+        { resource_id: "r7", name: "LON-Workstation", type: "desktop", connector_status: "offline" },
+      ],
+    },
+    {
+      network_id: "4",
+      name: "Legacy DMZ",
+      cidr_range: "10.100.0.0/24",
+      connector_health: "red",
+      location: "On-Premises",
+      last_check: new Date(Date.now() - 3600000).toISOString(),
+      resources: [
+        { resource_id: "r8", name: "Legacy-WebApp", type: "server", connector_status: "offline", ip_address: "10.100.0.50" },
+      ],
+    },
+  ];
 
   const fetchNetworks = async () => {
+    setLoadError(null);
     try {
       const res = await api.get<Network[]>("/resources");
       setNetworks(res.data);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      // Mock data for demo
-      setNetworks([
-        {
-          network_id: "1",
-          name: "Corporate HQ Network",
-          cidr_range: "10.0.0.0/16",
-          connector_health: "green",
-          location: "New York, US",
-          last_check: new Date().toISOString(),
-          resources: [
-            { resource_id: "r1", name: "DC-Primary", type: "server", connector_status: "online", ip_address: "10.0.1.10", port: 443 },
-            { resource_id: "r2", name: "SQL-Prod", type: "database", connector_status: "online", ip_address: "10.0.2.20", port: 1433 },
-            { resource_id: "r3", name: "File-Server", type: "server", connector_status: "online", ip_address: "10.0.1.30", port: 445 },
-          ],
-        },
-        {
-          network_id: "2",
-          name: "Azure Cloud VNet",
-          cidr_range: "172.16.0.0/12",
-          connector_health: "green",
-          location: "East US 2",
-          last_check: new Date().toISOString(),
-          resources: [
-            { resource_id: "r4", name: "Azure-VM-Web", type: "cloud", connector_status: "online", ip_address: "172.16.1.50", port: 443 },
-            { resource_id: "r5", name: "Azure-SQL-DB", type: "database", connector_status: "online", ip_address: "172.16.2.10", port: 1433 },
-          ],
-        },
-        {
-          network_id: "3",
-          name: "Remote Office - London",
-          cidr_range: "192.168.10.0/24",
-          connector_health: "amber",
-          location: "London, UK",
-          last_check: new Date(Date.now() - 300000).toISOString(),
-          resources: [
-            { resource_id: "r6", name: "LON-DC-01", type: "server", connector_status: "degraded", ip_address: "192.168.10.10" },
-            { resource_id: "r7", name: "LON-Workstation", type: "desktop", connector_status: "offline" },
-          ],
-        },
-        {
-          network_id: "4",
-          name: "Legacy DMZ",
-          cidr_range: "10.100.0.0/24",
-          connector_health: "red",
-          location: "On-Premises",
-          last_check: new Date(Date.now() - 3600000).toISOString(),
-          resources: [
-            { resource_id: "r8", name: "Legacy-WebApp", type: "server", connector_status: "offline", ip_address: "10.100.0.50" },
-          ],
-        },
-      ]);
+      // Use mock data for demo
+      setNetworks(getMockNetworks());
+      if (err.response?.status !== 404) {
+        setLoadError("Using demo data - API not connected");
+      }
     } finally {
       setLoading(false);
     }
@@ -189,6 +201,7 @@ const ResourcesPage: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Resources</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Manage networks and protected resources
+            {loadError && <span className="ml-2 text-amber-600">• {loadError}</span>}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -200,7 +213,10 @@ const ResourcesPage: React.FC = () => {
             <FaSyncAlt size={14} className={refreshing ? "animate-spin" : ""} />
             <span>Refresh</span>
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm">
+          <button 
+            onClick={() => setShowAddNetworkModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+          >
             <FaPlus size={14} />
             <span>Add Network</span>
           </button>
@@ -390,7 +406,13 @@ const ResourcesPage: React.FC = () => {
                   <div className="border-t border-gray-100 dark:border-gray-700 p-8 text-center">
                     <FaServer className="mx-auto text-gray-300 dark:text-gray-600 mb-3" size={32} />
                     <p className="text-sm text-gray-500 dark:text-gray-400">No resources in this network</p>
-                    <button className="mt-3 text-sm text-indigo-600 hover:text-indigo-700 font-medium">
+                    <button 
+                      onClick={() => {
+                        setSelectedNetworkForResource(network.network_id);
+                        setShowAddResourceModal(true);
+                      }}
+                      className="mt-3 text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                    >
                       + Add Resource
                     </button>
                   </div>
@@ -407,11 +429,226 @@ const ResourcesPage: React.FC = () => {
           <FaNetworkWired className="mx-auto text-gray-300 dark:text-gray-600 mb-4" size={48} />
           <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No networks found</h3>
           <p className="text-gray-500 dark:text-gray-400 mb-4">Add your first network to start protecting resources</p>
-          <button className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+          <button 
+            onClick={() => setShowAddNetworkModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+          >
             <FaPlus size={14} /> Add Network
           </button>
         </div>
       )}
+
+      {/* Add Network Modal */}
+      {showAddNetworkModal && (
+        <AddNetworkModal 
+          onClose={() => setShowAddNetworkModal(false)}
+          onAdd={(network) => {
+            setNetworks(prev => [...prev, { ...network, network_id: `${Date.now()}`, resources: [] }]);
+            setShowAddNetworkModal(false);
+            toast.success("Network added successfully");
+          }}
+        />
+      )}
+
+      {/* Add Resource Modal */}
+      {showAddResourceModal && selectedNetworkForResource && (
+        <AddResourceModal
+          onClose={() => {
+            setShowAddResourceModal(false);
+            setSelectedNetworkForResource(null);
+          }}
+          onAdd={(resource) => {
+            setNetworks(prev => prev.map(n => 
+              n.network_id === selectedNetworkForResource 
+                ? { ...n, resources: [...n.resources, { ...resource, resource_id: `r${Date.now()}` }] }
+                : n
+            ));
+            setShowAddResourceModal(false);
+            setSelectedNetworkForResource(null);
+            toast.success("Resource added successfully");
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+// Add Network Modal Component
+const AddNetworkModal: React.FC<{
+  onClose: () => void;
+  onAdd: (network: Omit<Network, 'network_id' | 'resources'>) => void;
+}> = ({ onClose, onAdd }) => {
+  const [name, setName] = useState("");
+  const [cidrRange, setCidrRange] = useState("");
+  const [location, setLocation] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onAdd({
+      name,
+      cidr_range: cidrRange,
+      connector_health: "green",
+      location,
+      last_check: new Date().toISOString(),
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full">
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Add Network</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+            <FaTimes size={20} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Network Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+              placeholder="e.g., Corporate Network"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">CIDR Range</label>
+            <input
+              type="text"
+              value={cidrRange}
+              onChange={(e) => setCidrRange(e.target.value)}
+              required
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+              placeholder="e.g., 10.0.0.0/16"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Location</label>
+            <input
+              type="text"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+              placeholder="e.g., East US"
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            >
+              Add Network
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Add Resource Modal Component
+const AddResourceModal: React.FC<{
+  onClose: () => void;
+  onAdd: (resource: Omit<Resource, 'resource_id'>) => void;
+}> = ({ onClose, onAdd }) => {
+  const [name, setName] = useState("");
+  const [type, setType] = useState("server");
+  const [ipAddress, setIpAddress] = useState("");
+  const [port, setPort] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onAdd({
+      name,
+      type,
+      connector_status: "online",
+      ip_address: ipAddress || undefined,
+      port: port ? parseInt(port) : undefined,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full">
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Add Resource</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+            <FaTimes size={20} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Resource Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+              placeholder="e.g., Web Server 01"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="server">Server</option>
+              <option value="database">Database</option>
+              <option value="cloud">Cloud Service</option>
+              <option value="desktop">Desktop/Workstation</option>
+              <option value="default">Other</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">IP Address</label>
+            <input
+              type="text"
+              value={ipAddress}
+              onChange={(e) => setIpAddress(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+              placeholder="e.g., 10.0.1.50"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Port</label>
+            <input
+              type="number"
+              value={port}
+              onChange={(e) => setPort(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+              placeholder="e.g., 443"
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            >
+              Add Resource
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 };

@@ -15,6 +15,8 @@ import SettingsPage from "./pages/SettingsPage";
 import IdentityPage from "./pages/IdentityPage";
 import UserProfilePage from "./pages/UserProfilePage";
 import NotFoundPage from "./pages/NotFoundPage";
+import ZeroTrustPoliciesPage from "./pages/ZeroTrustPoliciesPage";
+import { IdentityTestingPage, DevicesTestingPageNew } from "./pages/ZeroTrustTestingPage";
 
 function App() {
   const location = useLocation();
@@ -55,11 +57,14 @@ function App() {
           <Routes>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/identity" element={<IdentityPage />} />
+            <Route path="/identity-testing" element={<IdentityTestingPage />} />
             <Route path="/devices-testing" element={<DevicesTestingPage />} />
+            <Route path="/devices-testing-new" element={<DevicesTestingPageNew />} />
             <Route path="/devices" element={<DevicesPage />} />
             <Route path="/logs" element={<LogsPage />} />
             <Route path="/users" element={<UsersPage />} />
             <Route path="/policies" element={<PoliciesPage />} />
+            <Route path="/zero-trust-policies" element={<ZeroTrustPoliciesPage />} />
             <Route path="/resources" element={<ResourcesPage />} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/settings" element={<SettingsPage />} />

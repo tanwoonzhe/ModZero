@@ -1,0 +1,539 @@
+/**
+ * Zero Trust Policies Page
+ * 
+ * Central authority for weight configuration:
+ * - Pillar weight sliders (sum normalizes to 100)
+ * - Control weight table with edit capability
+ * - License management
+ * - Audit log for weight changes
+ * 
+ * RBAC: Only Admin role can edit; others view read-only.
+ */
+
+import React, { useState, useMemo } from 'react';
+import {
+  FaShieldAlt,
+  FaCog,
+  FaHistory,
+  FaLock,
+  FaCheck,
+  FaUndo,
+  FaSave,
+  FaSearch,
+  FaExclamationTriangle,
+  FaChevronDown,
+  FaChevronRight,
+  FaExternalLinkAlt,
+} from 'react-icons/fa';
+import toast from 'react-hot-toast';
+import {
+  Pillar,
+  Control,
+  LicenseKey,
+  PILLAR_COLORS,
+  LICENSE_INFO,
+  DEFAULT_PILLAR_WEIGHTS,
+} from '../types/zeroTrust';
+import {
+  useZeroTrustStore,
+  selectIsAdmin,
+  selectWeightConfig,
+  selectControls,
+  selectTenantLicenses,
+  selectAuditEvents,
+} from '../store/zeroTrustStore';
+import {
+  ScoreCard,
+  AuditLogPanel,
+  StatusBadge,
+  LicenseChips,
+} from '../components/ZeroTrustComponents';
+import { getEffectiveWeight, isLicensed, normalizePillarWeights } from '../lib/scoring';
+
+const ZeroTrustPoliciesPage: React.FC = () => {
+  const isAdmin = useZeroTrustStore(selectIsAdmin);
+  const weightConfig = useZeroTrustStore(selectWeightConfig);
+  const controls = useZeroTrustStore(selectControls);
+  const tenantLicenses = useZeroTrustStore(selectTenantLicenses);
+  const auditEvents = useZeroTrustStore(selectAuditEvents);
+  const getScores = useZeroTrustStore(state => state.getScores);
+  
+  const {
+    updatePillarWeight,
+    updateControlWeight,
+    resetControlWeight,
+    resetAllWeights,
+    toggleLicense,
+  } = useZeroTrustStore();
+  
+  const [activeTab, setActiveTab] = useState<'weights' | 'licenses' | 'audit'>('weights');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedPillars, setExpandedPillars] = useState<Set<Pillar>>(new Set([Pillar.Identity]));
+  
+  const scores = getScores();
+  
+  // Normalized pillar weights for display
+  const normalizedWeights = useMemo(
+    () => normalizePillarWeights(weightConfig.pillarWeights),
+    [weightConfig.pillarWeights]
+  );
+  
+  // Filter controls by search
+  const filteredControls = useMemo(() => {
+    if (!searchTerm) return controls;
+    const term = searchTerm.toLowerCase();
+    return controls.filter(c =>
+      c.title.toLowerCase().includes(term) ||
+      c.id.toLowerCase().includes(term) ||
+      c.category?.toLowerCase().includes(term)
+    );
+  }, [controls, searchTerm]);
+  
+  // Group controls by pillar
+  const controlsByPillar = useMemo(() => {
+    return filteredControls.reduce((acc, control) => {
+      if (!acc[control.pillar]) {
+        acc[control.pillar] = [];
+      }
+      acc[control.pillar].push(control);
+      return acc;
+    }, {} as Record<Pillar, Control[]>);
+  }, [filteredControls]);
+  
+  // Weight audit events
+  const weightAuditEvents = useMemo(
+    () => auditEvents.filter(e => e.type === 'WEIGHT_CHANGED'),
+    [auditEvents]
+  );
+  
+  const togglePillar = (pillar: Pillar) => {
+    setExpandedPillars(prev => {
+      const next = new Set(prev);
+      if (next.has(pillar)) {
+        next.delete(pillar);
+      } else {
+        next.add(pillar);
+      }
+      return next;
+    });
+  };
+  
+  const handleResetAll = () => {
+    if (window.confirm('Reset all weights to defaults? This action will be logged.')) {
+      resetAllWeights();
+      toast.success('All weights reset to defaults');
+    }
+  };
+  
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
+            <FaShieldAlt className="text-indigo-600" />
+            Zero Trust Policies
+          </h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Configure scoring weights and manage licenses • {isAdmin ? 'Admin Mode' : 'View Only'}
+          </p>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          {isAdmin && (
+            <button
+              onClick={handleResetAll}
+              className="flex items-center gap-2 px-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              <FaUndo size={14} />
+              Reset All
+            </button>
+          )}
+        </div>
+      </div>
+      
+      {/* Score Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <ScoreCard
+          title="Achievable Score"
+          score={scores.achievable.score}
+          max={scores.achievable.max}
+          percent={scores.achievable.percent}
+          subtitle="Based on current licenses"
+          variant="primary"
+        />
+        <ScoreCard
+          title="Full Coverage Score"
+          score={scores.fullCoverage.score}
+          max={scores.fullCoverage.max}
+          percent={scores.fullCoverage.percent}
+          subtitle="All controls included"
+          variant="secondary"
+        />
+        <ScoreCard
+          title="Upgrade Opportunity"
+          score={scores.upgradeOpportunityPoints}
+          max={scores.fullCoverage.max - scores.achievable.max}
+          percent={scores.fullCoverage.max > scores.achievable.max 
+            ? Math.round((scores.upgradeOpportunityPoints / (scores.fullCoverage.max - scores.achievable.max)) * 100)
+            : 0
+          }
+          subtitle={`${scores.unavailableTestCount} tests need licenses`}
+          variant="warning"
+        />
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700">
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Last Modified</p>
+          <p className="text-lg font-semibold text-gray-900 dark:text-white">
+            {new Date(weightConfig.updatedAt).toLocaleDateString()}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">by {weightConfig.updatedBy}</p>
+        </div>
+      </div>
+      
+      {/* Tab Navigation */}
+      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg w-fit">
+        <button
+          onClick={() => setActiveTab('weights')}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === 'weights'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          <FaCog className="inline mr-2" size={14} />
+          Weights
+        </button>
+        <button
+          onClick={() => setActiveTab('licenses')}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === 'licenses'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          <FaLock className="inline mr-2" size={14} />
+          Licenses
+        </button>
+        <button
+          onClick={() => setActiveTab('audit')}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === 'audit'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          <FaHistory className="inline mr-2" size={14} />
+          Audit Log ({weightAuditEvents.length})
+        </button>
+      </div>
+      
+      {/* Weights Tab */}
+      {activeTab === 'weights' && (
+        <div className="space-y-6">
+          {/* Pillar Weights Card */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+            <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Pillar Weights</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Distribute importance across Zero Trust pillars. Weights will be normalized to sum to 100%.
+              </p>
+            </div>
+            <div className="p-6">
+              <div className="space-y-6">
+                {Object.values(Pillar).map(pillar => {
+                  const colors = PILLAR_COLORS[pillar];
+                  const rawWeight = weightConfig.pillarWeights[pillar];
+                  const normalizedWeight = normalizedWeights[pillar];
+                  const pillarScore = scores.achievable.byPillar[pillar];
+                  
+                  return (
+                    <div key={pillar} className="flex items-center gap-6">
+                      <div className="w-36 flex-shrink-0">
+                        <span className={`px-3 py-1 text-sm rounded-full ${colors.bg} ${colors.text}`}>
+                          {pillar}
+                        </span>
+                      </div>
+                      <div className="flex-1">
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          value={rawWeight}
+                          onChange={(e) => updatePillarWeight(pillar, parseInt(e.target.value))}
+                          disabled={!isAdmin}
+                          className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
+                      </div>
+                      <div className="w-20 text-right">
+                        <span className="text-lg font-semibold text-gray-900 dark:text-white">
+                          {rawWeight}%
+                        </span>
+                        {rawWeight !== Math.round(normalizedWeight) && (
+                          <p className="text-xs text-gray-400">
+                            → {Math.round(normalizedWeight)}%
+                          </p>
+                        )}
+                      </div>
+                      <div className="w-24 text-right text-sm text-gray-500 dark:text-gray-400">
+                        {pillarScore.percent}% complete
+                        <br />
+                        <span className="text-xs">
+                          {pillarScore.passedCount}/{pillarScore.controlCount}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              
+              <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                <span className="text-sm text-gray-500 dark:text-gray-400">
+                  Raw sum: {Object.values(weightConfig.pillarWeights).reduce((a, b) => a + b, 0)}%
+                </span>
+                <button
+                  onClick={() => {
+                    Object.values(Pillar).forEach(p => {
+                      updatePillarWeight(p, DEFAULT_PILLAR_WEIGHTS[p]);
+                    });
+                    toast.success('Pillar weights reset to defaults');
+                  }}
+                  disabled={!isAdmin}
+                  className="text-sm text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
+                >
+                  Reset to defaults
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          {/* Control Weights Card */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+            <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Control Weights</h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Customize importance of individual security controls
+                  </p>
+                </div>
+                <div className="relative">
+                  <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                  <input
+                    type="text"
+                    placeholder="Search controls..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10 pr-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+            
+            <div className="divide-y divide-gray-200 dark:divide-gray-700">
+              {Object.values(Pillar).map(pillar => {
+                const pillarControls = controlsByPillar[pillar] || [];
+                if (pillarControls.length === 0) return null;
+                
+                const isExpanded = expandedPillars.has(pillar);
+                const colors = PILLAR_COLORS[pillar];
+                
+                return (
+                  <div key={pillar}>
+                    {/* Pillar Header */}
+                    <button
+                      onClick={() => togglePillar(pillar)}
+                      className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={`px-3 py-1 text-sm rounded-full ${colors.bg} ${colors.text}`}>
+                          {pillar}
+                        </span>
+                        <span className="text-sm text-gray-500 dark:text-gray-400">
+                          {pillarControls.length} controls
+                        </span>
+                      </div>
+                      {isExpanded ? <FaChevronDown size={14} className="text-gray-400" /> : <FaChevronRight size={14} className="text-gray-400" />}
+                    </button>
+                    
+                    {/* Controls List */}
+                    {isExpanded && (
+                      <div className="px-6 pb-4">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="text-xs text-gray-500 uppercase tracking-wider">
+                              <th className="text-left py-2">Control</th>
+                              <th className="text-left py-2 w-24">Default</th>
+                              <th className="text-left py-2 w-48">Weight</th>
+                              <th className="text-left py-2 w-20">Points</th>
+                              <th className="text-left py-2 w-24">Licensed</th>
+                              <th className="text-left py-2 w-20"></th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                            {pillarControls.map(control => {
+                              const effectiveWeight = getEffectiveWeight(control, weightConfig);
+                              const hasOverride = control.id in weightConfig.controlWeightOverrides;
+                              const licensed = isLicensed(control, tenantLicenses);
+                              
+                              return (
+                                <tr key={control.id} className={`${!licensed ? 'opacity-50' : ''}`}>
+                                  <td className="py-3">
+                                    <div>
+                                      <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                        {control.title}
+                                      </p>
+                                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                                        {control.id}
+                                      </p>
+                                    </div>
+                                  </td>
+                                  <td className="py-3 text-sm text-gray-500">
+                                    {control.defaultWeight}%
+                                  </td>
+                                  <td className="py-3">
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="range"
+                                        min="0"
+                                        max="100"
+                                        value={effectiveWeight}
+                                        onChange={(e) => updateControlWeight(control.id, parseInt(e.target.value))}
+                                        disabled={!isAdmin}
+                                        className="w-24 h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer disabled:opacity-50"
+                                      />
+                                      <span className={`text-sm font-medium w-12 ${
+                                        hasOverride ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-700 dark:text-gray-300'
+                                      }`}>
+                                        {effectiveWeight}%
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="py-3 text-sm text-gray-500">
+                                    {control.maxPoints} pts
+                                  </td>
+                                  <td className="py-3">
+                                    {licensed ? (
+                                      <FaCheck className="text-green-500" size={14} />
+                                    ) : (
+                                      <span className="text-xs text-amber-600">
+                                        <FaLock size={12} className="inline mr-1" />
+                                        Required
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-3">
+                                    {hasOverride && isAdmin && (
+                                      <button
+                                        onClick={() => resetControlWeight(control.id)}
+                                        className="text-gray-400 hover:text-indigo-600"
+                                        title="Reset to default"
+                                      >
+                                        <FaUndo size={12} />
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Licenses Tab */}
+      {activeTab === 'licenses' && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">License Configuration</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Configure which Microsoft licenses are available in your tenant
+            </p>
+          </div>
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {Object.entries(LICENSE_INFO).map(([key, info]) => {
+                const isEnabled = tenantLicenses.enabled[key as LicenseKey];
+                const controlsRequiring = controls.filter(c => c.minLicenses.includes(key as LicenseKey));
+                
+                return (
+                  <div
+                    key={key}
+                    className={`p-4 rounded-lg border ${
+                      isEnabled
+                        ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
+                        : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-medium text-gray-900 dark:text-white">
+                            {info.displayName}
+                          </h3>
+                          {isEnabled && <FaCheck className="text-green-500" size={14} />}
+                        </div>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                          {info.description}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-2">
+                          {controlsRequiring.length} controls require this license
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        <button
+                          onClick={() => toggleLicense(key)}
+                          disabled={!isAdmin}
+                          className={`relative w-12 h-6 rounded-full transition-colors disabled:opacity-50 ${
+                            isEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+                          }`}
+                        >
+                          <span
+                            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                              isEnabled ? 'translate-x-6' : ''
+                            }`}
+                          />
+                        </button>
+                        <a
+                          href={info.purchaseUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
+                        >
+                          Learn more <FaExternalLinkAlt size={10} />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Audit Tab */}
+      {activeTab === 'audit' && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Audit Log</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              History of weight and configuration changes
+            </p>
+          </div>
+          <div className="p-6">
+            <AuditLogPanel events={weightAuditEvents} maxHeight="max-h-[600px]" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default ZeroTrustPoliciesPage;
