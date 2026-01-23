@@ -166,6 +166,48 @@ class AzureGraphService:
                 "api_accessible": False
             }
     
+    def get_subscribed_skus(self) -> List[Dict]:
+        """Fetch subscribed SKUs (licenses) from Azure AD.
+        
+        Returns the list of commercial subscriptions that the organization has acquired.
+        Requires Organization.Read.All or Directory.Read.All permission.
+        
+        Returns:
+            List of SKU dictionaries containing license information
+        """
+        access_token = self._get_access_token()
+        if not access_token:
+            raise Exception("Failed to acquire Azure access token")
+        
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        url = f"{self.graph_endpoint}/subscribedSkus"
+        
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            
+            data = response.json()
+            skus = data.get('value', [])
+            
+            # Debug: Log SKU details
+            logger.info(f"Successfully fetched {len(skus)} subscribed SKUs from Azure AD")
+            for sku in skus:
+                logger.info(f"  SKU: {sku.get('skuPartNumber')} (ID: {sku.get('skuId')}, Status: {sku.get('capabilityStatus')})")
+                # Also log service plans within each SKU
+                for plan in sku.get('servicePlans', []):
+                    if plan.get('provisioningStatus') == 'Success':
+                        logger.info(f"    - Plan: {plan.get('servicePlanName')}")
+            
+            return skus
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching subscribed SKUs from Azure AD: {str(e)}")
+            raise Exception(f"Failed to fetch subscribed SKUs: {str(e)}")
+    
     def get_entra_devices(self, top: int = 100) -> List[Dict]:
         """Fetch all devices from Azure AD/Entra ID via Microsoft Graph API.
         

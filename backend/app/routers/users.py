@@ -1,6 +1,6 @@
 """User management endpoints."""
 
-from typing import List, Any
+from typing import List, Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -38,6 +38,65 @@ def get_user_by_id(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+@router.get("/{user_id}/details", response_model=Dict[str, Any])
+def get_user_details(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(get_current_admin),
+) -> Any:
+    """Get detailed user information including devices and recent access attempts."""
+    user = db.query(models.User).filter(models.User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get user's devices
+    devices = db.query(models.Device).filter(models.Device.user_id == user_id).all()
+    
+    # Get user's recent access attempts (last 20)
+    attempts = db.query(models.AccessAttempt).filter(
+        models.AccessAttempt.user_id == user_id
+    ).order_by(models.AccessAttempt.timestamp.desc()).limit(20).all()
+    
+    return {
+        "user": {
+            "user_id": str(user.user_id),
+            "username": user.username,
+            "email": user.email,
+            "role": user.role.value if hasattr(user.role, 'value') else user.role,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+        },
+        "devices": [
+            {
+                "device_id": str(d.device_id),
+                "device_name": d.device_name,
+                "os_version": d.os_version,
+                "fingerprint": d.fingerprint,
+                "registered_at": d.registered_at.isoformat() if d.registered_at else None,
+            }
+            for d in devices
+        ],
+        "recent_attempts": [
+            {
+                "attempt_id": str(a.attempt_id),
+                "timestamp": a.timestamp.isoformat() if a.timestamp else None,
+                "result": a.result.value if hasattr(a.result, 'value') else a.result,
+                "ip_address": a.ip_address,
+                "device_id": str(a.device_id) if a.device_id else None,
+                "total_score": float(a.total_score) if a.total_score else None,
+                "reason": a.reason,
+            }
+            for a in attempts
+        ],
+        "stats": {
+            "total_devices": len(devices),
+            "total_attempts": len(attempts),
+            "allowed_attempts": sum(1 for a in attempts if a.result and (a.result == models.AttemptResultEnum.ALLOW or a.result == 'allow')),
+            "denied_attempts": sum(1 for a in attempts if a.result and (a.result == models.AttemptResultEnum.DENY or a.result == 'deny')),
+        }
+    }
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

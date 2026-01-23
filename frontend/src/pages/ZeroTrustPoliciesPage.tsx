@@ -10,7 +10,7 @@
  * RBAC: Only Admin role can edit; others view read-only.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FaShieldAlt,
   FaCog,
@@ -24,6 +24,8 @@ import {
   FaChevronDown,
   FaChevronRight,
   FaExternalLinkAlt,
+  FaSpinner,
+  FaInfoCircle,
 } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import {
@@ -49,6 +51,7 @@ import {
   LicenseChips,
 } from '../components/ZeroTrustComponents';
 import { getEffectiveWeight, isLicensed, normalizePillarWeights } from '../lib/scoring';
+import api from '../api';
 
 const ZeroTrustPoliciesPage: React.FC = () => {
   const isAdmin = useZeroTrustStore(selectIsAdmin);
@@ -64,11 +67,17 @@ const ZeroTrustPoliciesPage: React.FC = () => {
     resetControlWeight,
     resetAllWeights,
     toggleLicense,
+    setTenantLicenses,
   } = useZeroTrustStore();
   
   const [activeTab, setActiveTab] = useState<'weights' | 'licenses' | 'audit'>('weights');
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedPillars, setExpandedPillars] = useState<Set<Pillar>>(new Set([Pillar.Identity]));
+  
+  // License detection state
+  const [detectedLicenses, setDetectedLicenses] = useState<Record<string, boolean> | null>(null);
+  const [loadingLicenses, setLoadingLicenses] = useState(false);
+  const [licenseError, setLicenseError] = useState<string | null>(null);
   
   const scores = getScores();
   
@@ -105,6 +114,150 @@ const ZeroTrustPoliciesPage: React.FC = () => {
     () => auditEvents.filter(e => e.type === 'WEIGHT_CHANGED'),
     [auditEvents]
   );
+  
+  // Fetch detected licenses from Azure on tab switch
+  useEffect(() => {
+    if (activeTab === 'licenses' && detectedLicenses === null && !loadingLicenses) {
+      detectLicenses();
+    }
+  }, [activeTab]);
+  
+  const detectLicenses = async () => {
+    setLoadingLicenses(true);
+    setLicenseError(null);
+    try {
+      const response = await api.get('/azure/subscribed-skus');
+      const skus = response.data.skus || [];
+      
+      console.log('Raw SKUs from Azure:', skus);
+      
+      // Comprehensive SKU to license mapping
+      // Reference: https://learn.microsoft.com/en-us/entra/identity/users/licensing-service-plan-reference
+      const skuMapping: Record<string, LicenseKey[]> = {
+        // Entra ID P1 SKUs
+        'AAD_PREMIUM': ['ENTRA_P1'],
+        'AAD_PREMIUM_P1': ['ENTRA_P1'],
+        'EMSPREMIUM': ['ENTRA_P1', 'INTUNE_P1'],  // EMS E5
+        'EMS': ['ENTRA_P1', 'INTUNE_P1'],  // EMS E3
+        'IDENTITY_THREAT_PROTECTION': ['ENTRA_P2'],
+        
+        // Entra ID P2 SKUs
+        'AAD_PREMIUM_P2': ['ENTRA_P2', 'ENTRA_P1'],
+        
+        // Intune SKUs
+        'INTUNE_A': ['INTUNE_P1'],
+        'INTUNE_EDU': ['INTUNE_P1'],
+        
+        // Defender for Endpoint SKUs
+        'WIN_DEF_ATP': ['MDE_P1'],
+        'DEFENDER_ENDPOINT_P1': ['MDE_P1'],
+        'DEFENDER_ENDPOINT_P2': ['MDE_P2', 'MDE_P1'],
+        'MDATP_XPLAT': ['MDE_P1'],
+        'ATP_ENTERPRISE': ['MDE_P1'],
+        'WINDEFATP': ['MDE_P2', 'MDE_P1'],
+        
+        // Governance
+        'AAD_GOVERNANCE': ['ENTRA_GOVERNANCE'],
+        'IDENTITY_GOVERNANCE': ['ENTRA_GOVERNANCE'],
+        
+        // Workload ID
+        'ENTRA_WORKLOAD_IDENTITIES': ['ENTRA_WORKLOAD_ID'],
+        
+        // M365 E3 SKUs (includes Entra P1, Intune)
+        'SPE_E3': ['M365_E3', 'ENTRA_P1', 'INTUNE_P1'],
+        'ENTERPRISEPACK': ['M365_E3', 'ENTRA_P1'],
+        'MICROSOFT_365_E3': ['M365_E3', 'ENTRA_P1', 'INTUNE_P1'],
+        'M365_E3': ['M365_E3', 'ENTRA_P1', 'INTUNE_P1'],
+        'DEVELOPERPACK_E5': ['M365_E5', 'ENTRA_P2', 'INTUNE_P1', 'MDE_P2'],
+        
+        // M365 E5 SKUs (includes Entra P2, Intune, MDE P2)
+        'SPE_E5': ['M365_E5', 'ENTRA_P2', 'ENTRA_P1', 'INTUNE_P1', 'MDE_P2', 'MDE_P1'],
+        'ENTERPRISEPREMIUM': ['M365_E5', 'ENTRA_P2', 'ENTRA_P1', 'INTUNE_P1', 'MDE_P2', 'MDE_P1'],
+        'MICROSOFT_365_E5': ['M365_E5', 'ENTRA_P2', 'ENTRA_P1', 'INTUNE_P1', 'MDE_P2', 'MDE_P1'],
+        'M365_E5': ['M365_E5', 'ENTRA_P2', 'ENTRA_P1', 'INTUNE_P1', 'MDE_P2', 'MDE_P1'],
+        'M365_E5_SUITE_COMPONENTS': ['M365_E5', 'ENTRA_P2', 'ENTRA_P1', 'INTUNE_P1'],
+        
+        // Business Premium (SMB)
+        'SMB_BUSINESS_PREMIUM': ['ENTRA_P1', 'INTUNE_P1', 'MDE_P1'],
+        'O365_BUSINESS_PREMIUM': ['ENTRA_P1'],
+        'SPB': ['ENTRA_P1', 'INTUNE_P1'],
+        'MICROSOFT_365_BUSINESS_PREMIUM': ['ENTRA_P1', 'INTUNE_P1', 'MDE_P1'],
+        
+        // Defender for Cloud
+        'DEFENDER_FOR_CLOUD': ['DEFENDER_CLOUD'],
+        'AZURE_DEFENDER': ['DEFENDER_CLOUD'],
+        'ATA': ['DEFENDER_CLOUD'],
+      };
+      
+      // Service plan mapping (for plans within SKUs)
+      const servicePlanMapping: Record<string, LicenseKey[]> = {
+        'AAD_PREMIUM': ['ENTRA_P1'],
+        'AAD_PREMIUM_P2': ['ENTRA_P2', 'ENTRA_P1'],
+        'INTUNE_A': ['INTUNE_P1'],
+        'WINDEFATP': ['MDE_P2', 'MDE_P1'],
+        'MDE_LITE': ['MDE_P1'],
+        'WIN_DEF_ATP': ['MDE_P1'],
+        'ADALLOM_S_STANDALONE': ['DEFENDER_CLOUD'],
+      };
+      
+      const detected: Record<string, boolean> = {};
+      Object.keys(LICENSE_INFO).forEach(key => {
+        detected[key] = false;
+      });
+      
+      // Check each SKU
+      skus.forEach((sku: any) => {
+        const skuPart = (sku.skuPartNumber || '').toUpperCase();
+        console.log(`Checking SKU: ${skuPart}`);
+        
+        // Direct SKU match
+        Object.entries(skuMapping).forEach(([pattern, licenses]) => {
+          if (skuPart === pattern.toUpperCase() || skuPart.includes(pattern.toUpperCase())) {
+            console.log(`  Matched SKU pattern: ${pattern} -> ${licenses.join(', ')}`);
+            licenses.forEach(lic => { detected[lic] = true; });
+          }
+        });
+        
+        // Check service plans within the SKU
+        const servicePlans = sku.servicePlans || [];
+        servicePlans.forEach((plan: any) => {
+          const planName = (plan.servicePlanName || '').toUpperCase();
+          Object.entries(servicePlanMapping).forEach(([pattern, licenses]) => {
+            if (planName === pattern.toUpperCase() || planName.includes(pattern.toUpperCase())) {
+              console.log(`  Matched service plan: ${planName} -> ${licenses.join(', ')}`);
+              licenses.forEach(lic => { detected[lic] = true; });
+            }
+          });
+        });
+      });
+      
+      const detectedCount = Object.values(detected).filter(Boolean).length;
+      console.log(`Detected ${detectedCount} licenses:`, detected);
+      
+      if (detectedCount === 0 && skus.length > 0) {
+        // Show warning with raw SKU names for debugging
+        const skuNames = skus.map((s: any) => s.skuPartNumber).filter(Boolean).join(', ');
+        setLicenseError(`Found ${skus.length} SKUs but couldn't map them: ${skuNames || 'No SKU names available'}. You may need to configure licenses manually.`);
+      }
+      
+      setDetectedLicenses(detected);
+    } catch (error: any) {
+      console.error('Failed to detect licenses:', error);
+      setLicenseError(error.response?.data?.detail || 'Unable to detect licenses from Azure. Configure them manually.');
+    } finally {
+      setLoadingLicenses(false);
+    }
+  };
+  
+  const applyDetectedLicenses = () => {
+    if (detectedLicenses) {
+      setTenantLicenses({ enabled: detectedLicenses as Record<LicenseKey, boolean> });
+      toast.success('Applied detected licenses');
+    }
+  };
+  
+  // Calculate raw pillar sum (now capped at 100% via UI)
+  const rawPillarSum = Object.values(weightConfig.pillarWeights).reduce((a, b) => a + b, 0);
   
   const togglePillar = (pillar: Pillar) => {
     setExpandedPillars(prev => {
@@ -257,9 +410,14 @@ const ZeroTrustPoliciesPage: React.FC = () => {
                         <input
                           type="range"
                           min="0"
-                          max="100"
+                          max={Math.min(100, 100 - rawPillarSum + rawWeight)}
                           value={rawWeight}
-                          onChange={(e) => updatePillarWeight(pillar, parseInt(e.target.value))}
+                          onChange={(e) => {
+                            const newValue = parseInt(e.target.value);
+                            const otherPillarsSum = rawPillarSum - rawWeight;
+                            const maxAllowed = 100 - otherPillarsSum;
+                            updatePillarWeight(pillar, Math.min(newValue, maxAllowed));
+                          }}
                           disabled={!isAdmin}
                           className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         />
@@ -287,21 +445,49 @@ const ZeroTrustPoliciesPage: React.FC = () => {
               </div>
               
               <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                <span className="text-sm text-gray-500 dark:text-gray-400">
-                  Raw sum: {Object.values(weightConfig.pillarWeights).reduce((a, b) => a + b, 0)}%
-                </span>
-                <button
-                  onClick={() => {
-                    Object.values(Pillar).forEach(p => {
-                      updatePillarWeight(p, DEFAULT_PILLAR_WEIGHTS[p]);
-                    });
-                    toast.success('Pillar weights reset to defaults');
-                  }}
-                  disabled={!isAdmin}
-                  className="text-sm text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
-                >
-                  Reset to defaults
-                </button>
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm ${rawPillarSum === 100 ? 'text-green-600 font-medium' : 'text-gray-500 dark:text-gray-400'}`}>
+                    Total: {rawPillarSum}%
+                  </span>
+                  {rawPillarSum < 100 && (
+                    <span className="flex items-center gap-1 text-xs text-amber-500">
+                      <FaExclamationTriangle size={12} />
+                      {100 - rawPillarSum}% remaining to allocate
+                    </span>
+                  )}
+                  {rawPillarSum === 100 && (
+                    <span className="flex items-center gap-1 text-xs text-green-600">
+                      <FaCheck size={12} />
+                      Fully allocated
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      Object.values(Pillar).forEach(p => {
+                        updatePillarWeight(p, DEFAULT_PILLAR_WEIGHTS[p]);
+                      });
+                      toast.success('Pillar weights reset to defaults');
+                    }}
+                    disabled={!isAdmin}
+                    className="text-sm text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
+                  >
+                    Reset to defaults
+                  </button>
+                  <button
+                    onClick={() => {
+                      // Weights are auto-saved to localStorage via Zustand persist
+                      // This button just confirms the save action to the user
+                      toast.success('Weights saved successfully');
+                    }}
+                    disabled={!isAdmin}
+                    className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <FaSave className="inline mr-2" size={14} />
+                    Save Weights
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -451,15 +637,67 @@ const ZeroTrustPoliciesPage: React.FC = () => {
       {activeTab === 'licenses' && (
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
           <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">License Configuration</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Configure which Microsoft licenses are available in your tenant
-            </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">License Configuration</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Configure which Microsoft licenses are available in your tenant
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={detectLicenses}
+                  disabled={loadingLicenses}
+                  className="flex items-center gap-2 px-4 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                >
+                  {loadingLicenses ? (
+                    <FaSpinner className="animate-spin" size={14} />
+                  ) : (
+                    <FaSearch size={14} />
+                  )}
+                  Detect from Azure
+                </button>
+                {detectedLicenses && (
+                  <button
+                    onClick={applyDetectedLicenses}
+                    disabled={!isAdmin}
+                    className="flex items-center gap-2 px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    <FaCheck size={14} />
+                    Apply Detected
+                  </button>
+                )}
+              </div>
+            </div>
+            
+            {/* License detection status */}
+            {licenseError && (
+              <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg flex items-start gap-2">
+                <FaInfoCircle className="text-amber-500 mt-0.5" size={14} />
+                <div className="text-sm text-amber-700 dark:text-amber-300">
+                  <p className="font-medium">Could not auto-detect licenses</p>
+                  <p className="text-xs mt-1">{licenseError}</p>
+                </div>
+              </div>
+            )}
+            
+            {detectedLicenses && !licenseError && (
+              <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-start gap-2">
+                <FaCheck className="text-green-500 mt-0.5" size={14} />
+                <div className="text-sm text-green-700 dark:text-green-300">
+                  <p className="font-medium">Licenses detected from Azure</p>
+                  <p className="text-xs mt-1">
+                    Found {Object.values(detectedLicenses).filter(Boolean).length} licenses. Click "Apply Detected" to update.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
           <div className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {Object.entries(LICENSE_INFO).map(([key, info]) => {
                 const isEnabled = tenantLicenses.enabled[key as LicenseKey];
+                const isDetected = detectedLicenses?.[key] ?? null;
                 const controlsRequiring = controls.filter(c => c.minLicenses.includes(key as LicenseKey));
                 
                 return (
@@ -478,6 +716,15 @@ const ZeroTrustPoliciesPage: React.FC = () => {
                             {info.displayName}
                           </h3>
                           {isEnabled && <FaCheck className="text-green-500" size={14} />}
+                          {isDetected !== null && (
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${
+                              isDetected 
+                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300'
+                                : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                            }`}>
+                              {isDetected ? 'Detected' : 'Not found'}
+                            </span>
+                          )}
                         </div>
                         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                           {info.description}
@@ -487,19 +734,25 @@ const ZeroTrustPoliciesPage: React.FC = () => {
                         </p>
                       </div>
                       <div className="flex flex-col items-end gap-2">
-                        <button
-                          onClick={() => toggleLicense(key)}
-                          disabled={!isAdmin}
-                          className={`relative w-12 h-6 rounded-full transition-colors disabled:opacity-50 ${
-                            isEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
-                          }`}
-                        >
-                          <span
-                            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                              isEnabled ? 'translate-x-6' : ''
+                        <div className="flex items-center gap-2">
+                          {isDetected === false && (
+                            <FaLock className="text-gray-400" size={12} title="Locked - license not available in tenant" />
+                          )}
+                          <button
+                            onClick={() => toggleLicense(key)}
+                            disabled={!isAdmin || isDetected === false}
+                            className={`relative w-12 h-6 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                              isEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
                             }`}
-                          />
-                        </button>
+                            title={isDetected === false ? 'License not available in your tenant - cannot be enabled' : (!isAdmin ? 'Admin permission required to change licenses' : '')}
+                          >
+                            <span
+                              className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                                isEnabled ? 'translate-x-6' : ''
+                              }`}
+                            />
+                          </button>
+                        </div>
                         <a
                           href={info.purchaseUrl}
                           target="_blank"

@@ -1,12 +1,13 @@
 """Device management endpoints."""
 
-from typing import List, Any
+from typing import List, Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..deps import get_db, get_current_user, get_current_admin
+from ..azure_service import azure_service
 
 router = APIRouter()
 
@@ -22,6 +23,63 @@ def list_devices(
     else:
         devices = db.query(models.Device).filter(models.Device.user_id == current_user.user_id).all()
     return devices
+
+
+@router.get("/stats", response_model=Dict[str, Any])
+def get_device_stats(
+    current_user: models.User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Get device statistics from Microsoft Intune.
+    
+    Returns aggregated stats about managed devices including:
+    - Total device count
+    - Compliance statistics
+    - OS distribution
+    - Encryption status
+    """
+    try:
+        devices = azure_service.get_managed_devices(top=999)
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to retrieve devices from Intune: {str(e)}"
+        )
+    
+    total = len(devices)
+    
+    # Compliance statistics
+    compliant = sum(1 for d in devices if d.get('complianceState') == 'compliant')
+    noncompliant = sum(1 for d in devices if d.get('complianceState') == 'noncompliant')
+    unknown = total - compliant - noncompliant
+    
+    # OS distribution
+    windows = sum(1 for d in devices if 'windows' in d.get('operatingSystem', '').lower())
+    mac = sum(1 for d in devices if 'mac' in d.get('operatingSystem', '').lower())
+    ios = sum(1 for d in devices if 'ios' in d.get('operatingSystem', '').lower())
+    android = sum(1 for d in devices if 'android' in d.get('operatingSystem', '').lower())
+    
+    # Encryption status
+    encrypted = sum(1 for d in devices if d.get('isEncrypted', False))
+    
+    # Ownership
+    corporate = sum(1 for d in devices if d.get('managedDeviceOwnerType') == 'company')
+    personal = total - corporate
+    
+    return {
+        "total": total,
+        "compliant": compliant,
+        "nonCompliant": noncompliant,
+        "unknown": unknown,
+        "complianceRate": round((compliant / max(total, 1)) * 100, 1),
+        "windows": windows,
+        "mac": mac,
+        "ios": ios,
+        "android": android,
+        "encrypted": encrypted,
+        "encryptionRate": round((encrypted / max(total, 1)) * 100, 1),
+        "corporate": corporate,
+        "personal": personal,
+    }
 
 
 @router.post("/", response_model=schemas.DeviceOut, status_code=status.HTTP_201_CREATED)

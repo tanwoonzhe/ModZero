@@ -395,6 +395,276 @@ def get_cache_status(
     return {"cache_status": status, "checked_at": now.isoformat()}
 
 
+# ========== NEW: Live Test Execution Endpoints ==========
+
+from .identity_tests import (
+    test_security_defaults,
+    test_high_risk_detections,
+    test_risky_users,
+    test_conditional_access_policies,
+    test_privileged_roles,
+    test_mfa_coverage,
+    test_named_locations,
+    test_authentication_methods,
+)
+from .device_tests import (
+    test_device_compliance_policies,
+    test_device_compliance_status,
+    test_device_encryption,
+    test_device_configurations,
+    test_stale_devices,
+    test_os_versions,
+    test_enrollment_restrictions,
+    test_app_protection_policies,
+)
+from ..graph_client import get_graph_client
+
+
+# Mapping of test IDs to test functions for identity tests
+IDENTITY_TEST_FUNCTIONS = {
+    "ID-001": test_security_defaults,
+    "INTUNE-ID-001": test_security_defaults,
+    "ID-002": test_high_risk_detections,
+    "ID-003": test_risky_users,
+    "ID-004": test_conditional_access_policies,
+    "INTUNE-CA-001": test_conditional_access_policies,
+    "ID-005": test_privileged_roles,
+    "ID-006": test_mfa_coverage,
+    "INTUNE-MFA-001": test_mfa_coverage,
+    "ID-007": test_named_locations,
+    "ID-008": test_authentication_methods,
+}
+
+# Mapping of test IDs to test functions for device tests
+DEVICE_TEST_FUNCTIONS = {
+    "DEV-001": test_device_compliance_policies,
+    "INTUNE-COMP-001": test_device_compliance_policies,
+    "DEV-002": test_device_compliance_status,
+    "DEV-003": test_device_encryption,
+    "INTUNE-ENC-001": test_device_encryption,
+    "DEV-004": test_device_configurations,
+    "DEV-005": test_stale_devices,
+    "INTUNE-STALE-001": test_stale_devices,
+    "DEV-006": test_os_versions,
+    "INTUNE-UPD-001": test_os_versions,
+    "DEV-007": test_enrollment_restrictions,
+    "DEV-008": test_app_protection_policies,
+    "INTUNE-MAM-001": test_app_protection_policies,
+}
+
+
+@router.post("/identity/run")
+async def run_all_identity_tests(
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Run all implemented identity security tests.
+    
+    This endpoint runs the 8 core identity tests against Microsoft Graph API.
+    Returns results for each test with pass/fail status, details, and recommendations.
+    """
+    client = get_graph_client()
+    
+    if not client.is_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="Azure credentials not configured. Set AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET."
+        )
+    
+    # Run all available identity tests
+    results = []
+    test_functions = [
+        test_security_defaults,
+        test_high_risk_detections,
+        test_risky_users,
+        test_conditional_access_policies,
+        test_privileged_roles,
+        test_mfa_coverage,
+        test_named_locations,
+        test_authentication_methods,
+    ]
+    
+    for test_func in test_functions:
+        try:
+            result = test_func(client)
+            results.append(result)
+        except Exception as e:
+            logger.error(f"Error running test {test_func.__name__}: {e}")
+            results.append({
+                "testId": test_func.__name__,
+                "name": test_func.__name__,
+                "status": "error",
+                "details": str(e),
+            })
+    
+    # Calculate summary
+    passed = len([r for r in results if r.get("status") == "pass"])
+    failed = len([r for r in results if r.get("status") == "fail"])
+    warnings = len([r for r in results if r.get("status") == "warning"])
+    errors = len([r for r in results if r.get("status") == "error"])
+    
+    return {
+        "category": "Identity",
+        "timestamp": datetime.utcnow().isoformat(),
+        "summary": {
+            "total": len(results),
+            "passed": passed,
+            "failed": failed,
+            "warnings": warnings,
+            "errors": errors,
+            "score": round((passed / max(len(results), 1)) * 100),
+        },
+        "results": results,
+    }
+
+
+@router.post("/identity/run/{test_id}")
+async def run_single_identity_test(
+    test_id: str,
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Run a single identity test by test ID.
+    
+    Args:
+        test_id: The test ID (e.g., "ID-001", "INTUNE-MFA-001")
+    """
+    client = get_graph_client()
+    
+    if not client.is_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="Azure credentials not configured."
+        )
+    
+    # Find the test function
+    test_func = IDENTITY_TEST_FUNCTIONS.get(test_id.upper())
+    
+    if not test_func:
+        # Try to match by partial ID
+        for key, func in IDENTITY_TEST_FUNCTIONS.items():
+            if test_id.upper() in key.upper() or key.upper() in test_id.upper():
+                test_func = func
+                break
+    
+    if not test_func:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test '{test_id}' not found or not implemented yet."
+        )
+    
+    try:
+        result = test_func(client)
+        return result
+    except Exception as e:
+        logger.error(f"Error running test {test_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/devices/run")
+async def run_all_device_tests(
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Run all implemented device security tests.
+    
+    This endpoint runs the 8 core device tests against Microsoft Intune API.
+    Returns results for each test with pass/fail status, details, and recommendations.
+    """
+    client = get_graph_client()
+    
+    if not client.is_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="Azure credentials not configured. Set AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET."
+        )
+    
+    # Run all available device tests
+    results = []
+    test_functions = [
+        test_device_compliance_policies,
+        test_device_compliance_status,
+        test_device_encryption,
+        test_device_configurations,
+        test_stale_devices,
+        test_os_versions,
+        test_enrollment_restrictions,
+        test_app_protection_policies,
+    ]
+    
+    for test_func in test_functions:
+        try:
+            result = test_func(client)
+            results.append(result)
+        except Exception as e:
+            logger.error(f"Error running test {test_func.__name__}: {e}")
+            results.append({
+                "testId": test_func.__name__,
+                "name": test_func.__name__,
+                "status": "error",
+                "details": str(e),
+            })
+    
+    # Calculate summary
+    passed = len([r for r in results if r.get("status") == "pass"])
+    failed = len([r for r in results if r.get("status") == "fail"])
+    warnings = len([r for r in results if r.get("status") == "warning"])
+    errors = len([r for r in results if r.get("status") == "error"])
+    
+    return {
+        "category": "Devices",
+        "timestamp": datetime.utcnow().isoformat(),
+        "summary": {
+            "total": len(results),
+            "passed": passed,
+            "failed": failed,
+            "warnings": warnings,
+            "errors": errors,
+            "score": round((passed / max(len(results), 1)) * 100),
+        },
+        "results": results,
+    }
+
+
+@router.post("/devices/run/{test_id}")
+async def run_single_device_test(
+    test_id: str,
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Run a single device test by test ID.
+    
+    Args:
+        test_id: The test ID (e.g., "DEV-001", "INTUNE-COMP-001")
+    """
+    client = get_graph_client()
+    
+    if not client.is_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="Azure credentials not configured."
+        )
+    
+    # Find the test function
+    test_func = DEVICE_TEST_FUNCTIONS.get(test_id.upper())
+    
+    if not test_func:
+        # Try to match by partial ID
+        for key, func in DEVICE_TEST_FUNCTIONS.items():
+            if test_id.upper() in key.upper() or key.upper() in test_id.upper():
+                test_func = func
+                break
+    
+    if not test_func:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test '{test_id}' not found or not implemented yet."
+        )
+    
+    try:
+        result = test_func(client)
+        return result
+    except Exception as e:
+        logger.error(f"Error running test {test_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Helper functions for assessment calculations
 
 def calculate_identity_score(auth_summary: Dict, user_count: int) -> int:

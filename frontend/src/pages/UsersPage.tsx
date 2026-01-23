@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../api";
 import { User, AzureUser, AzureUsersResponse, AzureConnectionTest } from "../types";
 
 const UsersPage: React.FC = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'local' | 'azure'>('local');
   const [localUsers, setLocalUsers] = useState<User[]>([]);
   const [azureUsers, setAzureUsers] = useState<AzureUser[]>([]);
@@ -147,11 +149,16 @@ const UsersPage: React.FC = () => {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                   {localUsers.map((user) => (
-                    <tr key={user.user_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                    <tr 
+                      key={user.user_id} 
+                      onClick={() => navigate(`/users/${user.user_id}`)}
+                      className="hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+                    >
                       <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
                         {user.username}
                       </td>
@@ -169,6 +176,9 @@ const UsersPage: React.FC = () => {
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
                         {new Date(user.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap text-sm text-indigo-600 hover:text-indigo-700">
+                        View Details →
                       </td>
                     </tr>
                   ))}

@@ -270,3 +270,43 @@ def sync_all_azure_users(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to sync users: {str(e)}"
         )
+
+
+@router.get("/subscribed-skus")
+def get_subscribed_skus(
+    current_admin: models.User = Depends(get_current_admin)
+) -> Any:
+    """Get subscribed SKUs (licenses) from Azure AD (admin only).
+    
+    Returns the list of commercial subscriptions that the organization has acquired.
+    Used to determine which Microsoft 365/Azure licenses are available.
+    """
+    try:
+        skus = azure_service.get_subscribed_skus()
+        
+        # Transform SKU data
+        transformed_skus = []
+        for sku in skus:
+            transformed_sku = {
+                "skuId": sku.get("skuId"),
+                "skuPartNumber": sku.get("skuPartNumber"),
+                "capabilityStatus": sku.get("capabilityStatus"),
+                "consumedUnits": sku.get("consumedUnits", 0),
+                "prepaidUnits": {
+                    "enabled": sku.get("prepaidUnits", {}).get("enabled", 0),
+                    "suspended": sku.get("prepaidUnits", {}).get("suspended", 0),
+                    "warning": sku.get("prepaidUnits", {}).get("warning", 0),
+                },
+            }
+            transformed_skus.append(transformed_sku)
+        
+        return {
+            "total": len(transformed_skus),
+            "skus": transformed_skus
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch subscribed SKUs: {str(e)}"
+        )
