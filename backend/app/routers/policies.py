@@ -175,3 +175,88 @@ def delete_policy(
     db.delete(policy)
     db.commit()
     return None
+
+
+@router.post("/weights", status_code=status.HTTP_200_OK)
+def save_weights(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(get_current_admin),
+) -> Any:
+    """Save pillar weights and control weight overrides.
+    
+    This endpoint persists the Zero Trust scoring weights configuration.
+    """
+    pillar_weights = payload.get("pillar_weights", {})
+    control_weight_overrides = payload.get("control_weight_overrides", {})
+    updated_by = payload.get("updated_by", "admin")
+    
+    # Store in a weights configuration table or policy settings
+    # For now, we store as a system policy called "weight_config"
+    existing = db.query(models.Policy).filter(models.Policy.policy_name == "__weight_config__").first()
+    
+    config_data = {
+        "pillar_weights": pillar_weights,
+        "control_weight_overrides": control_weight_overrides,
+        "updated_by": updated_by,
+        "updated_at": datetime.utcnow().isoformat()
+    }
+    
+    if existing:
+        existing.description = str(config_data)
+        existing.updated_at = datetime.utcnow()
+    else:
+        policy = models.Policy(
+            user_id=current_admin.user_id,
+            policy_name="__weight_config__",
+            min_trust_threshold=70.0,
+            description=str(config_data),
+            target_group="system",
+            is_active=False,  # Not a real policy, just config storage
+        )
+        db.add(policy)
+    
+    db.commit()
+    
+    return {
+        "status": "ok",
+        "message": "Weights saved successfully",
+        "pillar_weights": pillar_weights,
+        "control_weight_overrides": control_weight_overrides,
+    }
+
+
+@router.get("/weights", status_code=status.HTTP_200_OK)
+def get_weights(
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(get_current_admin),
+) -> Any:
+    """Get saved pillar weights and control weight overrides."""
+    existing = db.query(models.Policy).filter(models.Policy.policy_name == "__weight_config__").first()
+    
+    if not existing:
+        # Return default weights
+        return {
+            "pillar_weights": {
+                "Identity": 25,
+                "Devices": 25,
+                "Data": 20,
+                "Apps": 15,
+                "Infrastructure": 15,
+            },
+            "control_weight_overrides": {},
+            "updated_by": "system",
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+    
+    import ast
+    try:
+        config_data = ast.literal_eval(existing.description)
+        return config_data
+    except:
+        return {
+            "pillar_weights": {},
+            "control_weight_overrides": {},
+            "updated_by": "system",
+            "updated_at": existing.updated_at.isoformat() if existing.updated_at else None,
+        }

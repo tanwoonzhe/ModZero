@@ -1306,3 +1306,211 @@ def generate_device_sankey_data(devices: List[Dict]) -> Dict:
             {"source": "compliant", "target": "android", "value": max(android, 1)},
         ]
     }
+
+
+# ============================================================================
+# CUSTOM TEST EXECUTION
+# ============================================================================
+
+from pydantic import BaseModel, Field
+from ..custom_test_evaluator import evaluate_graph_response, evaluate_checklist
+
+
+class GraphQueryConfig(BaseModel):
+    """Configuration for Graph API query detection mode."""
+    endpoint: str = Field(..., description="Graph API endpoint (e.g., '/users')")
+    useBeta: bool = Field(False, description="Use beta API")
+    expectedField: str = Field("value", description="Field to evaluate")
+    operator: str = Field("not_empty", description="Comparison operator")
+    value: str = Field("", description="Expected value")
+    filter: Optional[str] = Field(None, description="OData $filter parameter")
+    select: Optional[str] = Field(None, description="OData $select parameter")
+
+
+class ChecklistItem(BaseModel):
+    """Single checklist item."""
+    id: str
+    label: str
+    description: Optional[str] = None
+    checked: bool = False
+
+
+class ChecklistConfig(BaseModel):
+    """Configuration for checklist detection mode."""
+    requireAll: bool = Field(True, description="Require all items checked")
+    items: List[ChecklistItem] = Field(default_factory=list)
+
+
+class RunCustomTestRequest(BaseModel):
+    """Request body for running a custom test."""
+    testId: str = Field(..., description="Custom test ID")
+    detectionMode: str = Field(..., description="Detection mode: manual, graph_query, checklist")
+    graphQueryConfig: Optional[GraphQueryConfig] = None
+    checklistConfig: Optional[ChecklistConfig] = None
+
+
+@router.post("/custom-tests/run")
+async def run_custom_test(
+    request: RunCustomTestRequest,
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Run a custom test based on its detection mode.
+    
+    Supports three detection modes:
+    - manual: Returns "not_run" status (user sets result manually)
+    - graph_query: Executes Graph API query and evaluates response
+    - checklist: Evaluates checklist completion status
+    
+    Returns:
+        Test result with status, details, and raw data (for graph_query mode)
+    """
+    logger.info(f"Running custom test: {request.testId} with mode: {request.detectionMode}")
+    
+    if request.detectionMode == "manual":
+        return {
+            "testId": request.testId,
+            "result": "not_run",
+            "details": "Manual assessment - set result manually",
+            "rawData": None,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    
+    elif request.detectionMode == "graph_query":
+        if not request.graphQueryConfig:
+            raise HTTPException(
+                status_code=400,
+                detail="graphQueryConfig is required for graph_query detection mode"
+            )
+        
+        client = get_graph_client()
+        
+        if not client.is_configured:
+            raise HTTPException(
+                status_code=503,
+                detail="Azure credentials not configured. Set AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET."
+            )
+        
+        try:
+            config = request.graphQueryConfig
+            
+            # Build params
+            params = {}
+            if config.filter:
+                params["$filter"] = config.filter
+            if config.select:
+                params["$select"] = config.select
+            
+            # Make the Graph API call
+            logger.info(f"Calling Graph API: {config.endpoint}, useBeta={config.useBeta}, params={params}")
+            
+            # Determine if we should get all pages or single response
+            if config.operator in ["count_gt", "count_lt", "count_eq", "not_empty", "all_match", "any_match"]:
+                # These operators typically need the full collection
+                response = {"value": client.get_all_pages(config.endpoint, use_beta=config.useBeta, params=params if params else None)}
+            else:
+                response = client.get(config.endpoint, use_beta=config.useBeta, params=params if params else None)
+            
+            # Evaluate the response
+            eval_config = {
+                "expectedField": config.expectedField,
+                "operator": config.operator,
+                "value": config.value,
+            }
+            
+            eval_result = evaluate_graph_response(response, eval_config)
+            
+            return {
+                "testId": request.testId,
+                "result": eval_result.result,
+                "details": eval_result.details,
+                "rawData": response,
+                "evaluatedValue": eval_result.evaluated_value,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Error running custom Graph query test: {e}")
+            return {
+                "testId": request.testId,
+                "result": "investigate",
+                "details": f"Error executing test: {str(e)}",
+                "rawData": None,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+    
+    elif request.detectionMode == "checklist":
+        if not request.checklistConfig:
+            raise HTTPException(
+                status_code=400,
+                detail="checklistConfig is required for checklist detection mode"
+            )
+        
+        config = {
+            "requireAll": request.checklistConfig.requireAll,
+            "items": [item.dict() for item in request.checklistConfig.items],
+        }
+        
+        eval_result = evaluate_checklist(config)
+        
+        return {
+            "testId": request.testId,
+            "result": eval_result.result,
+            "details": eval_result.details,
+            "rawData": None,
+            "evaluatedValue": eval_result.evaluated_value,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown detection mode: {request.detectionMode}"
+        )
+
+
+@router.get("/graph/test-endpoint")
+async def test_graph_endpoint(
+    endpoint: str,
+    use_beta: bool = False,
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Test a Graph API endpoint and return sample data.
+    
+    This endpoint is useful for testing custom Graph queries before saving them.
+    Limited to 5 results to avoid large responses.
+    """
+    client = get_graph_client()
+    
+    if not client.is_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="Azure credentials not configured."
+        )
+    
+    try:
+        # Use $top=5 to limit results
+        response = client.get(endpoint, use_beta=use_beta, params={"$top": "5"})
+        
+        # If response has a 'value' array, truncate it
+        if isinstance(response.get("value"), list):
+            total_count = len(response["value"])
+            response["value"] = response["value"][:5]
+            response["_truncated"] = True
+            response["_totalSample"] = total_count
+        
+        return {
+            "success": True,
+            "endpoint": endpoint,
+            "useBeta": use_beta,
+            "data": response,
+        }
+    except Exception as e:
+        logger.error(f"Error testing Graph endpoint: {e}")
+        return {
+            "success": False,
+            "endpoint": endpoint,
+            "useBeta": use_beta,
+            "error": str(e),
+        }

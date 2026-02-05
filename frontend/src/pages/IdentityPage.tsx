@@ -24,9 +24,20 @@ import {
   FaChevronDown,
   FaCog,
   FaCloud,
+  FaUnlock,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
-import { identityTests, SecurityTest, getTestStats, getUniqueSfiPillars, getTestRemediation } from "../data/securityTestsIndex";
+import { 
+  identityTests, 
+  SecurityTest, 
+  getTestStats, 
+  getUniqueSfiPillars, 
+  getTestRemediation,
+  isTestAchievable,
+  getTestLicenseRequirements,
+  LicenseKey
+} from "../data/securityTestsIndex";
+import { useZeroTrustStore, selectTenantLicenses } from "../store/zeroTrustStore";
 
 // Markdown components for styling
 const markdownComponents = {
@@ -183,6 +194,9 @@ const IdentityPage: React.FC = () => {
   const [apiData, setApiData] = useState<IdentityAssessmentData | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   
+  // Get tenant licenses from ZeroTrust store
+  const tenantLicenses = useZeroTrustStore(selectTenantLicenses);
+  
   // Live tests state
   const [activeTab, setActiveTab] = useState<"assessment" | "live-tests">("assessment");
   const [liveTests, setLiveTests] = useState<LiveTestsResponse | null>(null);
@@ -216,6 +230,7 @@ const IdentityPage: React.FC = () => {
       setLoading(false);
     }
   };
+
 
   useEffect(() => {
     fetchAssessment();
@@ -344,7 +359,17 @@ const IdentityPage: React.FC = () => {
     }));
   }, [apiData]);
 
+  // Split tests by license availability
+  const { achievableTests, unavailableTests } = useMemo(() => {
+    const licenses = tenantLicenses.enabled as Record<LicenseKey, boolean>;
+    const achievable = tests.filter(t => isTestAchievable(t, licenses));
+    const unavailable = tests.filter(t => !isTestAchievable(t, licenses));
+    return { achievableTests: achievable, unavailableTests: unavailable };
+  }, [tests, tenantLicenses]);
+
   const stats = useMemo(() => getTestStats(tests), [tests]);
+  const achievableStats = useMemo(() => getTestStats(achievableTests), [achievableTests]);
+  const unavailableStats = useMemo(() => getTestStats(unavailableTests), [unavailableTests]);
   const uniqueSfiPillars = useMemo(() => getUniqueSfiPillars(tests), [tests]);
 
   const handleRefresh = async () => {
@@ -368,9 +393,9 @@ const IdentityPage: React.FC = () => {
     }
   };
 
-  // Filtered tests
-  const filteredTests = useMemo(() => {
-    let result = tests;
+  // Apply common filters to a test list
+  const applyFilters = (testList: SecurityTest[]) => {
+    let result = testList;
 
     // Search filter
     if (searchTerm) {
@@ -402,8 +427,8 @@ const IdentityPage: React.FC = () => {
     // Sort
     if (sortConfig) {
       result = [...result].sort((a, b) => {
-        const aVal = a[sortConfig.key as keyof SecurityTest];
-        const bVal = b[sortConfig.key as keyof SecurityTest];
+        const aVal = a[sortConfig.key as keyof SecurityTest] ?? '';
+        const bVal = b[sortConfig.key as keyof SecurityTest] ?? '';
         if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
         if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
@@ -411,7 +436,17 @@ const IdentityPage: React.FC = () => {
     }
 
     return result;
-  }, [tests, searchTerm, selectedSfiPillars, selectedRisks, selectedStatuses, sortConfig]);
+  };
+
+  // Filtered achievable tests
+  const filteredAchievableTests = useMemo(() => {
+    return applyFilters(achievableTests);
+  }, [achievableTests, searchTerm, selectedSfiPillars, selectedRisks, selectedStatuses, sortConfig]);
+
+  // Filtered unavailable tests
+  const filteredUnavailableTests = useMemo(() => {
+    return applyFilters(unavailableTests);
+  }, [unavailableTests, searchTerm, selectedSfiPillars, selectedRisks, selectedStatuses, sortConfig]);
 
   const toggleFilter = (value: string, selected: string[], setSelected: React.Dispatch<React.SetStateAction<string[]>>) => {
     setSelected((prev: string[]) => prev.includes(value) ? prev.filter((v: string) => v !== value) : [...prev, value]);
@@ -805,12 +840,33 @@ const IdentityPage: React.FC = () => {
           </div>
 
           {/* Results Count */}
-          <div className="text-sm text-gray-500">
-            Showing {filteredTests.length} of {tests.length} tests
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="text-sm text-gray-500">
+              Total: {tests.length} tests • 
+              <span className="text-green-600 ml-2">Achievable: {achievableTests.length}</span> • 
+              <span className="text-amber-600 ml-2">Needs License: {unavailableTests.length}</span>
+            </div>
           </div>
         </div>
+      </div>
 
-        {/* Table */}
+      {/* Achievable Tests Table */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
+              <FaCheckCircle className="text-green-600" size={18} />
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-900 dark:text-white">Achievable Tests</h3>
+              <p className="text-sm text-gray-500">Tests that can be achieved with your current licenses</p>
+            </div>
+          </div>
+          <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-sm font-medium">
+            {filteredAchievableTests.length} of {achievableTests.length} tests
+          </span>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 dark:bg-gray-700/50">
@@ -862,45 +918,143 @@ const IdentityPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {filteredTests.map((test: SecurityTest) => {
-                const riskConfig = getRiskConfig(test.risk);
-                const statusConfig = getStatusConfig(test.status);
-                const StatusIcon = statusConfig.icon;
-                const RiskIcon = riskConfig.icon;
+              {filteredAchievableTests.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
+                    No achievable tests match your filters
+                  </td>
+                </tr>
+              ) : (
+                filteredAchievableTests.map((test: SecurityTest) => {
+                  const riskConfig = getRiskConfig(test.risk);
+                  const statusConfig = getStatusConfig(test.status);
+                  const StatusIcon = statusConfig.icon;
+                  const RiskIcon = riskConfig.icon;
 
-                return (
-                  <tr
-                    key={test.id}
-                    onClick={() => { setSelectedTest(test); setShowDetail(true); }}
-                    className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
-                  >
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline font-medium">
-                        {test.title}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
-                      {test.category}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <RiskIcon className={riskConfig.color} size={12} />
-                        <span className={`text-sm ${riskConfig.color}`}>{test.risk}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${statusConfig.bgColor} ${statusConfig.textColor}`}>
-                        <StatusIcon size={12} />
-                        {test.status}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
+                  return (
+                    <tr
+                      key={test.id}
+                      onClick={() => { setSelectedTest(test); setShowDetail(true); }}
+                      className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
+                    >
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline font-medium">
+                          {test.title}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                        {test.category}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <RiskIcon className={riskConfig.color} size={12} />
+                          <span className={`text-sm ${riskConfig.color}`}>{test.risk}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${statusConfig.bgColor} ${statusConfig.textColor}`}>
+                          <StatusIcon size={12} />
+                          {test.status}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Unavailable Tests Table */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
+              <FaUnlock className="text-amber-600" size={18} />
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-900 dark:text-white">Tests Requiring Additional Licenses</h3>
+              <p className="text-sm text-gray-500">Enable licenses in ZT Policies to unlock these tests</p>
+            </div>
+          </div>
+          <span className="px-3 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-full text-sm font-medium">
+            {filteredUnavailableTests.length} of {unavailableTests.length} tests
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50 dark:bg-gray-700/50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Name
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Category
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Risk
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Required License
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {filteredUnavailableTests.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
+                    {unavailableTests.length === 0 
+                      ? "All tests are achievable with your current licenses!" 
+                      : "No unavailable tests match your filters"}
+                  </td>
+                </tr>
+              ) : (
+                filteredUnavailableTests.map((test: SecurityTest) => {
+                  const riskConfig = getRiskConfig(test.risk);
+                  const RiskIcon = riskConfig.icon;
+                  const requiredLicenses = getTestLicenseRequirements(test);
+
+                  return (
+                    <tr
+                      key={test.id}
+                      onClick={() => { setSelectedTest(test); setShowDetail(true); }}
+                      className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors opacity-75"
+                    >
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-gray-600 dark:text-gray-400 font-medium">
+                          {test.title}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                        {test.category}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <RiskIcon className={riskConfig.color} size={12} />
+                          <span className={`text-sm ${riskConfig.color}`}>{test.risk}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {requiredLicenses.map((license) => (
+                            <span key={license} className="px-2 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded text-xs">
+                              {license.replace(/_/g, ' ')}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      </>
+      )}
 
       {/* Detail Panel */}
       {showDetail && selectedTest && (
@@ -1085,8 +1239,6 @@ const IdentityPage: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
-      </>
       )}
       </>
       )}

@@ -2,172 +2,50 @@
  * Seed Data for Zero Trust Controls
  * 
  * This file contains realistic security controls aligned with Microsoft Zero Trust principles.
- * Controls are divided between Identity (6+) and Devices (6+) pillars.
+ * Controls are divided between Identity (134 tests from identityTests) and Devices (10+) pillars.
  */
 
-import { Control, Pillar, ControlResult, ControlStatus } from '../types/zeroTrust';
+import { Control, Pillar, ControlResult, ControlStatus, TestResult, LicenseKey } from '../types/zeroTrust';
+import { identityTests, SecurityTest, getTestLicenseRequirements } from './identityTests';
 
 // ============================================================================
-// IDENTITY CONTROLS
+// CONVERT IDENTITY TESTS TO CONTROLS
 // ============================================================================
 
-export const identityControls: Control[] = [
-  {
-    id: "ZT-IDENTITY-0001",
-    title: "Block legacy authentication",
-    description: "Block legacy authentication protocols (POP, IMAP, SMTP) that cannot support MFA. These protocols are frequently exploited in password spray attacks.",
+/**
+ * Convert SecurityTest from identityTests to Control format
+ */
+function convertSecurityTestToControl(test: SecurityTest): Control {
+  const licenses = getTestLicenseRequirements(test);
+  
+  // Map risk to defaultWeight and maxPoints
+  const riskWeightMap: Record<string, { weight: number; points: number }> = {
+    "High": { weight: 100, points: 15 },
+    "Medium": { weight: 70, points: 10 },
+    "Low": { weight: 40, points: 5 },
+  };
+  
+  const { weight, points } = riskWeightMap[test.risk] || { weight: 50, points: 8 };
+  
+  return {
+    id: test.id,
+    title: test.title,
+    description: test.description,
     pillar: Pillar.Identity,
-    minLicenses: ["ENTRA_P1"],
-    defaultWeight: 100,
-    maxPoints: 15,
-    category: "Conditional Access",
-    sfiPillar: "Protect identities and secrets",
-    risk: "High",
-    userImpact: "Medium",
-    implementationCost: "Low",
-    docsUrl: "https://learn.microsoft.com/en-us/entra/identity/conditional-access/block-legacy-authentication",
-  },
-  {
-    id: "ZT-IDENTITY-0002",
-    title: "Require MFA for all users",
-    description: "Enforce multi-factor authentication for all users accessing cloud apps. This is the single most effective control against identity attacks.",
-    pillar: Pillar.Identity,
-    minLicenses: ["ENTRA_P1"],
-    defaultWeight: 100,
-    maxPoints: 20,
-    category: "MFA",
-    sfiPillar: "Protect identities and secrets",
-    risk: "High",
-    userImpact: "Medium",
-    implementationCost: "Low",
-    docsUrl: "https://learn.microsoft.com/en-us/entra/identity/authentication/concept-mfa-howitworks",
-  },
-  {
-    id: "ZT-IDENTITY-0003",
-    title: "PIM JIT privileged role assignment",
-    description: "Use Privileged Identity Management for just-in-time access to administrative roles, reducing standing admin privileges.",
-    pillar: Pillar.Identity,
-    minLicenses: ["ENTRA_P2"],
-    defaultWeight: 90,
-    maxPoints: 15,
-    category: "Privileged Access",
-    sfiPillar: "Protect identities and secrets",
-    risk: "High",
-    userImpact: "Low",
-    implementationCost: "Medium",
-    docsUrl: "https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-configure",
-    purchaseUrl: "https://www.microsoft.com/en-us/security/business/microsoft-entra-pricing",
-  },
-  {
-    id: "ZT-IDENTITY-0004",
-    title: "Enable sign-in risk policies",
-    description: "Automatically respond to risky sign-in behaviors detected by Identity Protection, blocking or requiring additional verification.",
-    pillar: Pillar.Identity,
-    minLicenses: ["ENTRA_P2"],
-    defaultWeight: 85,
-    maxPoints: 12,
-    category: "Identity Protection",
-    sfiPillar: "Monitor and detect cyberthreats",
-    risk: "High",
-    userImpact: "Low",
-    implementationCost: "Low",
-    docsUrl: "https://learn.microsoft.com/en-us/entra/id-protection/howto-identity-protection-configure-risk-policies",
-    purchaseUrl: "https://www.microsoft.com/en-us/security/business/microsoft-entra-pricing",
-  },
-  {
-    id: "ZT-IDENTITY-0005",
-    title: "Enable user risk policies",
-    description: "Automatically respond to compromised user accounts detected by Identity Protection, requiring password change or blocking access.",
-    pillar: Pillar.Identity,
-    minLicenses: ["ENTRA_P2"],
-    defaultWeight: 85,
-    maxPoints: 12,
-    category: "Identity Protection",
-    sfiPillar: "Monitor and detect cyberthreats",
-    risk: "High",
-    userImpact: "Low",
-    implementationCost: "Low",
-    docsUrl: "https://learn.microsoft.com/en-us/entra/id-protection/howto-identity-protection-configure-risk-policies",
-    purchaseUrl: "https://www.microsoft.com/en-us/security/business/microsoft-entra-pricing",
-  },
-  {
-    id: "ZT-IDENTITY-0006",
-    title: "Deploy phishing-resistant MFA methods",
-    description: "Enable FIDO2 security keys, Windows Hello for Business, or certificate-based authentication to protect against phishing attacks.",
-    pillar: Pillar.Identity,
-    minLicenses: ["ENTRA_P1"],
-    defaultWeight: 80,
-    maxPoints: 10,
-    category: "MFA",
-    sfiPillar: "Protect identities and secrets",
-    risk: "High",
-    userImpact: "Medium",
-    implementationCost: "High",
-    docsUrl: "https://learn.microsoft.com/en-us/entra/identity/authentication/concept-authentication-passwordless",
-  },
-  {
-    id: "ZT-IDENTITY-0007",
-    title: "Require compliant or hybrid Azure AD joined device",
-    description: "Only allow access from devices that meet compliance policies or are joined to Azure AD, ensuring device health.",
-    pillar: Pillar.Identity,
-    minLicenses: ["ENTRA_P1", "INTUNE_P1"],
-    defaultWeight: 75,
-    maxPoints: 10,
-    category: "Conditional Access",
-    sfiPillar: "Protect engineering systems",
-    risk: "Medium",
-    userImpact: "Medium",
-    implementationCost: "Medium",
-    docsUrl: "https://learn.microsoft.com/en-us/entra/identity/conditional-access/howto-conditional-access-policy-compliant-device",
-  },
-  {
-    id: "ZT-IDENTITY-0008",
-    title: "Configure access reviews for privileged roles",
-    description: "Regularly review and recertify access to privileged roles to ensure least privilege and remove unnecessary access.",
-    pillar: Pillar.Identity,
-    minLicenses: ["ENTRA_GOVERNANCE"],
-    defaultWeight: 70,
-    maxPoints: 8,
-    category: "Access Governance",
-    sfiPillar: "Protect identities and secrets",
-    risk: "Medium",
-    userImpact: "Low",
-    implementationCost: "Medium",
-    docsUrl: "https://learn.microsoft.com/en-us/entra/id-governance/access-reviews-overview",
-    purchaseUrl: "https://www.microsoft.com/en-us/security/business/identity-access/microsoft-entra-id-governance",
-  },
-  {
-    id: "ZT-IDENTITY-0009",
-    title: "Limit guest user permissions",
-    description: "Restrict guest user access to directory properties and limit their ability to enumerate users, groups, and other directory objects.",
-    pillar: Pillar.Identity,
-    minLicenses: [],
-    defaultWeight: 60,
-    maxPoints: 6,
-    category: "Guest Access",
-    sfiPillar: "Protect tenants and isolate production systems",
-    risk: "Medium",
-    userImpact: "Low",
-    implementationCost: "Low",
-    docsUrl: "https://learn.microsoft.com/en-us/entra/external-id/external-identities-overview",
-  },
-  {
-    id: "ZT-IDENTITY-0010",
-    title: "Configure workload identity protection",
-    description: "Protect service principals and managed identities with conditional access policies and risk detection.",
-    pillar: Pillar.Identity,
-    minLicenses: ["ENTRA_WORKLOAD_ID"],
-    defaultWeight: 65,
-    maxPoints: 8,
-    category: "Workload Identity",
-    sfiPillar: "Protect engineering systems",
-    risk: "High",
-    userImpact: "Low",
-    implementationCost: "Medium",
-    docsUrl: "https://learn.microsoft.com/en-us/entra/workload-id/workload-identities-overview",
-    purchaseUrl: "https://www.microsoft.com/en-us/security/business/identity-access/microsoft-entra-workload-id",
-  },
-];
+    minLicenses: licenses as LicenseKey[],
+    defaultWeight: weight,
+    maxPoints: points,
+    category: test.category,
+    sfiPillar: test.sfiPillar,
+    risk: test.risk,
+    userImpact: test.userImpact as "High" | "Medium" | "Low",
+    implementationCost: test.implementationCost as "High" | "Medium" | "Low",
+    docsUrl: test.docLink,
+  };
+}
+
+// Convert all 134 identity tests to Controls
+export const identityControls: Control[] = identityTests.map(convertSecurityTestToControl);
 
 // ============================================================================
 // DEVICE CONTROLS
@@ -340,30 +218,59 @@ export const allControls: Control[] = [...identityControls, ...deviceControls];
 // MOCK CONTROL RESULTS
 // ============================================================================
 
+// Generate mock results for all identity controls based on their original status
+const generateIdentityMockResults = (): ControlResult[] => {
+  return identityTests.map((test, index) => {
+    // Map SecurityTest status to TestResult (auto-detected)
+    const resultMap: Record<string, TestResult> = {
+      "Passed": TestResult.PASSED,
+      "Failed": TestResult.FAILED,
+      "Investigate": TestResult.INVESTIGATE,
+      "Skipped": TestResult.NOT_RUN,
+      "Planned": TestResult.NOT_RUN,
+    };
+    
+    // Map SecurityTest status to ControlStatus (user action)
+    const statusMap: Record<string, ControlStatus> = {
+      "Passed": ControlStatus.COMPLETED,
+      "Failed": ControlStatus.TO_ADDRESS,
+      "Investigate": ControlStatus.PLANNED,
+      "Skipped": ControlStatus.RISK_ACCEPTED,
+      "Planned": ControlStatus.PLANNED,
+    };
+    
+    const result = resultMap[test.status] || TestResult.NOT_RUN;
+    const status = statusMap[test.status] || ControlStatus.TO_ADDRESS;
+    
+    return {
+      controlId: test.id,
+      result,
+      status,
+      lastCheckedAt: new Date().toISOString(),
+      evidence: result === TestResult.PASSED 
+        ? [{ kind: "assessment", value: `Auto-evaluated: ${test.testId}` }]
+        : undefined,
+    };
+  });
+};
+
+// Device mock results
+const deviceMockResults: ControlResult[] = [
+  { controlId: "ZT-DEVICE-0001", result: TestResult.FAILED, status: ControlStatus.TO_ADDRESS, lastCheckedAt: new Date().toISOString() },
+  { controlId: "ZT-DEVICE-0002", result: TestResult.PASSED, status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString(), evidence: [{ kind: "policy", value: "Windows-Compliance-Policy" }] },
+  { controlId: "ZT-DEVICE-0003", result: TestResult.PASSED, status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString() },
+  { controlId: "ZT-DEVICE-0004", result: TestResult.PASSED, status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString() },
+  { controlId: "ZT-DEVICE-0005", result: TestResult.FAILED, status: ControlStatus.TO_ADDRESS, lastCheckedAt: new Date().toISOString() },
+  { controlId: "ZT-DEVICE-0006", result: TestResult.INVESTIGATE, status: ControlStatus.TO_ADDRESS, lastCheckedAt: new Date().toISOString() },
+  { controlId: "ZT-DEVICE-0007", result: TestResult.PASSED, status: ControlStatus.ALTERNATE_MITIGATION, lastCheckedAt: new Date().toISOString(), notes: "Using third-party MAM solution" },
+  { controlId: "ZT-DEVICE-0008", result: TestResult.PASSED, status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString() },
+  { controlId: "ZT-DEVICE-0009", result: TestResult.PASSED, status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString() },
+  { controlId: "ZT-DEVICE-0010", result: TestResult.NOT_RUN, status: ControlStatus.TO_ADDRESS, lastCheckedAt: new Date().toISOString() },
+];
+
 export const mockControlResults: ControlResult[] = [
-  // Identity - some completed, some in progress
-  { controlId: "ZT-IDENTITY-0001", status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString(), evidence: [{ kind: "policy", value: "CA-BlockLegacy" }] },
-  { controlId: "ZT-IDENTITY-0002", status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString(), evidence: [{ kind: "policy", value: "CA-RequireMFA" }] },
-  { controlId: "ZT-IDENTITY-0003", status: ControlStatus.PLANNED, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-IDENTITY-0004", status: ControlStatus.TO_ADDRESS, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-IDENTITY-0005", status: ControlStatus.TO_ADDRESS, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-IDENTITY-0006", status: ControlStatus.PLANNED, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-IDENTITY-0007", status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-IDENTITY-0008", status: ControlStatus.TO_ADDRESS, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-IDENTITY-0009", status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-IDENTITY-0010", status: ControlStatus.TO_ADDRESS, lastCheckedAt: new Date().toISOString() },
-  
-  // Devices - mixed statuses
-  { controlId: "ZT-DEVICE-0001", status: ControlStatus.TO_ADDRESS, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-DEVICE-0002", status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString(), evidence: [{ kind: "policy", value: "Windows-Compliance-Policy" }] },
-  { controlId: "ZT-DEVICE-0003", status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-DEVICE-0004", status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-DEVICE-0005", status: ControlStatus.TO_ADDRESS, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-DEVICE-0006", status: ControlStatus.TO_ADDRESS, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-DEVICE-0007", status: ControlStatus.ALTERNATE_MITIGATION, lastCheckedAt: new Date().toISOString(), notes: "Using third-party MAM solution" },
-  { controlId: "ZT-DEVICE-0008", status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-DEVICE-0009", status: ControlStatus.COMPLETED, lastCheckedAt: new Date().toISOString() },
-  { controlId: "ZT-DEVICE-0010", status: ControlStatus.TO_ADDRESS, lastCheckedAt: new Date().toISOString() },
+  ...generateIdentityMockResults(),
+  ...deviceMockResults,
 ];
 
 // ============================================================================

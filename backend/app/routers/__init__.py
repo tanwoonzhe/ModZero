@@ -7,6 +7,15 @@ from . import identity_tests, device_tests
 
 api_router = APIRouter()
 
+@api_router.get("")
+@api_router.get("/")
+def api_root() -> dict:
+    """Simple index endpoint for the API root."""
+    return {
+        "status": "ok",
+        "message": "ModZero API root. See /docs for interactive docs.",
+    }
+
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(devices.router, prefix="/devices", tags=["devices"])

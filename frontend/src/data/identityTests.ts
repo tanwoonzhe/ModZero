@@ -167,6 +167,79 @@ export function getRemediation(title: string): { text: string; link: string; lin
   return remediationMap.default;
 }
 
+// License requirement mapping based on test categories and features
+// Tests requiring specific licenses to be achievable
+export type LicenseKey = 
+  | "ENTRA_P1"        
+  | "ENTRA_P2"        
+  | "INTUNE_P1"       
+  | "MDE_P1"          
+  | "MDE_P2"          
+  | "ENTRA_GOVERNANCE" 
+  | "ENTRA_WORKLOAD_ID"
+  | "M365_E3"         
+  | "M365_E5"         
+  | "DEFENDER_CLOUD";
+
+// Map test features to required licenses
+export const testLicenseMapping: Record<string, LicenseKey[]> = {
+  // Conditional Access features require Entra P1 or higher
+  "conditional access": ["ENTRA_P1"],
+  "device compliance": ["ENTRA_P1", "INTUNE_P1"],
+  "sign-in risk": ["ENTRA_P2"],
+  "user risk": ["ENTRA_P2"],
+  "identity protection": ["ENTRA_P2"],
+  "risk-based": ["ENTRA_P2"],
+  
+  // PIM and Governance
+  "privileged identity management": ["ENTRA_P2"],
+  "pim": ["ENTRA_P2"],
+  "access review": ["ENTRA_GOVERNANCE"],
+  "entitlement management": ["ENTRA_GOVERNANCE"],
+  "lifecycle workflow": ["ENTRA_GOVERNANCE"],
+  
+  // Workload identities
+  "workload identity": ["ENTRA_WORKLOAD_ID"],
+  "service principal": ["ENTRA_P1"],
+  
+  // Device management
+  "intune": ["INTUNE_P1"],
+  "mdm": ["INTUNE_P1"],
+  "device configuration": ["INTUNE_P1"],
+  "app protection": ["INTUNE_P1"],
+  
+  // Defender
+  "defender for endpoint": ["MDE_P1"],
+  "microsoft defender": ["MDE_P1"],
+  "threat detection": ["MDE_P2"],
+};
+
+// Determine required licenses for a test based on its title and category
+export function getTestLicenseRequirements(test: SecurityTest): LicenseKey[] {
+  const searchText = `${test.title.toLowerCase()} ${test.category.toLowerCase()}`;
+  const requiredLicenses = new Set<LicenseKey>();
+  
+  for (const [keyword, licenses] of Object.entries(testLicenseMapping)) {
+    if (searchText.includes(keyword)) {
+      licenses.forEach(lic => requiredLicenses.add(lic));
+    }
+  }
+  
+  // Return empty array if no specific licenses required (available to all)
+  return Array.from(requiredLicenses);
+}
+
+// Check if a test is achievable with given tenant licenses
+export function isTestAchievable(test: SecurityTest, tenantLicenses: Record<LicenseKey, boolean>): boolean {
+  const required = getTestLicenseRequirements(test);
+  
+  // If no licenses required, test is achievable
+  if (required.length === 0) return true;
+  
+  // Check if at least one required license is enabled
+  return required.some(lic => tenantLicenses[lic] === true);
+}
+
 export const identityTests: SecurityTest[] = [
   {
     "id": "ZTA-21770",

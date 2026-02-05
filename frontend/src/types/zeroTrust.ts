@@ -18,7 +18,101 @@ export enum Pillar {
 }
 
 /**
- * Control status model supporting Microsoft Secure Score status concepts
+ * Test Result (auto-detected from assessment)
+ * - PASSED: Test passed successfully
+ * - FAILED: Test failed
+ * - INVESTIGATE: Requires manual investigation
+ * - NOT_RUN: Test has not been executed yet
+ */
+export enum TestResult {
+  PASSED = "PASSED",
+  FAILED = "FAILED",
+  INVESTIGATE = "INVESTIGATE",
+  NOT_RUN = "NOT_RUN",
+}
+
+/**
+ * Detection mode for custom tests
+ * - manual: User manually sets pass/fail status
+ * - graph_query: Automatically evaluate via Microsoft Graph API
+ * - checklist: Verify checklist items are completed
+ */
+export type DetectionMode = "manual" | "graph_query" | "checklist";
+
+/**
+ * Operator for Graph API query evaluation
+ */
+export type GraphQueryOperator = 
+  | "exists"        // Resource exists (non-empty response)
+  | "not_empty"     // Array/collection is not empty
+  | "equals"        // Field equals expected value
+  | "not_equals"    // Field does not equal expected value
+  | "contains"      // Field contains expected value (string)
+  | "count_gt"      // Array count is greater than value
+  | "count_lt"      // Array count is less than value
+  | "count_eq"      // Array count equals value
+  | "all_match"     // All items in array match condition
+  | "any_match";    // At least one item matches condition
+
+/**
+ * Common Graph API endpoints for custom tests
+ */
+export const GRAPH_API_ENDPOINTS = [
+  { value: "/users", label: "Users", description: "All users in the directory" },
+  { value: "/identity/conditionalAccess/policies", label: "Conditional Access Policies", description: "All CA policies" },
+  { value: "/deviceManagement/managedDevices", label: "Managed Devices", description: "Intune managed devices" },
+  { value: "/deviceManagement/deviceCompliancePolicies", label: "Device Compliance Policies", description: "Device compliance policies" },
+  { value: "/directoryRoles", label: "Directory Roles", description: "Azure AD directory roles" },
+  { value: "/reports/authenticationMethods/userRegistrationDetails", label: "MFA Registration Details", description: "User MFA registration status" },
+  { value: "/identity/conditionalAccess/namedLocations", label: "Named Locations", description: "CA named locations" },
+  { value: "/policies/authenticationMethodsPolicy", label: "Authentication Methods Policy", description: "Auth methods policy" },
+  { value: "/identityProtection/riskDetections", label: "Risk Detections", description: "Identity protection risk detections" },
+  { value: "/identityProtection/riskyUsers", label: "Risky Users", description: "Users flagged for risk" },
+  { value: "custom", label: "Custom Endpoint", description: "Enter a custom Graph API endpoint" },
+] as const;
+
+/**
+ * Configuration for Graph API query detection mode
+ */
+export interface GraphQueryConfig {
+  /** Graph API endpoint (e.g., "/users", "/identity/conditionalAccess/policies") */
+  endpoint: string;
+  /** Use beta API instead of v1.0 */
+  useBeta: boolean;
+  /** Field to evaluate in the response (e.g., "value", "value[0].state") */
+  expectedField: string;
+  /** Comparison operator */
+  operator: GraphQueryOperator;
+  /** Expected value for comparison (if applicable) */
+  value: string;
+  /** Optional $filter parameter */
+  filter?: string;
+  /** Optional $select parameter */
+  select?: string;
+}
+
+/**
+ * Single item in a checklist
+ */
+export interface ChecklistItem {
+  id: string;
+  label: string;
+  description?: string;
+  checked: boolean;
+}
+
+/**
+ * Configuration for checklist detection mode
+ */
+export interface ChecklistConfig {
+  /** Require all items to be checked for pass */
+  requireAll: boolean;
+  /** Checklist items */
+  items: ChecklistItem[];
+}
+
+/**
+ * Action status model (user-selected) supporting Microsoft Secure Score status concepts
  * - TO_ADDRESS: Control needs attention
  * - PLANNED: Scheduled for future implementation
  * - RISK_ACCEPTED: Risk acknowledged but not mitigated (earns 0 points)
@@ -88,6 +182,26 @@ export interface Control {
   userImpact?: "High" | "Medium" | "Low";
   /** Implementation complexity/cost */
   implementationCost?: "High" | "Medium" | "Low";
+  /** Whether this control is enabled (included in assessment) */
+  enabled?: boolean;
+  /** Whether this is a custom (user-defined) control */
+  isCustom?: boolean;
+  /** When this control was created (for custom controls) */
+  createdAt?: string;
+  /** Who created this control (for custom controls) */
+  createdBy?: string;
+  /** Detection mode for custom tests */
+  detectionMode?: DetectionMode;
+  /** Graph API query configuration (for graph_query mode) */
+  graphQueryConfig?: GraphQueryConfig;
+  /** Checklist configuration (for checklist mode) */
+  checklistConfig?: ChecklistConfig;
+  /** Last test run data (raw API response) */
+  lastRunData?: unknown;
+  /** Last test run timestamp */
+  lastRunAt?: string;
+  /** Is the test currently running? */
+  isRunning?: boolean;
 }
 
 /**
@@ -111,7 +225,9 @@ export interface Evidence {
 export interface ControlResult {
   /** Reference to the control ID */
   controlId: string;
-  /** Current status of the control */
+  /** Auto-detected result from assessment */
+  result: TestResult;
+  /** User-selected action status */
   status: ControlStatus;
   /** Evidence supporting the status */
   evidence?: Evidence[];
@@ -299,6 +415,20 @@ export const DEFAULT_WEIGHT_CONFIG: WeightConfig = {
 // ============================================================================
 // DISPLAY NAME MAPPINGS
 // ============================================================================
+
+export const TEST_RESULT_DISPLAY_NAMES: Record<TestResult, string> = {
+  [TestResult.PASSED]: "Passed",
+  [TestResult.FAILED]: "Failed",
+  [TestResult.INVESTIGATE]: "Investigate",
+  [TestResult.NOT_RUN]: "Not Run",
+};
+
+export const TEST_RESULT_COLORS: Record<TestResult, { bg: string; text: string; icon: string }> = {
+  [TestResult.PASSED]: { bg: "bg-green-100 dark:bg-green-900/30", text: "text-green-700 dark:text-green-400", icon: "text-green-500" },
+  [TestResult.FAILED]: { bg: "bg-red-100 dark:bg-red-900/30", text: "text-red-700 dark:text-red-400", icon: "text-red-500" },
+  [TestResult.INVESTIGATE]: { bg: "bg-amber-100 dark:bg-amber-900/30", text: "text-amber-700 dark:text-amber-400", icon: "text-amber-500" },
+  [TestResult.NOT_RUN]: { bg: "bg-gray-100 dark:bg-gray-800", text: "text-gray-500 dark:text-gray-400", icon: "text-gray-400" },
+};
 
 export const STATUS_DISPLAY_NAMES: Record<ControlStatus, string> = {
   [ControlStatus.TO_ADDRESS]: "To Address",

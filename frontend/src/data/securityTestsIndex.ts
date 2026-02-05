@@ -1,9 +1,17 @@
 // Auto-generated index file for security tests
-export { identityTests, type SecurityTest, getRemediation } from './identityTests';
+export { 
+  identityTests, 
+  type SecurityTest, 
+  getRemediation,
+  isTestAchievable,
+  getTestLicenseRequirements,
+  testLicenseMapping,
+  type LicenseKey
+} from './identityTests';
 export { devicesTests } from './devicesTests';
 export { testRemediations, getTestRemediation, type TestRemediation } from './testRemediations';
 
-import { identityTests } from './identityTests';
+import { identityTests, isTestAchievable, type LicenseKey } from './identityTests';
 import { devicesTests } from './devicesTests';
 
 // Helper functions
@@ -39,3 +47,13 @@ export const getTestStats = (tests: typeof identityTests) => ({
   mediumRisk: tests.filter(t => t.risk === "Medium").length,
   lowRisk: tests.filter(t => t.risk === "Low").length,
 });
+
+// Split tests by license availability
+export const splitTestsByLicense = (
+  tests: typeof identityTests, 
+  tenantLicenses: Record<LicenseKey, boolean>
+) => {
+  const achievable = tests.filter(t => isTestAchievable(t, tenantLicenses));
+  const unavailable = tests.filter(t => !isTestAchievable(t, tenantLicenses));
+  return { achievable, unavailable };
+};

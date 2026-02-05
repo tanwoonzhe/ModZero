@@ -28,7 +28,7 @@ interface Attempt {
   device_id?: string;
   device_name?: string;
   timestamp: string;
-  decision: "allow" | "deny" | "mfa_required" | "block";
+  decision: "allow" | "deny" | "mfa_required" | "block" | "review";
   result?: string;
   total_score?: number;
   ip_address?: string;
@@ -38,10 +38,25 @@ interface Attempt {
   risk_level?: "low" | "medium" | "high" | "critical";
 }
 
+// Response from backend API
+interface AttemptApiResponse {
+  attempt_id: string;
+  user_id: string;
+  device_id?: string;
+  ip_address?: string;
+  geo_location?: { city?: string; country?: string };
+  timestamp: string;
+  result: string;
+  reason?: string;
+  total_score?: number;
+  decision?: string;
+}
+
 const decisionConfig = {
   allow: { icon: FaCheck, bg: "bg-green-100 dark:bg-green-900/30", text: "text-green-700 dark:text-green-400", label: "Allowed" },
   deny: { icon: FaTimes, bg: "bg-red-100 dark:bg-red-900/30", text: "text-red-700 dark:text-red-400", label: "Denied" },
   mfa_required: { icon: FaShieldAlt, bg: "bg-amber-100 dark:bg-amber-900/30", text: "text-amber-700 dark:text-amber-400", label: "MFA Required" },
+  review: { icon: FaEye, bg: "bg-blue-100 dark:bg-blue-900/30", text: "text-blue-700 dark:text-blue-400", label: "Review" },
   block: { icon: FaTimes, bg: "bg-red-100 dark:bg-red-900/30", text: "text-red-700 dark:text-red-400", label: "Blocked" },
 };
 
@@ -63,15 +78,46 @@ const LogsPage: React.FC = () => {
   const [selectedAttempt, setSelectedAttempt] = useState<Attempt | null>(null);
   const itemsPerPage = 20;
 
+  const mapDecision = (result: string): Attempt["decision"] => {
+    if (result === "allow" || result === "deny" || result === "review" || result === "mfa_required" || result === "block") {
+      return result as Attempt["decision"];
+    }
+    return "deny";
+  };
+
+  const calculateRiskLevel = (score: number | undefined): Attempt["risk_level"] => {
+    if (!score) return "medium";
+    if (score >= 80) return "low";
+    if (score >= 60) return "medium";
+    if (score >= 40) return "high";
+    return "critical";
+  };
+
   const fetchAttempts = async () => {
     try {
-      const res = await api.get<Attempt[]>("/attempts");
-      setAttempts(res.data);
+      const res = await api.get<AttemptApiResponse[]>("/attempts");
+      // Transform backend response to frontend Attempt format
+      const transformedAttempts: Attempt[] = res.data.map((item) => ({
+        attempt_id: item.attempt_id,
+        user_id: item.user_id,
+        device_id: item.device_id,
+        ip_address: item.ip_address,
+        location: item.geo_location 
+          ? [item.geo_location.city, item.geo_location.country].filter(Boolean).join(", ") 
+          : undefined,
+        timestamp: item.timestamp,
+        decision: mapDecision(item.decision || item.result),
+        result: item.result,
+        total_score: item.total_score,
+        reason: item.reason,
+        risk_level: calculateRiskLevel(item.total_score),
+      }));
+      setAttempts(transformedAttempts);
     } catch (error) {
       console.error(error);
       // Mock data for demo
       const mockAttempts: Attempt[] = Array.from({ length: 50 }, (_, i) => {
-        const decisions: Array<"allow" | "deny" | "mfa_required" | "block"> = ["allow", "allow", "allow", "deny", "mfa_required", "block"];
+        const decisions: Array<"allow" | "deny" | "mfa_required" | "block" | "review"> = ["allow", "allow", "allow", "deny", "mfa_required", "review"];
         const risks: Array<"low" | "medium" | "high" | "critical"> = ["low", "low", "low", "medium", "high", "critical"];
         const locations = ["New York, US", "London, UK", "Tokyo, JP", "Sydney, AU", "Berlin, DE", "Unknown"];
         const resources = ["SharePoint", "Exchange Online", "Azure Portal", "Teams", "OneDrive", "Power BI"];
@@ -159,7 +205,7 @@ const LogsPage: React.FC = () => {
   }).length;
   const allowedCount = attempts.filter((a) => a.decision === "allow").length;
   const deniedCount = attempts.filter((a) => a.decision === "deny" || a.decision === "block").length;
-  const mfaCount = attempts.filter((a) => a.decision === "mfa_required").length;
+  const reviewCount = attempts.filter((a) => a.decision === "review" || a.decision === "mfa_required").length;
 
   return (
     <div className="space-y-6">
@@ -231,8 +277,8 @@ const LogsPage: React.FC = () => {
               <FaShieldAlt className="text-amber-600 dark:text-amber-400" size={24} />
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{mfaCount}</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">MFA Challenged</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{reviewCount}</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Under Review</p>
             </div>
           </div>
         </div>

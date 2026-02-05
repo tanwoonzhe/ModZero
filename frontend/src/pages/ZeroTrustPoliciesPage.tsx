@@ -476,10 +476,20 @@ const ZeroTrustPoliciesPage: React.FC = () => {
                     Reset to defaults
                   </button>
                   <button
-                    onClick={() => {
-                      // Weights are auto-saved to localStorage via Zustand persist
-                      // This button just confirms the save action to the user
-                      toast.success('Weights saved successfully');
+                    onClick={async () => {
+                      try {
+                        // Save weights to backend API
+                        await api.post('/policies/weights', {
+                          pillar_weights: weightConfig.pillarWeights,
+                          control_weight_overrides: weightConfig.controlWeightOverrides,
+                          updated_by: isAdmin ? 'admin' : 'user'
+                        });
+                        toast.success('Weights saved to server successfully');
+                      } catch (error: any) {
+                        console.error('Failed to save weights:', error);
+                        // Still saved locally via Zustand persist
+                        toast.success('Weights saved locally (server unavailable)');
+                      }
                     }}
                     disabled={!isAdmin}
                     className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"

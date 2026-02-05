@@ -463,10 +463,9 @@ const ResourcesPage: React.FC = () => {
                 ? { ...n, resources: [...n.resources, { ...resource, resource_id: `r${Date.now()}` }] }
                 : n
             ));
-            setShowAddResourceModal(false);
-            setSelectedNetworkForResource(null);
-            toast.success("Resource added successfully");
+            // Don't close modal here - let the modal handle its own closing after batch add
           }}
+          networkId={selectedNetworkForResource}
         />
       )}
     </div>
@@ -481,9 +480,23 @@ const AddNetworkModal: React.FC<{
   const [name, setName] = useState("");
   const [cidrRange, setCidrRange] = useState("");
   const [location, setLocation] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSaving(true);
+    
+    try {
+      // Try to save to backend API
+      await api.post('/resources/networks', {
+        name,
+        cidr_range: cidrRange,
+        location
+      });
+    } catch (error) {
+      console.log("API save failed, using local state");
+    }
+    
     onAdd({
       name,
       cidr_range: cidrRange,
@@ -491,6 +504,8 @@ const AddNetworkModal: React.FC<{
       location,
       last_check: new Date().toISOString(),
     });
+    
+    setSaving(false);
   };
 
   return (
@@ -504,7 +519,7 @@ const AddNetworkModal: React.FC<{
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Network Name</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Network Name *</label>
             <input
               type="text"
               value={name}
@@ -515,15 +530,17 @@ const AddNetworkModal: React.FC<{
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">CIDR Range</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">CIDR Range *</label>
             <input
               type="text"
               value={cidrRange}
               onChange={(e) => setCidrRange(e.target.value)}
               required
+              pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$"
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
               placeholder="e.g., 10.0.0.0/16"
             />
+            <p className="text-xs text-gray-500 mt-1">Format: IP/prefix (e.g., 10.0.0.0/16)</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Location</label>
@@ -545,9 +562,10 @@ const AddNetworkModal: React.FC<{
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              disabled={saving}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
             >
-              Add Network
+              {saving ? "Saving..." : "Add Network"}
             </button>
           </div>
         </form>
@@ -556,83 +574,157 @@ const AddNetworkModal: React.FC<{
   );
 };
 
-// Add Resource Modal Component
+// Add Resource Modal Component - supports adding multiple resources
 const AddResourceModal: React.FC<{
   onClose: () => void;
   onAdd: (resource: Omit<Resource, 'resource_id'>) => void;
-}> = ({ onClose, onAdd }) => {
-  const [name, setName] = useState("");
-  const [type, setType] = useState("server");
-  const [ipAddress, setIpAddress] = useState("");
-  const [port, setPort] = useState("");
+  networkId: string;
+}> = ({ onClose, onAdd, networkId }) => {
+  const [resources, setResources] = useState<Array<{
+    name: string;
+    type: string;
+    ipAddress: string;
+    port: string;
+  }>>([{ name: "", type: "server", ipAddress: "", port: "" }]);
+  const [saving, setSaving] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const addResourceRow = () => {
+    setResources(prev => [...prev, { name: "", type: "server", ipAddress: "", port: "" }]);
+  };
+
+  const removeResourceRow = (index: number) => {
+    if (resources.length > 1) {
+      setResources(prev => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  const updateResource = (index: number, field: string, value: string) => {
+    setResources(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onAdd({
-      name,
-      type,
-      connector_status: "online",
-      ip_address: ipAddress || undefined,
-      port: port ? parseInt(port) : undefined,
-    });
+    setSaving(true);
+    
+    try {
+      // Save each resource to API and update local state
+      for (const resource of resources) {
+        if (resource.name.trim()) {
+          try {
+            // Try to save to backend API
+            await api.post(`/resources/networks/${networkId}/resources`, {
+              name: resource.name,
+              type: resource.type,
+              ip_address: resource.ipAddress || undefined,
+              port: resource.port ? parseInt(resource.port) : undefined,
+            });
+          } catch (error) {
+            console.log("API save failed, using local state");
+          }
+          
+          // Add to local state
+          onAdd({
+            name: resource.name,
+            type: resource.type,
+            connector_status: "online",
+            ip_address: resource.ipAddress || undefined,
+            port: resource.port ? parseInt(resource.port) : undefined,
+          });
+        }
+      }
+      onClose();
+    } catch (error) {
+      console.error("Failed to save resources:", error);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
         <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Add Resource</h2>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Add Resources</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
             <FaTimes size={20} />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Resource Name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
-              placeholder="e.g., Web Server 01"
-            />
+        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto max-h-[calc(90vh-150px)]">
+          <div className="space-y-4">
+            {resources.map((resource, index) => (
+              <div key={index} className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Resource {index + 1}</span>
+                  {resources.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeResourceRow(index)}
+                      className="text-red-500 hover:text-red-600 text-sm"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name *</label>
+                    <input
+                      type="text"
+                      value={resource.name}
+                      onChange={(e) => updateResource(index, 'name', e.target.value)}
+                      required
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 text-sm"
+                      placeholder="e.g., Web Server 01"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
+                    <select
+                      value={resource.type}
+                      onChange={(e) => updateResource(index, 'type', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 text-sm"
+                    >
+                      <option value="server">Server</option>
+                      <option value="database">Database</option>
+                      <option value="cloud">Cloud Service</option>
+                      <option value="desktop">Desktop/Workstation</option>
+                      <option value="default">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">IP Address</label>
+                    <input
+                      type="text"
+                      value={resource.ipAddress}
+                      onChange={(e) => updateResource(index, 'ipAddress', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 text-sm"
+                      placeholder="e.g., 10.0.1.50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Port</label>
+                    <input
+                      type="number"
+                      value={resource.port}
+                      onChange={(e) => updateResource(index, 'port', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 text-sm"
+                      placeholder="e.g., 443"
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
-            <select
-              value={type}
-              onChange={(e) => setType(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="server">Server</option>
-              <option value="database">Database</option>
-              <option value="cloud">Cloud Service</option>
-              <option value="desktop">Desktop/Workstation</option>
-              <option value="default">Other</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">IP Address</label>
-            <input
-              type="text"
-              value={ipAddress}
-              onChange={(e) => setIpAddress(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
-              placeholder="e.g., 10.0.1.50"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Port</label>
-            <input
-              type="number"
-              value={port}
-              onChange={(e) => setPort(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
-              placeholder="e.g., 443"
-            />
-          </div>
-          <div className="flex justify-end gap-3 pt-4">
+          
+          <button
+            type="button"
+            onClick={addResourceRow}
+            className="mt-4 w-full py-2 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg text-gray-500 hover:border-indigo-500 hover:text-indigo-500 transition-colors flex items-center justify-center gap-2"
+          >
+            <FaPlus size={12} /> Add Another Resource
+          </button>
+          
+          <div className="flex justify-end gap-3 pt-6 mt-6 border-t border-gray-200 dark:border-gray-700">
             <button
               type="button"
               onClick={onClose}
@@ -642,9 +734,10 @@ const AddResourceModal: React.FC<{
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              disabled={saving || resources.every(r => !r.name.trim())}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
             >
-              Add Resource
+              {saving ? "Saving..." : `Add ${resources.filter(r => r.name.trim()).length} Resource(s)`}
             </button>
           </div>
         </form>
