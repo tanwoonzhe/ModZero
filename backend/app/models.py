@@ -749,3 +749,99 @@ class RemediationTask(Base):
 
     def __repr__(self) -> str:
         return f"<RemediationTask {self.task_id} test={self.test_id} status={self.status}>"
+
+class DetectionModeEnum(str, Enum):
+    """Detection modes for custom tests."""
+    MANUAL = "manual"
+    GRAPH_QUERY = "graph_query"
+    CHECKLIST = "checklist"
+
+
+class UserTestConfiguration(Base):
+    """User-specific test configuration.
+    
+    Stores user customizations for security tests:
+    - Enable/disable status for any test
+    - Custom tests created by users
+    - Action status (planned, completed, risk_accepted, etc.)
+    - Weight overrides
+    
+    For default tests, test_id references security_test_definitions.
+    For custom tests, is_custom=True and all fields are user-defined.
+    """
+    __tablename__ = "user_test_configurations"
+    __table_args__ = (
+        UniqueConstraint("user_id", "test_id", name="uix_user_test"),
+    )
+
+    config_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    user_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
+    )
+    test_id: str = Column(String(64), nullable=False)  # Can be default test ID or custom test ID
+    
+    # Test metadata (for custom tests or overrides)
+    is_custom: bool = Column(Boolean, default=False, nullable=False)
+    title: str = Column(String(512), nullable=True)  # Required for custom tests
+    description: str = Column(Text, nullable=True)
+    pillar: str = Column(String(32), nullable=True)  # identity, devices
+    category: str = Column(String(128), nullable=True)
+    risk: str = Column(String(32), nullable=True)  # high, medium, low
+    
+    # User-defined status and settings
+    is_enabled: bool = Column(Boolean, default=True, nullable=False)
+    action_status: str = Column(String(64), default="to_address")  # to_address, planned, completed, etc.
+    action_notes: str = Column(Text, nullable=True)
+    weight_override: float = Column(Float, nullable=True)  # Custom weight 0-100
+    
+    # Detection mode configuration (for custom tests)
+    detection_mode: DetectionModeEnum = Column(
+        PgEnum(DetectionModeEnum), nullable=True
+    )
+    graph_query_config: dict = Column(JSON, nullable=True)  # For graph_query mode
+    checklist_config: dict = Column(JSON, nullable=True)  # For checklist mode
+    
+    # Test result tracking
+    last_test_result: str = Column(String(32), nullable=True)  # passed, failed, investigate, not_run
+    last_run_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    last_run_data: dict = Column(JSON, nullable=True)  # Raw API response
+    
+    # Timestamps
+    created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<UserTestConfiguration {self.test_id} user={self.user_id} custom={self.is_custom}>"
+
+
+class PillarWeightConfiguration(Base):
+    """User-specific pillar weight configuration.
+    
+    Stores the pillar-level weight configuration (should sum to 100).
+    """
+    __tablename__ = "pillar_weight_configurations"
+    __table_args__ = (
+        UniqueConstraint("user_id", "pillar", name="uix_user_pillar"),
+    )
+
+    config_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    user_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
+    )
+    pillar: str = Column(String(32), nullable=False)  # identity, devices, data, apps, infrastructure
+    weight: float = Column(Float, nullable=False, default=20)
+    created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<PillarWeightConfiguration {self.pillar}={self.weight} user={self.user_id}>"

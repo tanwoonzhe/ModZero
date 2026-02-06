@@ -29,6 +29,7 @@ function convertSecurityTestToControl(test: SecurityTest): Control {
   
   return {
     id: test.id,
+    testId: test.testId, // API identifier for running the test
     title: test.title,
     description: test.description,
     pillar: Pillar.Identity,

@@ -29,6 +29,7 @@ import {
 } from '../types/zeroTrust';
 import { allControls, mockControlResults } from '../data/controls.seed';
 import { computeScores } from '../lib/scoring';
+import * as testConfigService from '../services/testConfigService';
 
 // ============================================================================
 // USER TYPE
@@ -64,12 +65,23 @@ interface ZeroTrustState {
   customControls: Control[]; // User-defined controls
   disabledControlIds: Set<string>; // Controls that are disabled
   
+  // API sync status
+  isLoading: boolean;
+  lastSyncedAt: string | null;
+  syncError: string | null;
+  
   // Computed (cached)
   _cachedScores: ComputedScores | null;
   
+  // Actions - API Sync
+  loadFromAPI: () => Promise<void>;
+  syncToAPI: (testId: string, update: Record<string, unknown>) => Promise<void>;
+  createCustomTestInAPI: (control: Control) => Promise<string | null>;
+  deleteCustomTestInAPI: (testId: string) => Promise<boolean>;
+  
   // Actions - Controls
   setControls: (controls: Control[]) => void;
-  addControl: (control: Omit<Control, 'id' | 'createdAt' | 'createdBy' | 'isCustom'>) => void;
+  addControl: (control: Omit<Control, 'id' | 'createdAt' | 'createdBy' | 'isCustom'>) => Promise<void>;
   updateControl: (controlId: string, updates: Partial<Control>) => void;
   deleteControl: (controlId: string) => void;
   toggleControlEnabled: (controlId: string) => void;
@@ -79,6 +91,7 @@ interface ZeroTrustState {
   
   // Actions - Results
   setControlResults: (results: ControlResult[]) => void;
+  updateControlTestResult: (controlId: string, testResult: TestResult) => void;
   updateControlStatus: (controlId: string, status: ControlStatus, notes?: string) => void;
   
   // Actions - Licenses
@@ -120,32 +133,172 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
       currentUser: DEFAULT_USER,
       customControls: [],
       disabledControlIds: new Set<string>(),
+      isLoading: false,
+      lastSyncedAt: null,
+      syncError: null,
       _cachedScores: null,
+      
+      // Actions - API Sync
+      loadFromAPI: async () => {
+        set({ isLoading: true, syncError: null });
+        try {
+          const data = await testConfigService.loadTestConfigurations();
+          const state = get();
+          
+          // Process default test overrides
+          const newDisabledIds = new Set<string>();
+          const newControlResults = [...state.controlResults];
+          const newControls = [...state.controls];
+          
+          for (const config of data.defaults) {
+            if (!config.isEnabled) {
+              newDisabledIds.add(config.testId);
+            }
+            // Update result status if different
+            const resultIdx = newControlResults.findIndex(r => r.controlId === config.testId);
+            if (resultIdx >= 0 && config.actionStatus) {
+              newControlResults[resultIdx] = {
+                ...newControlResults[resultIdx],
+                status: testConfigService.apiStatusToControlStatus(config.actionStatus),
+              };
+            }
+            // Apply title/description overrides to default controls
+            if (config.title || config.description) {
+              const controlIdx = newControls.findIndex(c => c.id === config.testId);
+              if (controlIdx >= 0) {
+                newControls[controlIdx] = {
+                  ...newControls[controlIdx],
+                  ...(config.title ? { title: config.title } : {}),
+                  ...(config.description ? { description: config.description } : {}),
+                };
+              }
+            }
+          }
+          
+          // Process custom tests
+          const customControls = data.customs.map(testConfigService.customTestResponseToControl);
+          
+          set({
+            controls: newControls,
+            disabledControlIds: newDisabledIds,
+            controlResults: newControlResults,
+            customControls,
+            isLoading: false,
+            lastSyncedAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          console.error('[ZeroTrustStore] loadFromAPI failed:', error);
+          set({ 
+            isLoading: false, 
+            syncError: error instanceof Error ? error.message : 'Failed to load configurations' 
+          });
+        }
+      },
+      
+      syncToAPI: async (testId, update) => {
+        try {
+          // Check if it's a custom test
+          const state = get();
+          const isCustom = state.customControls.some(c => c.id === testId);
+          
+          if (isCustom) {
+            // Use custom test update endpoint
+            await testConfigService.updateCustomTest(testId, {
+              title: update.title as string | undefined,
+              description: update.description as string | undefined,
+              category: update.category as string | undefined,
+              risk: update.risk as string | undefined,
+              detection_mode: update.detectionMode as string | undefined,
+              graph_query_config: update.graphQueryConfig as any,
+              checklist_config: update.checklistConfig as any,
+              is_enabled: update.enabled as boolean | undefined,
+              action_status: update.actionStatus as string | undefined,
+            });
+          } else {
+            // Use default test update endpoint
+            await testConfigService.updateTestConfig(testId, {
+              is_enabled: update.is_enabled as boolean | undefined ?? update.enabled as boolean | undefined,
+              action_status: update.action_status as string | undefined ?? update.actionStatus as string | undefined,
+              action_notes: update.action_notes as string | undefined,
+              weight_override: update.weight_override as number | undefined,
+              title: update.title as string | undefined,
+              description: update.description as string | undefined,
+            });
+          }
+        } catch (error) {
+          console.error('Failed to sync to API:', error);
+          // Don't throw - just log. Local state is source of truth for now
+        }
+      },
+      
+      createCustomTestInAPI: async (control) => {
+        try {
+          const response = await testConfigService.createCustomTest({
+            title: control.title,
+            description: control.description,
+            pillar: control.pillar,
+            category: control.category,
+            risk: control.risk?.toLowerCase(),
+            detection_mode: control.detectionMode || 'manual',
+            graph_query_config: control.graphQueryConfig,
+            checklist_config: control.checklistConfig,
+          });
+          return response.testId;
+        } catch (error) {
+          console.error('Failed to create custom test in API:', error);
+          return null;
+        }
+      },
+      
+      deleteCustomTestInAPI: async (testId) => {
+        try {
+          await testConfigService.deleteCustomTest(testId);
+          return true;
+        } catch (error) {
+          console.error('Failed to delete custom test from API:', error);
+          return false;
+        }
+      },
       
       // Actions - Controls
       setControls: (controls) => {
         set({ controls, _cachedScores: null });
       },
       
-      addControl: (controlData) => {
+      addControl: async (controlData) => {
         const state = get();
-        const id = `CUSTOM-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
-        const newControl: Control = {
+        
+        // Create in API first to get the server-generated ID
+        const tempControl: Control = {
           ...controlData,
-          id,
+          id: 'temp-' + Date.now(),
           isCustom: true,
           enabled: true,
           createdAt: new Date().toISOString(),
           createdBy: state.currentUser.email,
         };
         
+        const apiTestId = await get().createCustomTestInAPI(tempControl);
+        
+        if (!apiTestId) {
+          console.error('Failed to create custom test in API');
+          return;
+        }
+        
+        // Use the API-generated ID
+        const newControl: Control = {
+          ...tempControl,
+          id: apiTestId,
+        };
+        
         get().addAuditEvent({
-          type: 'STATUS_CHANGED',
+          type: 'TEST_CREATED',
           actor: state.currentUser.email,
           details: {
-            controlId: id,
+            controlId: apiTestId,
+            controlTitle: tempControl.title,
             before: null,
-            after: 'created',
+            after: { title: tempControl.title },
           },
         });
         
@@ -169,12 +322,40 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
             actor: state.currentUser.email,
             details: {
               controlId,
+              controlTitle: state.customControls[customIndex].title,
               before: state.customControls[customIndex],
               after: updates,
             },
           });
           
           set({ customControls: newCustomControls, _cachedScores: null });
+          
+          // Sync to API
+          get().syncToAPI(controlId, updates);
+          return;
+        }
+        
+        // Check if it's a default control
+        const defaultIndex = state.controls.findIndex(c => c.id === controlId);
+        if (defaultIndex >= 0) {
+          const newControls = [...state.controls];
+          newControls[defaultIndex] = { ...newControls[defaultIndex], ...updates };
+          
+          get().addAuditEvent({
+            type: 'STATUS_CHANGED',
+            actor: state.currentUser.email,
+            details: {
+              controlId,
+              controlTitle: state.controls[defaultIndex].title,
+              before: state.controls[defaultIndex],
+              after: updates,
+            },
+          });
+          
+          set({ controls: newControls, _cachedScores: null });
+          
+          // Sync to API
+          get().syncToAPI(controlId, updates);
         }
       },
       
@@ -183,13 +364,17 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
         const control = state.customControls.find(c => c.id === controlId);
         
         if (control?.isCustom) {
+          // Delete from API
+          get().deleteCustomTestInAPI(controlId);
+          
           get().addAuditEvent({
-            type: 'STATUS_CHANGED',
+            type: 'TEST_DELETED',
             actor: state.currentUser.email,
             details: {
               controlId,
-              before: 'exists',
-              after: 'deleted',
+              controlTitle: control.title,
+              before: { title: control.title },
+              after: null,
             },
           });
           
@@ -203,8 +388,9 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
       toggleControlEnabled: (controlId) => {
         const state = get();
         const newDisabled = new Set(state.disabledControlIds);
+        const isNowEnabled = newDisabled.has(controlId);
         
-        if (newDisabled.has(controlId)) {
+        if (isNowEnabled) {
           newDisabled.delete(controlId);
         } else {
           newDisabled.add(controlId);
@@ -221,6 +407,9 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
         });
         
         set({ disabledControlIds: newDisabled, _cachedScores: null });
+        
+        // Sync to API in background
+        get().syncToAPI(controlId, { is_enabled: isNowEnabled });
       },
       
       setControlEnabled: (controlId, enabled) => {
@@ -283,6 +472,47 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
         set({ controlResults: results, _cachedScores: null });
       },
       
+      updateControlTestResult: (controlId, testResult) => {
+        const state = get();
+        const now = new Date().toISOString();
+        const existingIdx = state.controlResults.findIndex(r => r.controlId === controlId);
+        let newResults: ControlResult[];
+        
+        if (existingIdx >= 0) {
+          newResults = [...state.controlResults];
+          newResults[existingIdx] = {
+            ...newResults[existingIdx],
+            result: testResult,
+            lastCheckedAt: now,
+          };
+        } else {
+          newResults = [
+            ...state.controlResults,
+            {
+              controlId,
+              result: testResult,
+              status: ControlStatus.TO_ADDRESS,
+              lastCheckedAt: now,
+            },
+          ];
+        }
+        
+        set({ controlResults: newResults, _cachedScores: null });
+        
+        const control = [...state.controls, ...state.customControls].find(c => c.id === controlId);
+        
+        get().addAuditEvent({
+          type: 'STATUS_CHANGED',
+          actor: state.currentUser.email,
+          details: {
+            controlId,
+            controlTitle: control?.title,
+            before: { result: existingIdx >= 0 ? state.controlResults[existingIdx].result : 'not_run' },
+            after: { result: testResult },
+          },
+        });
+      },
+      
       updateControlStatus: (controlId, status, notes) => {
         const state = get();
         const existingIndex = state.controlResults.findIndex(r => r.controlId === controlId);
@@ -323,6 +553,12 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
         }
         
         set({ controlResults: newResults, _cachedScores: null });
+        
+        // Sync to API in background
+        get().syncToAPI(controlId, { 
+          action_status: testConfigService.controlStatusToApiStatus(status),
+          action_notes: notes,
+        });
       },
       
       // Actions - Licenses

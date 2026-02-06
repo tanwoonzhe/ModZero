@@ -1,5 +1,6 @@
 """Main entrypoint for the ModZero backend."""
 
+import os
 import secrets
 from fastapi import FastAPI, Request, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,15 +18,23 @@ from .init_superuser import create_initial_superuser
 
 settings = get_settings()
 
-# HTTP Basic auth for docs
+# HTTP Basic auth for docs - use same credentials as superuser
+# This allows unified login with admin/admin123 for both app and docs
+DOCS_USERNAME = os.getenv("INITIAL_SUPERUSER_USERNAME", "admin")
+DOCS_PASSWORD = os.getenv("INITIAL_SUPERUSER_PASSWORD", "admin123")
+
 security = HTTPBasic()
 
 
 def verify_docs_credentials(credentials: HTTPBasicCredentials = Depends(security)):
-    """Verify credentials for accessing API documentation."""
-    # In production, use environment variables for these credentials
-    correct_username = secrets.compare_digest(credentials.username, "admin")
-    correct_password = secrets.compare_digest(credentials.password, settings.secret_key)
+    """Verify credentials for accessing API documentation.
+    
+    Uses the same credentials as the initial superuser for consistency.
+    Username: admin (or INITIAL_SUPERUSER_USERNAME env var)
+    Password: admin123 (or INITIAL_SUPERUSER_PASSWORD env var)
+    """
+    correct_username = secrets.compare_digest(credentials.username, DOCS_USERNAME)
+    correct_password = secrets.compare_digest(credentials.password, DOCS_PASSWORD)
     if not (correct_username and correct_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

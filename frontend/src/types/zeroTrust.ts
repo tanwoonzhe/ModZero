@@ -156,6 +156,8 @@ export type LicenseKey =
 export interface Control {
   /** Unique identifier, e.g., "ZT-IDENTITY-0001" */
   id: string;
+  /** API test identifier for running default tests (e.g., "21770") */
+  testId?: string;
   /** Human-readable title */
   title: string;
   /** Detailed description of the control */
@@ -259,7 +261,7 @@ export interface AuditEvent {
   /** Unique event ID */
   id: string;
   /** Event type */
-  type: "WEIGHT_CHANGED" | "STATUS_CHANGED" | "LICENSE_CHANGED";
+  type: "WEIGHT_CHANGED" | "STATUS_CHANGED" | "LICENSE_CHANGED" | "TEST_CREATED" | "TEST_DELETED" | "TEST_RESULT_CHANGED" | "CONTROL_ENABLED" | "CONTROL_DISABLED" | "BULK_ENABLE" | "BULK_DISABLE";
   /** Who made the change */
   actor: string;
   /** ISO timestamp */
@@ -267,6 +269,7 @@ export interface AuditEvent {
   /** Change details */
   details: {
     controlId?: string;
+    controlTitle?: string;
     pillar?: Pillar;
     before: unknown;
     after: unknown;

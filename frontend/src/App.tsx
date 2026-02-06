@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { Route, Routes, useLocation, Navigate } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import Layout from "./components/Layout";
@@ -20,10 +20,32 @@ import ZeroTrustPoliciesPage from "./pages/ZeroTrustPoliciesPage";
 import IdentityTestingPageLive from "./pages/IdentityTestingPageLive";
 import DevicesTestingPageLive from "./pages/DevicesTestingPageLive";
 import ZeroTrustTestingPage from "./pages/ZeroTrustTestingPage";
+import { useZeroTrustStore } from "./store/zeroTrustStore";
+import api from "./api";
 
 function App() {
   const location = useLocation();
   const isLogin = location.pathname === "/login";
+  const loadFromAPI = useZeroTrustStore(state => state.loadFromAPI);
+  const setCurrentUser = useZeroTrustStore(state => state.setCurrentUser);
+  
+  // Load test configurations and current user from API on mount (when logged in)
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (token && !isLogin) {
+      loadFromAPI();
+      // Fetch actual logged-in user info
+      api.get('/auth/me').then(res => {
+        const u = res.data;
+        setCurrentUser({
+          id: u.user_id,
+          email: u.email,
+          name: u.username,
+          role: u.role === 'admin' ? 'Admin' : u.role === 'operator' ? 'Operator' : 'Viewer',
+        });
+      }).catch(() => { /* ignore - will use default */ });
+    }
+  }, [loadFromAPI, setCurrentUser, isLogin]);
 
   // If user not logged in, redirect to login for protected routes
   const token = localStorage.getItem("token");
@@ -34,7 +56,7 @@ function App() {
   return (
     <>
       <Toaster
-        position="top-right"
+        position="bottom-right"
         toastOptions={{
           duration: 3000,
           style: {
