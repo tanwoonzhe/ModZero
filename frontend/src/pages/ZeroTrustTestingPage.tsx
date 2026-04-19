@@ -1,9 +1,12 @@
 /**
  * Zero Trust Testing Page
  * 
- * Unified testing page for Identity and Devices pillars with:
- * - Two tabs: Default Tests and Custom Tests
- * - Full CRUD operations for custom tests (add, edit, delete)
+ * Unified testing page for Identity and Devices pillars with dual-layer design:
+ * - Three tabs: Baseline Checks, Custom Policies, Custom Tests
+ * - Built-in baseline checks from Microsoft ZT Assessment (read-only reference)
+ * - Custom policies for customer-specific enforced rules or thresholds
+ * - Custom tests for additional user-defined security evaluations
+ * - Full CRUD operations for custom tests and policies
  * - Enable/disable toggle for all tests
  * - Bulk actions (enable all, disable all)
  * - Status management (To Address, Planned, Risk Accepted, etc.)
@@ -29,6 +32,8 @@ import {
   FaHistory,
   FaPlay,
   FaSpinner,
+  FaClipboardList,
+  FaGavel,
 } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import {
@@ -42,6 +47,8 @@ import {
   GraphQueryConfig,
   ChecklistConfig,
   ChecklistItem,
+  CustomPolicy,
+  EnforcementMode,
   GRAPH_API_ENDPOINTS,
   STATUS_DISPLAY_NAMES,
   STATUS_COLORS,
@@ -55,6 +62,7 @@ import {
   selectIsAdmin,
   selectControls,
   selectCustomControls,
+  selectCustomPolicies,
   selectDisabledControlIds,
   selectControlResults,
   selectTenantLicenses,
@@ -96,6 +104,7 @@ const ZeroTrustTestingPage: React.FC<ZeroTrustTestingPageProps> = ({
   const isAdmin = useZeroTrustStore(selectIsAdmin);
   const defaultControls = useZeroTrustStore(selectControls);
   const customControls = useZeroTrustStore(selectCustomControls);
+  const customPolicies = useZeroTrustStore(selectCustomPolicies);
   const disabledControlIds = useZeroTrustStore(selectDisabledControlIds);
   const controlResults = useZeroTrustStore(selectControlResults);
   const tenantLicenses = useZeroTrustStore(selectTenantLicenses);
@@ -112,8 +121,14 @@ const ZeroTrustTestingPage: React.FC<ZeroTrustTestingPageProps> = ({
   
   const updateControlTestResult = useZeroTrustStore(state => state.updateControlTestResult);
   
+  // Custom policy actions
+  const addCustomPolicy = useZeroTrustStore(state => state.addCustomPolicy);
+  const updateCustomPolicyAction = useZeroTrustStore(state => state.updateCustomPolicy);
+  const removeCustomPolicy = useZeroTrustStore(state => state.removeCustomPolicy);
+  const runCustomPolicyCheck = useZeroTrustStore(state => state.runCustomPolicyCheck);
+  
   // Local state
-  const [activeTab, setActiveTab] = useState<'default' | 'custom'>('default');
+  const [activeTab, setActiveTab] = useState<'baseline' | 'policies' | 'custom'>('baseline');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatuses, setSelectedStatuses] = useState<ControlStatus[]>([]);
   const [selectedRisks, setSelectedRisks] = useState<string[]>([]);
@@ -127,6 +142,10 @@ const ZeroTrustTestingPage: React.FC<ZeroTrustTestingPageProps> = ({
   const [showBulkMenu, setShowBulkMenu] = useState(false);
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [runningTestId, setRunningTestId] = useState<string | null>(null);
+  const [showAddPolicyModal, setShowAddPolicyModal] = useState(false);
+  const [editingPolicy, setEditingPolicy] = useState<CustomPolicy | null>(null);
+  const [showDeletePolicyConfirm, setShowDeletePolicyConfirm] = useState<string | null>(null);
+  const [runningPolicyId, setRunningPolicyId] = useState<string | null>(null);
   
   // Combine default and custom controls for this pillar
   const allControls = useMemo(() => {
@@ -134,6 +153,12 @@ const ZeroTrustTestingPage: React.FC<ZeroTrustTestingPageProps> = ({
     const customs = customControls.filter(c => c.pillar === pillar);
     return { defaults, customs };
   }, [defaultControls, customControls, pillar]);
+  
+  // Filter custom policies for this pillar
+  const pillarPolicies = useMemo(
+    () => customPolicies.filter(p => p.pillar === pillar),
+    [customPolicies, pillar]
+  );
   
   // Keep selectedControl in sync with store updates (for checklist toggles, etc.)
   useEffect(() => {
@@ -459,15 +484,26 @@ const ZeroTrustTestingPage: React.FC<ZeroTrustTestingPageProps> = ({
       {/* Tab Selector */}
       <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg w-fit">
         <button
-          onClick={() => setActiveTab('default')}
+          onClick={() => setActiveTab('baseline')}
           className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-            activeTab === 'default'
+            activeTab === 'baseline'
               ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
               : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
           }`}
         >
           <FaShieldAlt className="inline mr-2" size={14} />
-          Default Tests ({allControls.defaults.length})
+          Baseline Checks ({allControls.defaults.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('policies')}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === 'policies'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          <FaGavel className="inline mr-2" size={14} />
+          Custom Policies ({pillarPolicies.length})
         </button>
         <button
           onClick={() => setActiveTab('custom')}
@@ -477,13 +513,13 @@ const ZeroTrustTestingPage: React.FC<ZeroTrustTestingPageProps> = ({
               : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
           }`}
         >
-          <FaPlus className="inline mr-2" size={14} />
+          <FaClipboardList className="inline mr-2" size={14} />
           Custom Tests ({allControls.customs.length})
         </button>
       </div>
 
-      {/* Default Tests Tab Content */}
-      {activeTab === 'default' && (
+      {/* Baseline Checks Tab Content */}
+      {activeTab === 'baseline' && (
         <>
           {/* Score Summary */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -687,6 +723,172 @@ const ZeroTrustTestingPage: React.FC<ZeroTrustTestingPageProps> = ({
         </>
       )}
 
+      {/* Custom Policies Tab Content */}
+      {activeTab === 'policies' && (
+        <div className="space-y-4">
+          {/* Header with description and add button */}
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Define organization-specific security policies with enforcement rules and thresholds.
+              </p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                Custom policies complement built-in baseline checks and can be set to <span className="font-medium text-amber-600">informational</span> or <span className="font-medium text-red-600">enforced</span> mode.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowAddPolicyModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+            >
+              <FaPlus size={14} />
+              Add Custom Policy
+            </button>
+          </div>
+
+          {/* Policies List */}
+          {pillarPolicies.length > 0 ? (
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 dark:bg-gray-900/50">
+                    <tr className="text-xs text-gray-500 uppercase tracking-wider">
+                      <th className="px-4 py-3 text-left w-12">Enabled</th>
+                      <th className="px-4 py-3 text-left">Policy</th>
+                      <th className="px-4 py-3 text-left">Enforcement</th>
+                      <th className="px-4 py-3 text-left">Scope</th>
+                      <th className="px-4 py-3 text-left">Result</th>
+                      <th className="px-4 py-3 text-left">Risk</th>
+                      <th className="px-4 py-3 text-left">Last Run</th>
+                      <th className="px-4 py-3 text-left">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                    {pillarPolicies.map(policy => (
+                      <tr
+                        key={policy.policyId}
+                        className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${!policy.isEnabled ? 'opacity-50' : ''}`}
+                      >
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => updateCustomPolicyAction(policy.policyId, { is_enabled: !policy.isEnabled })}
+                            className={`p-1 rounded transition-colors ${policy.isEnabled ? 'text-green-500 hover:text-green-600' : 'text-gray-400 hover:text-gray-500'}`}
+                          >
+                            {policy.isEnabled ? <FaToggleOn size={20} /> : <FaToggleOff size={20} />}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div>
+                            <p className="font-medium text-gray-900 dark:text-white text-sm">{policy.title}</p>
+                            {policy.description && (
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">{policy.description}</p>
+                            )}
+                            {policy.category && (
+                              <span className="inline-block mt-1 px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs text-gray-600 dark:text-gray-300">{policy.category}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${
+                            policy.enforcementMode === 'enforced'
+                              ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                          }`}>
+                            <FaGavel size={10} />
+                            {policy.enforcementMode === 'enforced' ? 'Enforced' : 'Informational'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                          {policy.scope || '—'}
+                        </td>
+                        <td className="px-4 py-3">
+                          {policy.lastTestResult ? (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                              policy.lastTestResult === 'passed' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                              policy.lastTestResult === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                              'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                            }`}>
+                              {policy.lastTestResult.charAt(0).toUpperCase() + policy.lastTestResult.slice(1)}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">Not run</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {policy.risk ? (
+                            <span className={`text-xs font-medium ${
+                              policy.risk === 'High' ? 'text-red-600' :
+                              policy.risk === 'Medium' ? 'text-amber-600' : 'text-green-600'
+                            }`}>{policy.risk}</span>
+                          ) : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-500">
+                          {policy.lastRunAt ? new Date(policy.lastRunAt).toLocaleDateString() : '—'}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1">
+                            {policy.detectionMode && policy.detectionMode !== 'manual' && (
+                              <button
+                                onClick={async () => {
+                                  setRunningPolicyId(policy.policyId);
+                                  const result = await runCustomPolicyCheck(policy.policyId);
+                                  setRunningPolicyId(null);
+                                  if (result) {
+                                    toast.success(`Policy check: ${result.status}`);
+                                  } else {
+                                    toast.error('Failed to run policy check');
+                                  }
+                                }}
+                                disabled={runningPolicyId === policy.policyId}
+                                className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded transition-colors"
+                                title="Run policy check"
+                              >
+                                {runningPolicyId === policy.policyId ? <FaSpinner className="animate-spin" size={14} /> : <FaPlay size={14} />}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setEditingPolicy(policy)}
+                              className="p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                              title="Edit policy"
+                            >
+                              <FaEdit size={14} />
+                            </button>
+                            <button
+                              onClick={() => setShowDeletePolicyConfirm(policy.policyId)}
+                              className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
+                              title="Delete policy"
+                            >
+                              <FaTrash size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-12 text-center">
+              <FaGavel className="mx-auto text-gray-300 dark:text-gray-600 mb-4" size={48} />
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No Custom Policies Yet</h3>
+              <p className="text-gray-500 dark:text-gray-400 mb-2 max-w-md mx-auto">
+                Custom policies let you define organization-specific security rules and thresholds that complement the built-in Microsoft Entra baseline checks.
+              </p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mb-6 max-w-md mx-auto">
+                Policies can be <span className="font-medium text-amber-600">informational</span> (advisory) or <span className="font-medium text-red-600">enforced</span> (active).
+              </p>
+              <button
+                onClick={() => setShowAddPolicyModal(true)}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              >
+                <FaPlus className="inline mr-2" size={14} />
+                Add Your First Custom Policy
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Custom Tests Tab Content */}
       {activeTab === 'custom' && (
         <div className="space-y-4">
@@ -802,6 +1004,76 @@ const ZeroTrustTestingPage: React.FC<ZeroTrustTestingPageProps> = ({
           })}
           onClose={() => setShowAuditLog(false)}
           onClearEvents={clearAuditEvents}
+        />
+      )}
+
+      {/* Add Policy Modal */}
+      {showAddPolicyModal && (
+        <PolicyFormModal
+          pillar={pillar}
+          onClose={() => setShowAddPolicyModal(false)}
+          onSave={async (data) => {
+            const result = await addCustomPolicy({
+              title: data.title,
+              description: data.description,
+              pillar: pillar.toLowerCase(),
+              category: data.category,
+              module: data.module,
+              scope: data.scope,
+              enforcement_mode: data.enforcementMode,
+              risk: data.risk?.toLowerCase(),
+              severity: data.severity?.toLowerCase(),
+              detection_mode: data.detectionMode,
+              graph_query_config: data.graphQueryConfig,
+              checklist_config: data.checklistConfig,
+              threshold_config: data.thresholdConfig,
+            });
+            if (result) {
+              toast.success('Custom policy created');
+              setShowAddPolicyModal(false);
+            } else {
+              toast.error('Failed to create policy');
+            }
+          }}
+        />
+      )}
+
+      {/* Edit Policy Modal */}
+      {editingPolicy && (
+        <PolicyFormModal
+          pillar={pillar}
+          policy={editingPolicy}
+          onClose={() => setEditingPolicy(null)}
+          onSave={async (data) => {
+            await updateCustomPolicyAction(editingPolicy.policyId, {
+              title: data.title,
+              description: data.description,
+              category: data.category,
+              module: data.module,
+              scope: data.scope,
+              enforcement_mode: data.enforcementMode,
+              risk: data.risk?.toLowerCase(),
+              severity: data.severity?.toLowerCase(),
+              detection_mode: data.detectionMode,
+              graph_query_config: data.graphQueryConfig,
+              checklist_config: data.checklistConfig,
+              threshold_config: data.thresholdConfig,
+            });
+            toast.success('Policy updated');
+            setEditingPolicy(null);
+          }}
+        />
+      )}
+
+      {/* Delete Policy Confirmation */}
+      {showDeletePolicyConfirm && (
+        <DeleteConfirmModal
+          onClose={() => setShowDeletePolicyConfirm(null)}
+          onConfirm={async () => {
+            await removeCustomPolicy(showDeletePolicyConfirm);
+            toast.success('Policy deleted');
+            setShowDeletePolicyConfirm(null);
+          }}
         />
       )}
     </div>
@@ -2287,6 +2559,234 @@ const AuditLogModal: React.FC<AuditLogModalProps> = ({ events, onClose, onClearE
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// POLICY FORM MODAL
+// ============================================================================
+
+interface PolicyFormData {
+  title: string;
+  description?: string;
+  category?: string;
+  module?: string;
+  scope?: string;
+  enforcementMode: string;
+  risk?: string;
+  severity?: string;
+  detectionMode?: string;
+  graphQueryConfig?: Record<string, unknown>;
+  checklistConfig?: Record<string, unknown>;
+  thresholdConfig?: Record<string, unknown>;
+}
+
+interface PolicyFormModalProps {
+  pillar: Pillar;
+  policy?: CustomPolicy;
+  onClose: () => void;
+  onSave: (data: PolicyFormData) => Promise<void>;
+}
+
+const PolicyFormModal: React.FC<PolicyFormModalProps> = ({
+  pillar,
+  policy,
+  onClose,
+  onSave,
+}) => {
+  const isEdit = !!policy;
+  const [title, setTitle] = useState(policy?.title || '');
+  const [description, setDescription] = useState(policy?.description || '');
+  const [category, setCategory] = useState(policy?.category || '');
+  const [module, setModule] = useState(policy?.module || '');
+  const [scope, setScope] = useState(policy?.scope || '');
+  const [enforcementMode, setEnforcementMode] = useState(policy?.enforcementMode || 'informational');
+  const [risk, setRisk] = useState(policy?.risk || '');
+  const [severity, setSeverity] = useState(policy?.severity || '');
+  const [detectionMode, setDetectionMode] = useState(policy?.detectionMode || 'manual');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+
+    setSaving(true);
+    await onSave({
+      title: title.trim(),
+      description: description.trim() || undefined,
+      category: category.trim() || undefined,
+      module: module.trim() || undefined,
+      scope: scope.trim() || undefined,
+      enforcementMode,
+      risk: risk || undefined,
+      severity: severity || undefined,
+      detectionMode: detectionMode || undefined,
+    });
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto">
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <FaGavel className="text-indigo-500" />
+              {isEdit ? 'Edit Custom Policy' : 'Add Custom Policy'}
+            </h2>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+              <FaTimes className="text-gray-400" />
+            </button>
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            {pillar} pillar &middot; Define organization-specific security rules
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {/* Title */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title *</label>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              required
+              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm"
+              placeholder="e.g., Require MFA for all admin accounts"
+            />
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm"
+              placeholder="Detailed description of this policy..."
+            />
+          </div>
+
+          {/* Two-column layout */}
+          <div className="grid grid-cols-2 gap-4">
+            {/* Enforcement Mode */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Enforcement Mode</label>
+              <select
+                value={enforcementMode}
+                onChange={e => setEnforcementMode(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm"
+              >
+                <option value="informational">Informational (Advisory)</option>
+                <option value="enforced">Enforced (Active)</option>
+              </select>
+            </div>
+
+            {/* Risk */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Risk Level</label>
+              <select
+                value={risk}
+                onChange={e => setRisk(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm"
+              >
+                <option value="">Not set</option>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+              </select>
+            </div>
+
+            {/* Category */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Category</label>
+              <input
+                type="text"
+                value={category}
+                onChange={e => setCategory(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm"
+                placeholder="e.g., MFA, Conditional Access"
+              />
+            </div>
+
+            {/* Module */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Module</label>
+              <input
+                type="text"
+                value={module}
+                onChange={e => setModule(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm"
+                placeholder="e.g., Authentication, Access Control"
+              />
+            </div>
+          </div>
+
+          {/* Scope */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Scope</label>
+            <input
+              type="text"
+              value={scope}
+              onChange={e => setScope(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm"
+              placeholder="e.g., All Users, Admins Only, Guest Accounts"
+            />
+          </div>
+
+          {/* Severity */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Severity</label>
+            <select
+              value={severity}
+              onChange={e => setSeverity(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm"
+            >
+              <option value="">Not set</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+
+          {/* Detection Mode */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Detection Mode</label>
+            <select
+              value={detectionMode}
+              onChange={e => setDetectionMode(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm"
+            >
+              <option value="manual">Manual (set result manually)</option>
+              <option value="graph_query">Graph API Query (automatic)</option>
+              <option value="checklist">Checklist (verify items)</option>
+            </select>
+          </div>
+
+          {/* Actions */}
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!title.trim() || saving}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              {saving && <FaSpinner className="animate-spin" size={14} />}
+              {isEdit ? 'Update Policy' : 'Create Policy'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

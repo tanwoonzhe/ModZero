@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field("HS256", env="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(60 * 8, env="ACCESS_TOKEN_EXPIRE_MINUTES")
 
+    # CORS
+    cors_origins: str = Field("*", env="CORS_ORIGINS")
+
     # Azure (placeholders)
     azure_tenant_id: Optional[str] = Field(None, env="AZURE_TENANT_ID")
     azure_client_id: Optional[str] = Field(None, env="AZURE_CLIENT_ID")

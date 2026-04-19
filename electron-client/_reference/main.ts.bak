@@ -1,0 +1,578 @@
+/**
+ * Electron main process for ModZero Client.
+ *
+ * Responsibilities:
+ *  - System tray with Twingate-style context menu
+ *  - BrowserWindow with frameless title bar
+ *  - IPC handlers for auth, resources, networks, troubleshoot, settings
+ *  - Socket.IO for real-time events (resource updates, force-logout, policy changes)
+ *  - Sanitized logger + log upload
+ *  - Start at Login toggle
+ */
+
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Tray,
+  Menu,
+  nativeImage,
+  Notification,
+  shell,
+  clipboard,
+} from 'electron';
+import { autoUpdater } from 'electron-updater';
+import * as path from 'path';
+import * as os from 'os';
+import { getDeviceInfo, DeviceInfo } from './device-info';
+import { ApiClient, ClientResource, UserProfile } from './api-client';
+import { logger } from './logger';
+import { initSocketIO, disconnectSocketIO, isSocketConnected } from './socket-manager';
+import { createLogArchive, uploadLogArchive } from './log-uploader';
+import Store from 'electron-store';
+
+// ── Single-instance lock ───────────────────────────────────────────
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+}
+
+// ── Persistent settings store ──────────────────────────────────────
+const store = new Store({
+  defaults: {
+    serverUrl: 'http://localhost:8000',
+    autoStart: false,
+    minimizeToTray: true,
+    selectedNetwork: '',
+    secureDns: false,
+    shareCrashReports: false,
+    collectDetailedLogs: false,
+  },
+});
+
+let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let apiClient: ApiClient;
+let deviceInfo: DeviceInfo | null = null;
+let userProfile: UserProfile | null = null;
+
+const isDev = !app.isPackaged;
+const APP_VERSION = app.getVersion() || '1.0.0';
+
+// ── Window ─────────────────────────────────────────────────────────
+
+function createWindow(): void {
+  mainWindow = new BrowserWindow({
+    width: 380,
+    height: 620,
+    minWidth: 350,
+    minHeight: 500,
+    frame: false,
+    resizable: true,
+    show: false,
+    skipTaskbar: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:5174').catch(() => {
+      mainWindow?.loadURL('http://localhost:5173');
+    });
+  } else {
+    mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  }
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show();
+  });
+
+  mainWindow.on('close', (event) => {
+    if (store.get('minimizeToTray') && !(app as any).isQuitting) {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
+  });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
+
+// ── Tray (Twingate-style) ──────────────────────────────────────────
+
+function buildTrayMenu(): Menu {
+  const isConnected = isSocketConnected();
+  const user = userProfile;
+
+  return Menu.buildFromTemplate([
+    {
+      label: user ? `${user.email}` : 'Not signed in',
+      enabled: false,
+    },
+    {
+      label: isConnected ? 'Connected' : 'Disconnected',
+      enabled: false,
+    },
+    { type: 'separator' },
+    {
+      label: 'Resources',
+      click: () => {
+        mainWindow?.show();
+        mainWindow?.focus();
+        mainWindow?.webContents.send('navigate', 'resources');
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Start at Login',
+      type: 'checkbox',
+      checked: store.get('autoStart') as boolean,
+      click: (item) => {
+        store.set('autoStart', item.checked);
+        app.setLoginItemSettings({ openAtLogin: item.checked });
+        logger.info(`Start at Login: ${item.checked}`);
+      },
+    },
+    {
+      label: 'Troubleshoot',
+      submenu: [
+        {
+          label: 'View Logs',
+          click: () => {
+            shell.openPath(logger.getLogDir());
+          },
+        },
+        {
+          label: 'Share Crash Reports',
+          type: 'checkbox',
+          checked: store.get('shareCrashReports') as boolean,
+          click: (item) => {
+            store.set('shareCrashReports', item.checked);
+          },
+        },
+        {
+          label: 'Collect Detailed Logs',
+          type: 'checkbox',
+          checked: logger.getLevel() === 'debug',
+          click: (item) => {
+            logger.setLevel(item.checked ? 'debug' : 'info');
+            store.set('collectDetailedLogs', item.checked);
+          },
+        },
+        {
+          label: 'Upload Logs',
+          click: async () => {
+            await handleUploadLogs();
+          },
+        },
+        {
+          label: 'Copy Version Details',
+          click: () => {
+            const details = [
+              `ModZero Client v${APP_VERSION}`,
+              `Electron ${process.versions.electron}`,
+              `OS: ${os.platform()} ${os.release()} ${os.arch()}`,
+              `Node: ${process.versions.node}`,
+            ].join('\n');
+            clipboard.writeText(details);
+            showNotification('Copied', 'Version details copied to clipboard');
+          },
+        },
+      ],
+    },
+    { type: 'separator' },
+    {
+      label: 'Secure DNS',
+      type: 'checkbox',
+      checked: store.get('secureDns') as boolean,
+      click: (item) => {
+        store.set('secureDns', item.checked);
+        mainWindow?.webContents.send('secure-dns-changed', item.checked);
+        logger.info(`Secure DNS: ${item.checked}`);
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Log out & disconnect',
+      click: () => handleLogout(),
+    },
+    {
+      label: 'Quit ModZero',
+      click: () => {
+        (app as any).isQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+}
+
+function createTray(): void {
+  const iconPath = isDev
+    ? path.join(__dirname, '..', 'assets', 'tray-icon.png')
+    : path.join(process.resourcesPath, 'assets', 'tray-icon.png');
+
+  let trayIcon;
+  try {
+    trayIcon = nativeImage.createFromPath(iconPath);
+    if (trayIcon.isEmpty()) trayIcon = nativeImage.createEmpty();
+  } catch {
+    trayIcon = nativeImage.createEmpty();
+  }
+
+  tray = new Tray(trayIcon.isEmpty() ? nativeImage.createEmpty() : trayIcon);
+  tray.setToolTip('ModZero Client');
+  tray.setContextMenu(buildTrayMenu());
+
+  tray.on('click', () => {
+    if (mainWindow?.isVisible()) {
+      mainWindow.hide();
+    } else {
+      mainWindow?.show();
+      mainWindow?.focus();
+    }
+  });
+}
+
+function refreshTray(): void {
+  tray?.setContextMenu(buildTrayMenu());
+}
+
+// ── Helpers ────────────────────────────────────────────────────────
+
+function showNotification(title: string, body: string): void {
+  if (Notification.isSupported()) {
+    new Notification({ title, body }).show();
+  }
+}
+
+async function handleUploadLogs(): Promise<boolean> {
+  try {
+    const logDir = logger.getLogDir();
+    const zipPath = await createLogArchive(logDir);
+    const serverUrl = store.get('serverUrl') as string;
+    const token = apiClient.getToken();
+    if (!token) {
+      showNotification('Error', 'Not authenticated — please log in first');
+      return false;
+    }
+    const ok = await uploadLogArchive(zipPath, serverUrl, token);
+    if (ok) {
+      showNotification('Logs Uploaded', 'Logs sent to controller');
+    } else {
+      showNotification('Upload Failed', 'Could not upload logs');
+    }
+    return ok;
+  } catch (error: any) {
+    logger.error(`Log upload error: ${error.message}`);
+    showNotification('Upload Failed', error.message);
+    return false;
+  }
+}
+
+async function handleLogout(): Promise<void> {
+  disconnectSocketIO();
+  apiClient.setToken(null);
+  (store as any).delete('authToken');
+  userProfile = null;
+  refreshTray();
+  mainWindow?.webContents.send('logged-out');
+  mainWindow?.show();
+  logger.info('User logged out');
+}
+
+// ── Socket.IO bootstrap ───────────────────────────────────────────
+
+function connectSocketIO(): void {
+  const serverUrl = store.get('serverUrl') as string;
+  const token = apiClient.getToken();
+  if (!token) return;
+
+  initSocketIO(serverUrl, token, {
+    onResourcesUpdate: (resources) => {
+      logger.info(`Resources updated (${resources.length} items)`);
+      mainWindow?.webContents.send('resources-updated', resources);
+    },
+    onForceLogout: () => {
+      logger.warn('Force logout received from controller');
+      handleLogout();
+      showNotification('Session Ended', 'You have been logged out by the administrator');
+    },
+    onPolicyChange: () => {
+      logger.info('Policy changed — refreshing resources');
+      mainWindow?.webContents.send('policy-changed');
+    },
+  });
+}
+
+// ── IPC Handlers ───────────────────────────────────────────────────
+
+function setupIPC(): void {
+  // ── Auth ─────────────────────────────────────────────────────
+
+  ipcMain.handle('login', async (_event, { username, password }) => {
+    try {
+      const result = await apiClient.login(username, password);
+      store.set('authToken', result.access_token);
+      // Fetch user profile
+      try {
+        userProfile = await apiClient.getMe();
+      } catch {
+        userProfile = { user_id: '', username, email: username, role: '' };
+      }
+      connectSocketIO();
+      refreshTray();
+      logger.info('Login successful');
+      return { success: true };
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || error.message;
+      logger.warn(`Login failed: ${msg}`);
+      return { success: false, error: msg };
+    }
+  });
+
+  ipcMain.handle('logout', async () => {
+    await handleLogout();
+    return true;
+  });
+
+  ipcMain.handle('get-auth-status', () => {
+    return {
+      isAuthenticated: !!apiClient.getToken(),
+      user: userProfile,
+    };
+  });
+
+  // ── Resources ────────────────────────────────────────────────
+
+  ipcMain.handle('get-resources', async (_event, network?: string) => {
+    try {
+      return await apiClient.getResources(network);
+    } catch (error: any) {
+      logger.error(`get-resources failed: ${error.message}`);
+      return [];
+    }
+  });
+
+  ipcMain.handle('open-resource', async (_event, resource: ClientResource) => {
+    try {
+      if (resource.connector_url) {
+        await shell.openExternal(resource.connector_url);
+      } else {
+        const url = `${resource.protocol}://${resource.target_host}:${resource.target_port}${resource.path_prefix}`;
+        await shell.openExternal(url);
+      }
+      return true;
+    } catch (error: any) {
+      logger.error(`open-resource failed: ${error.message}`);
+      return false;
+    }
+  });
+
+  // ── Networks ─────────────────────────────────────────────────
+
+  ipcMain.handle('get-networks', async () => {
+    try {
+      return await apiClient.getNetworks();
+    } catch (error: any) {
+      logger.error(`get-networks failed: ${error.message}`);
+      return [];
+    }
+  });
+
+  ipcMain.handle('set-network', (_event, network: string) => {
+    store.set('selectedNetwork', network);
+    logger.info(`Network switched to: ${network}`);
+    mainWindow?.webContents.send('network-changed', network);
+    return true;
+  });
+
+  ipcMain.handle('get-selected-network', () => {
+    return store.get('selectedNetwork') || '';
+  });
+
+  // ── Device Info ──────────────────────────────────────────────
+
+  ipcMain.handle('get-device-info', async () => {
+    if (!deviceInfo) deviceInfo = await getDeviceInfo();
+    return deviceInfo;
+  });
+
+  // ── Compliance ───────────────────────────────────────────────
+
+  ipcMain.handle('check-compliance', async () => {
+    if (!deviceInfo) deviceInfo = await getDeviceInfo();
+    try {
+      const result = await apiClient.checkCompliance(deviceInfo);
+      mainWindow?.webContents.send('compliance-result', result);
+      return result;
+    } catch (error: any) {
+      logger.error(`Compliance check failed: ${error.message}`);
+      return null;
+    }
+  });
+
+  // ── Settings ─────────────────────────────────────────────────
+
+  ipcMain.handle('get-settings', () => ({
+    serverUrl: store.get('serverUrl'),
+    autoStart: store.get('autoStart'),
+    minimizeToTray: store.get('minimizeToTray'),
+    secureDns: store.get('secureDns'),
+    shareCrashReports: store.get('shareCrashReports'),
+    collectDetailedLogs: store.get('collectDetailedLogs'),
+  }));
+
+  ipcMain.handle('save-settings', (_event, settings: Record<string, any>) => {
+    Object.entries(settings).forEach(([key, value]) => {
+      store.set(key, value);
+    });
+    if (settings.serverUrl) {
+      apiClient = new ApiClient(settings.serverUrl);
+      const token = store.get('authToken') as string;
+      if (token) apiClient.setToken(token);
+    }
+    if (settings.autoStart !== undefined) {
+      app.setLoginItemSettings({ openAtLogin: settings.autoStart });
+    }
+    if (settings.collectDetailedLogs !== undefined) {
+      logger.setLevel(settings.collectDetailedLogs ? 'debug' : 'info');
+    }
+    refreshTray();
+    return true;
+  });
+
+  // ── Troubleshoot ─────────────────────────────────────────────
+
+  ipcMain.handle('view-logs', () => {
+    shell.openPath(logger.getLogDir());
+  });
+
+  ipcMain.handle('upload-logs', async () => {
+    return await handleUploadLogs();
+  });
+
+  ipcMain.handle('copy-version-details', () => {
+    const details = [
+      `ModZero Client v${APP_VERSION}`,
+      `Electron ${process.versions.electron}`,
+      `OS: ${os.platform()} ${os.release()} ${os.arch()}`,
+      `Node: ${process.versions.node}`,
+    ].join('\n');
+    clipboard.writeText(details);
+    return details;
+  });
+
+  ipcMain.handle('get-connection-status', () => ({
+    socketConnected: isSocketConnected(),
+    serverUrl: store.get('serverUrl'),
+  }));
+
+  // ── Window Controls ──────────────────────────────────────────
+
+  ipcMain.handle('window-minimize', () => mainWindow?.minimize());
+  ipcMain.handle('window-close', () => mainWindow?.close());
+
+  // ── Updates ──────────────────────────────────────────────────
+
+  ipcMain.handle('check-for-updates', async () => {
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      return result?.updateInfo;
+    } catch {
+      return null;
+    }
+  });
+}
+
+// ── Auto-updater ───────────────────────────────────────────────────
+
+function setupAutoUpdater(): void {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-available', (info) => {
+    showNotification('Update Available', `Version ${info.version} is available`);
+    mainWindow?.webContents.send('update-available', info);
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    showNotification('Update Ready', `Version ${info.version} ready to install`);
+    mainWindow?.webContents.send('update-downloaded', info);
+  });
+
+  autoUpdater.on('error', (error) => {
+    logger.error(`Auto-updater error: ${error.message}`);
+  });
+}
+
+// ── App Lifecycle ──────────────────────────────────────────────────
+
+app.on('ready', async () => {
+  logger.info(`ModZero Client v${APP_VERSION} starting`);
+
+  const serverUrl = store.get('serverUrl') as string;
+  apiClient = new ApiClient(serverUrl);
+
+  // Restore token if available
+  const savedToken = store.get('authToken') as string;
+  if (savedToken) {
+    apiClient.setToken(savedToken);
+    try {
+      userProfile = await apiClient.getMe();
+      connectSocketIO();
+    } catch {
+      // Token expired — user must re-login
+      apiClient.setToken(null);
+      (store as any).delete('authToken');
+      logger.info('Saved token expired, user must re-login');
+    }
+  }
+
+  // Restore detailed log level
+  if (store.get('collectDetailedLogs')) {
+    logger.setLevel('debug');
+  }
+
+  createWindow();
+  createTray();
+  setupIPC();
+  setupAutoUpdater();
+
+  // Sync login item setting
+  app.setLoginItemSettings({ openAtLogin: store.get('autoStart') as boolean });
+
+  // Gather device info in background
+  deviceInfo = await getDeviceInfo();
+
+  if (!isDev) {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }
+
+  logger.info('ModZero Client ready');
+});
+
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+});
+
+app.on('window-all-closed', () => {
+  // Keep running in tray on Windows/Linux
+});
+
+app.on('activate', () => {
+  if (mainWindow === null) createWindow();
+});
+
+app.on('before-quit', () => {
+  (app as any).isQuitting = true;
+  disconnectSocketIO();
+  logger.info('ModZero Client shutting down');
+});

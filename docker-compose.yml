@@ -1,6 +1,7 @@
 version: "3.8"
 
 services:
+  # ── PostgreSQL Database ──────────────────────────────────────────
   db:
     image: postgres:15
     environment:
@@ -17,6 +18,7 @@ services:
       timeout: 5s
       retries: 10
 
+  # ── FastAPI Backend (Controller) ────────────────────────────────
   backend:
     build: ./backend
     environment:
@@ -33,23 +35,68 @@ services:
       AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
       AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
       AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      # CORS origins (comma-separated, * for dev)
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     depends_on:
       db:
         condition: service_healthy
     ports:
       - "8000:8000"
+    restart: unless-stopped
     volumes:
       - ./frontend/dist:/app/frontend/dist  # mount built frontend for serving static files
       - ./backend/app:/app/app  # mount backend code for hot reload
+      - ./backend/setup.sh:/app/setup.sh:ro  # setup script served via /public/connector/setup.sh
 
+  # ── React Frontend (Dashboard) ──────────────────────────────────
   frontend:
-    build: ./frontend
-    environment:
-      VITE_API_BASE: ${VITE_API_BASE}
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8000/api}
+        VITE_SOCKET_URL: ${VITE_SOCKET_URL:-}
     depends_on:
       - backend
     ports:
       - "5173:80"
+    restart: unless-stopped
+
+  # ── Sample Internal Resource (simulates intranet) ───────────────
+  intranet:
+    image: nginx:alpine
+    volumes:
+      - ./intranet/index.html:/usr/share/nginx/html/index.html:ro
+    # No ports exposed externally — only accessible via connector
+
+  # ── ModZero Connector ──────────────────────────────────────────
+  # For the demo, this connector enrolls with the controller and
+  # proxies traffic to the intranet service above.
+  #
+  # IMPORTANT: You must first create an enroll token via the dashboard
+  # (Connectors → Deploy Connector), then set MODZERO_ENROLL_TOKEN
+  # in .env before starting this service.
+  #
+  # In production, connectors are deployed independently using:
+  #   docker run ... modzero/connector:latest
+  connector:
+    build: ./connector
+    environment:
+      MODZERO_CONTROLLER_URL: "http://backend:8000"
+      MODZERO_ENROLL_TOKEN: "${MODZERO_ENROLL_TOKEN:-}"
+      MODZERO_NETWORK: "demo-network"
+      MODZERO_LABEL_HOSTNAME: "demo-connector"
+      MODZERO_LABEL_DEPLOYED_BY: "docker-compose"
+      MODZERO_CONNECTOR_LISTEN_PORT: "8443"
+      MODZERO_INSECURE_SKIP_VERIFY: "true"
+    depends_on:
+      - backend
+      - intranet
+    ports:
+      - "8443:8443"
+    volumes:
+      - connector_data:/etc/modzero-connector
+    restart: unless-stopped
 
 volumes:
   db_data:
+  connector_data:

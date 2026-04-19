@@ -1,0 +1,24 @@
+# docker-compose.prod.yml
+# Production overlay — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Overrides development defaults for cloud / VPS deployment.
+
+services:
+  backend:
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://yourdomain.com}
+    volumes: []  # Remove dev hot-reload mounts
+    restart: always
+
+  frontend:
+    build:
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-/api}
+        VITE_SOCKET_URL: ${VITE_SOCKET_URL:-}
+    restart: always
+
+  db:
+    restart: always

@@ -346,3 +346,55 @@ class SecurityTestWithResult(BaseModel):
     has_remediation_task: bool = False
 
     model_config = ConfigDict(from_attributes=True)
+
+
+## Custom Policy schemas
+
+class CustomPolicyBase(BaseModel):
+    title: str
+    description: Optional[str] = None
+    pillar: str
+    category: Optional[str] = None
+    module: Optional[str] = None
+    scope: Optional[str] = None
+    enforcement_mode: str = "informational"  # informational | enforced
+    is_enabled: bool = True
+    risk: Optional[str] = None
+    severity: Optional[str] = None
+    detection_mode: Optional[str] = None  # manual | graph_query | checklist
+    graph_query_config: Optional[Dict] = None
+    checklist_config: Optional[Dict] = None
+    threshold_config: Optional[Dict] = None
+
+
+class CustomPolicyCreate(CustomPolicyBase):
+    pass
+
+
+class CustomPolicyUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    pillar: Optional[str] = None
+    category: Optional[str] = None
+    module: Optional[str] = None
+    scope: Optional[str] = None
+    enforcement_mode: Optional[str] = None
+    is_enabled: Optional[bool] = None
+    risk: Optional[str] = None
+    severity: Optional[str] = None
+    detection_mode: Optional[str] = None
+    graph_query_config: Optional[Dict] = None
+    checklist_config: Optional[Dict] = None
+    threshold_config: Optional[Dict] = None
+
+
+class CustomPolicyOut(CustomPolicyBase):
+    policy_id: UUID
+    last_test_result: Optional[str] = None
+    last_run_at: Optional[datetime] = None
+    last_run_data: Optional[Dict] = None
+    created_by: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

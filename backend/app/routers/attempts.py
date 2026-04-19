@@ -1,5 +1,6 @@
 """Access attempt and trust evaluation endpoints."""
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..deps import get_db, get_current_user
+from ..sio_server import notify_access_attempt
 
 router = APIRouter()
 
@@ -175,7 +177,7 @@ def create_attempt(
         {"factor": "device_posture", "score": posture_score},
         {"factor": "context", "score": context_score},
     ]
-    return schemas.AttemptOut(
+    result = schemas.AttemptOut(
         attempt_id=str(attempt.attempt_id),
         user_id=str(attempt.user_id),
         device_id=str(attempt.device_id) if attempt.device_id else None,
@@ -188,6 +190,16 @@ def create_attempt(
         decision=decision,
         trust_details=resp_details,
     )
+
+    # Emit real-time event to dashboard
+    try:
+        asyncio.get_event_loop().create_task(
+            notify_access_attempt(result.model_dump(mode="json"))
+        )
+    except Exception:
+        pass  # Don't fail the request if Socket.IO notification fails
+
+    return result
 
 
 @router.get("/", response_model=list[schemas.AttemptOut])

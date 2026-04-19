@@ -1,0 +1,23 @@
+{
+  "_comment": "Manual overrides for identity test reference data. Fields here are merged on top of auto-extracted data from test_reference_data.json. Use this to supplement missing sections or customize content for ModZero.",
+  "21772": {
+    "what_was_checked_override": "Scanned all Application and ServicePrincipal objects in the tenant for passwordCredentials (client secrets). Any entity with one or more secrets is flagged.",
+    "why_it_matters_override": "Client secrets are the weakest form of application credential. They can be leaked in code repos, config files, or logs. Replacing them with certificates or managed identities significantly reduces the attack surface."
+  },
+  "21773": {
+    "what_was_checked_override": "Checked all Application and ServicePrincipal keyCredentials (certificates) for expiration dates beyond 180 days from now.",
+    "why_it_matters_override": "Long-lived certificates increase the window of exposure if compromised. Shorter certificate lifetimes enforce regular rotation and limit risk."
+  },
+  "21795": {
+    "what_was_checked_override": "Analyzed recent sign-in logs for any authentication using legacy protocols such as IMAP4, POP3, Authenticated SMTP, Exchange ActiveSync, and other pre-modern auth clients.",
+    "why_it_matters_override": "Legacy authentication protocols do not support MFA, making accounts that use them easy targets for credential-based attacks like password spraying and brute force."
+  },
+  "21801": {
+    "what_was_checked_override": "Queried user authentication method registration details to determine what percentage of users have strong (phishing-resistant) methods like FIDO2 or Windows Hello for Business registered.",
+    "why_it_matters_override": "Weak MFA methods (SMS, phone call) can be bypassed through SIM swapping and social engineering. Phishing-resistant methods provide significantly stronger protection."
+  },
+  "21796": {
+    "what_was_checked_override": "Inspected Conditional Access policies for any that block 'exchangeActiveSync' and 'other' client app types for all users with the policy in enabled state.",
+    "why_it_matters_override": "Without a Conditional Access policy explicitly blocking legacy authentication, attackers can bypass MFA requirements by using legacy protocols to access the tenant."
+  }
+}

@@ -1,0 +1,151 @@
+/**
+ * Preload script — exposes a safe IPC bridge to the renderer via contextBridge.
+ *
+ * Every IPC channel used in main.ts must be mirrored here.
+ * The renderer accesses these through `window.electronAPI`.
+ */
+
+import { contextBridge, ipcRenderer } from 'electron';
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  // ── Auth ─────────────────────────────────────────────────────
+  login: (username: string, password: string) =>
+    ipcRenderer.invoke('login', { username, password }),
+  logout: () => ipcRenderer.invoke('logout'),
+  getAuthStatus: () => ipcRenderer.invoke('get-auth-status'),
+
+  // ── Resources ────────────────────────────────────────────────
+  getResources: (network?: string) => ipcRenderer.invoke('get-resources', network),
+  openResource: (resource: any) => ipcRenderer.invoke('open-resource', resource),
+
+  // ── Networks ─────────────────────────────────────────────────
+  getNetworks: () => ipcRenderer.invoke('get-networks'),
+  setNetwork: (network: string) => ipcRenderer.invoke('set-network', network),
+  getSelectedNetwork: () => ipcRenderer.invoke('get-selected-network'),
+
+  // ── Device Info ──────────────────────────────────────────────
+  getDeviceInfo: () => ipcRenderer.invoke('get-device-info'),
+
+  // ── Compliance ───────────────────────────────────────────────
+  checkCompliance: () => ipcRenderer.invoke('check-compliance'),
+
+  // ── Settings ─────────────────────────────────────────────────
+  getSettings: () => ipcRenderer.invoke('get-settings'),
+  saveSettings: (settings: any) => ipcRenderer.invoke('save-settings', settings),
+
+  // ── Troubleshoot ─────────────────────────────────────────────
+  viewLogs: () => ipcRenderer.invoke('view-logs'),
+  uploadLogs: () => ipcRenderer.invoke('upload-logs'),
+  copyVersionDetails: () => ipcRenderer.invoke('copy-version-details'),
+  getConnectionStatus: () => ipcRenderer.invoke('get-connection-status'),
+
+  // ── Window Controls ──────────────────────────────────────────
+  minimize: () => ipcRenderer.invoke('window-minimize'),
+  close: () => ipcRenderer.invoke('window-close'),
+
+  // ── Updates ──────────────────────────────────────────────────
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+
+  // ── Event listeners (main → renderer) ────────────────────────
+  onNavigate: (callback: (page: string) => void) => {
+    ipcRenderer.on('navigate', (_event, page) => callback(page));
+  },
+  onResourcesUpdated: (callback: (resources: any[]) => void) => {
+    ipcRenderer.on('resources-updated', (_event, resources) => callback(resources));
+  },
+  onLoggedOut: (callback: () => void) => {
+    ipcRenderer.on('logged-out', () => callback());
+  },
+  onComplianceResult: (callback: (result: any) => void) => {
+    ipcRenderer.on('compliance-result', (_event, result) => callback(result));
+  },
+  onNetworkChanged: (callback: (network: string) => void) => {
+    ipcRenderer.on('network-changed', (_event, network) => callback(network));
+  },
+  onPolicyChanged: (callback: () => void) => {
+    ipcRenderer.on('policy-changed', () => callback());
+  },
+  onSecureDnsChanged: (callback: (enabled: boolean) => void) => {
+    ipcRenderer.on('secure-dns-changed', (_event, enabled) => callback(enabled));
+  },
+  onUpdateAvailable: (callback: (info: any) => void) => {
+    ipcRenderer.on('update-available', (_event, info) => callback(info));
+  },
+  onUpdateDownloaded: (callback: (info: any) => void) => {
+    ipcRenderer.on('update-downloaded', (_event, info) => callback(info));
+  },
+});
+
+// ── Type declarations for renderer ─────────────────────────────────
+
+export interface ElectronAPI {
+  login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  logout: () => Promise<boolean>;
+  getAuthStatus: () => Promise<{ isAuthenticated: boolean; user: UserProfile | null }>;
+  getResources: (network?: string) => Promise<ClientResource[]>;
+  openResource: (resource: ClientResource) => Promise<boolean>;
+  getNetworks: () => Promise<ClientNetwork[]>;
+  setNetwork: (network: string) => Promise<boolean>;
+  getSelectedNetwork: () => Promise<string>;
+  getDeviceInfo: () => Promise<any>;
+  checkCompliance: () => Promise<any>;
+  getSettings: () => Promise<AppSettings>;
+  saveSettings: (settings: Partial<AppSettings>) => Promise<boolean>;
+  viewLogs: () => Promise<void>;
+  uploadLogs: () => Promise<boolean>;
+  copyVersionDetails: () => Promise<string>;
+  getConnectionStatus: () => Promise<{ socketConnected: boolean; serverUrl: string }>;
+  minimize: () => Promise<void>;
+  close: () => Promise<void>;
+  checkForUpdates: () => Promise<any>;
+  onNavigate: (callback: (page: string) => void) => void;
+  onResourcesUpdated: (callback: (resources: ClientResource[]) => void) => void;
+  onLoggedOut: (callback: () => void) => void;
+  onComplianceResult: (callback: (result: any) => void) => void;
+  onNetworkChanged: (callback: (network: string) => void) => void;
+  onPolicyChanged: (callback: () => void) => void;
+  onSecureDnsChanged: (callback: (enabled: boolean) => void) => void;
+  onUpdateAvailable: (callback: (info: any) => void) => void;
+  onUpdateDownloaded: (callback: (info: any) => void) => void;
+}
+
+export interface ClientResource {
+  resource_id: string;
+  name: string;
+  network: string;
+  protocol: string;
+  target_host: string;
+  target_port: number;
+  path_prefix: string;
+  status: string;
+  connector_url: string | null;
+}
+
+export interface ClientNetwork {
+  network: string;
+  connector_count: number;
+  resource_count: number;
+  status: string;
+}
+
+export interface UserProfile {
+  user_id: string;
+  username: string;
+  email: string;
+  role: string;
+}
+
+export interface AppSettings {
+  serverUrl: string;
+  autoStart: boolean;
+  minimizeToTray: boolean;
+  secureDns: boolean;
+  shareCrashReports: boolean;
+  collectDetailedLogs: boolean;
+}
+
+declare global {
+  interface Window {
+    electronAPI: ElectronAPI;
+  }
+}

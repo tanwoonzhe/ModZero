@@ -20,6 +20,7 @@ import ZeroTrustPoliciesPage from "./pages/ZeroTrustPoliciesPage";
 import IdentityTestingPageLive from "./pages/IdentityTestingPageLive";
 import DevicesTestingPageLive from "./pages/DevicesTestingPageLive";
 import ZeroTrustTestingPage from "./pages/ZeroTrustTestingPage";
+import ConnectorsPage from "./pages/ConnectorsPage";
 import { useZeroTrustStore } from "./store/zeroTrustStore";
 import api from "./api";
 
@@ -94,6 +95,7 @@ function App() {
             <Route path="/policies" element={<PoliciesPage />} />
             <Route path="/zero-trust-policies" element={<ZeroTrustPoliciesPage />} />
             <Route path="/resources" element={<ResourcesPage />} />
+            <Route path="/connectors" element={<ConnectorsPage />} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/profile" element={<UserProfilePage />} />

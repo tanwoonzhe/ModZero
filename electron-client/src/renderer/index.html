@@ -3,21 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:*; style-src 'self' 'unsafe-inline' http://localhost:*; connect-src 'self' http://localhost:* ws://localhost:*;">
-    <title>ModZero Client</title>
-    <script>
-      // Immediately apply theme to prevent flash of wrong theme
-      (function() {
-        const savedTheme = localStorage.getItem("theme");
-        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-        if (savedTheme === "dark" || (!savedTheme && prefersDark)) {
-          document.documentElement.classList.add("dark");
-        }
-      })();
-    </script>
+    <title>ModZero Dashboard</title>
   </head>
-  <body class="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-50">
-    <div id="root"></div>
-    <script type="module" src="./main.tsx"></script>
+  <body>
+    <p>Loading ModZero Dashboard...</p>
   </body>
 </html>

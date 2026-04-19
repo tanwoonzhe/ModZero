@@ -277,6 +277,66 @@ export interface AuditEvent {
 }
 
 // ============================================================================
+// ENFORCEMENT & CUSTOM POLICY TYPES
+// ============================================================================
+
+/**
+ * Enforcement mode for custom policies
+ * - informational: Advisory only, does not block access
+ * - enforced: Actively enforced, may affect access decisions
+ */
+export type EnforcementMode = "informational" | "enforced";
+
+/**
+ * Customer-defined security policy
+ * Separate from built-in baseline checks (SecurityTestDefinition).
+ */
+export interface CustomPolicy {
+  /** UUID from backend */
+  policyId: string;
+  /** Human-readable title */
+  title: string;
+  /** Detailed description */
+  description?: string;
+  /** Zero Trust pillar */
+  pillar: Pillar;
+  /** Category for grouping */
+  category?: string;
+  /** Grouping module (e.g., "MFA", "Conditional Access") */
+  module?: string;
+  /** What this policy applies to */
+  scope?: string;
+  /** Enforcement mode */
+  enforcementMode: EnforcementMode;
+  /** Whether this policy is active */
+  isEnabled: boolean;
+  /** Risk level */
+  risk?: "High" | "Medium" | "Low";
+  /** Severity level */
+  severity?: string;
+  /** Detection mode */
+  detectionMode?: DetectionMode;
+  /** Graph API query configuration */
+  graphQueryConfig?: GraphQueryConfig;
+  /** Checklist configuration */
+  checklistConfig?: ChecklistConfig;
+  /** Threshold/condition configuration */
+  thresholdConfig?: Record<string, unknown>;
+  /** Last evaluation result */
+  lastTestResult?: string;
+  /** Last run timestamp */
+  lastRunAt?: string;
+  /** Last run raw data */
+  lastRunData?: unknown;
+  /** Who created this policy */
+  createdBy?: string;
+  /** When created */
+  createdAt?: string;
+  /** When last updated */
+  updatedAt?: string;
+}
+
+// ============================================================================
 // SCORING RESULT TYPES
 // ============================================================================
 

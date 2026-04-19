@@ -757,6 +757,18 @@ class DetectionModeEnum(str, Enum):
     CHECKLIST = "checklist"
 
 
+class EnforcementModeEnum(str, Enum):
+    """Enforcement mode for custom policies."""
+    INFORMATIONAL = "informational"
+    ENFORCED = "enforced"
+
+
+class PolicyTypeEnum(str, Enum):
+    """Type of policy/test."""
+    BUILTIN = "builtin"
+    CUSTOM = "custom"
+
+
 class UserTestConfiguration(Base):
     """User-specific test configuration.
     
@@ -845,3 +857,254 @@ class PillarWeightConfiguration(Base):
 
     def __repr__(self) -> str:
         return f"<PillarWeightConfiguration {self.pillar}={self.weight} user={self.user_id}>"
+
+
+# ============================================================================
+# CUSTOM POLICY MODELS
+# ============================================================================
+
+class CustomPolicy(Base):
+    """Customer-defined security policies and tests.
+    
+    Separate from built-in SecurityTestDefinition checks. Custom policies
+    represent organization-specific enforced rules or thresholds that
+    complement the built-in Microsoft-inspired baseline checks.
+    
+    Built-in checks = recommended posture/security assessment (read-only)
+    Custom policies = customer-specific enforced rules or thresholds (CRUD)
+    """
+    __tablename__ = "custom_policies"
+
+    policy_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    title: str = Column(String(512), nullable=False)
+    description: str = Column(Text, nullable=True)
+    pillar: str = Column(String(32), nullable=False)  # identity, devices, data, apps, infrastructure
+    category: str = Column(String(128), nullable=True)
+    module: str = Column(String(128), nullable=True)  # Grouping module (e.g., "MFA", "Conditional Access")
+    scope: str = Column(String(256), nullable=True)  # What this policy applies to (e.g., "All Users", "Admins Only")
+
+    # Enforcement
+    enforcement_mode: EnforcementModeEnum = Column(
+        PgEnum(EnforcementModeEnum, name="enforcementmodeenum"),
+        default=EnforcementModeEnum.INFORMATIONAL,
+        nullable=False,
+    )
+    is_enabled: bool = Column(Boolean, default=True, nullable=False)
+    risk: str = Column(String(32), nullable=True)  # high, medium, low
+    severity: str = Column(String(32), nullable=True)  # critical, high, medium, low
+
+    # Detection configuration
+    detection_mode: DetectionModeEnum = Column(
+        PgEnum(DetectionModeEnum), nullable=True
+    )
+    graph_query_config: dict = Column(JSON, nullable=True)
+    checklist_config: dict = Column(JSON, nullable=True)
+    threshold_config: dict = Column(JSON, nullable=True)  # For threshold-based evaluation
+    # Example threshold_config: {"metric": "mfa_coverage", "operator": "gte", "value": 95, "unit": "percent"}
+
+    # Result tracking
+    last_test_result: str = Column(String(32), nullable=True)  # passed, failed, investigate, not_run
+    last_run_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    last_run_data: dict = Column(JSON, nullable=True)
+
+    # Audit
+    created_by: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
+    )
+    created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    created_by_user = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<CustomPolicy {self.policy_id} title={self.title[:50]} enforcement={self.enforcement_mode}>"
+
+
+# ============================================================================
+# CONNECTOR MODELS
+# ============================================================================
+
+class EnrollTokenStatusEnum(str, Enum):
+    ACTIVE = "active"
+    USED = "used"
+    EXPIRED = "expired"
+    REVOKED = "revoked"
+
+
+class ConnectorOnlineStatusEnum(str, Enum):
+    ONLINE = "online"
+    OFFLINE = "offline"
+    DEGRADED = "degraded"
+
+
+class ResourceProtocolEnum(str, Enum):
+    HTTP = "http"
+    HTTPS = "https"
+    TCP = "tcp"
+
+
+class EnrollToken(Base):
+    """One-time enrollment tokens for connector registration.
+
+    The token value is stored as a SHA-256 hash — the plaintext is shown
+    only once at creation time and never persisted.
+    """
+    __tablename__ = "enroll_tokens"
+
+    token_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    token_hash: str = Column(String(128), nullable=False, unique=True)
+    network: str = Column(String(128), nullable=False, default="default")
+    status: EnrollTokenStatusEnum = Column(
+        PgEnum(EnrollTokenStatusEnum, name="enrolltokenstatusenum"),
+        default=EnrollTokenStatusEnum.ACTIVE,
+    )
+    created_by: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
+    )
+    expires_at: datetime = Column(DateTime(timezone=True), nullable=False)
+    used_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    used_by_connector_id: uuid.UUID = Column(
+        UUID(as_uuid=True), nullable=True
+    )
+    created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+    # Relationships
+    created_by_user = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<EnrollToken {self.token_id} status={self.status}>"
+
+
+class Connector(Base):
+    """Registered connectors that proxy traffic to internal resources."""
+    __tablename__ = "connectors"
+
+    connector_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    name: str = Column(String(256), nullable=False)
+    secret_hash: str = Column(String(128), nullable=False)
+    network: str = Column(String(128), nullable=False, default="default")
+    hostname: str = Column(String(256), nullable=True)
+    ip_address: str = Column(String(64), nullable=True)
+    version: str = Column(String(32), nullable=True)
+    status: ConnectorOnlineStatusEnum = Column(
+        PgEnum(ConnectorOnlineStatusEnum, name="connectoronlinestatusenum"),
+        default=ConnectorOnlineStatusEnum.OFFLINE,
+    )
+    labels: dict = Column(JSON, default=dict)
+    uptime: int = Column(Numeric, default=0)
+    last_heartbeat: datetime = Column(DateTime(timezone=True), nullable=True)
+    deployed_by: str = Column(String(64), default="docker")
+    created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    assigned_resources = relationship(
+        "ConnectorResource",
+        back_populates="connector",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Connector {self.name} status={self.status}>"
+
+
+class ConnectorResource(Base):
+    """Resources assigned to a connector for proxying.
+
+    Each resource defines a target host/port that the connector should
+    forward traffic to.
+    """
+    __tablename__ = "connector_resources"
+
+    resource_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    connector_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("connectors.connector_id"), nullable=True
+    )
+    network: str = Column(String(128), nullable=False, default="default")
+    name: str = Column(String(256), nullable=False)
+    protocol: ResourceProtocolEnum = Column(
+        PgEnum(ResourceProtocolEnum, name="resourceprotocolenum"),
+        default=ResourceProtocolEnum.HTTP,
+    )
+    target_host: str = Column(String(256), nullable=False)
+    target_port: int = Column(Numeric, nullable=False, default=80)
+    path_prefix: str = Column(String(256), nullable=True, default="")
+    is_active: bool = Column(Boolean, default=True, nullable=False)
+    created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    connector = relationship("Connector", back_populates="assigned_resources")
+    policy_bindings = relationship(
+        "PolicyBinding",
+        back_populates="resource",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        return f"<ConnectorResource {self.name} -> {self.target_host}:{self.target_port}>"
+
+
+class PolicyBinding(Base):
+    """Binds a policy to a connector resource.
+
+    Determines which access policies apply to a particular resource.
+    """
+    __tablename__ = "policy_bindings"
+
+    binding_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    resource_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("connector_resources.resource_id"), nullable=False
+    )
+    policy_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("policies.policy_id"), nullable=False
+    )
+    created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+    # Relationships
+    resource = relationship("ConnectorResource", back_populates="policy_bindings")
+    policy = relationship("Policy")
+
+    def __repr__(self) -> str:
+        return f"<PolicyBinding resource={self.resource_id} policy={self.policy_id}>"
+
+
+class ConnectorAccessLog(Base):
+    """Audit trail for access attempts through connectors."""
+    __tablename__ = "connector_access_logs"
+
+    log_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    connector_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("connectors.connector_id"), nullable=False
+    )
+    resource_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("connector_resources.resource_id"), nullable=True
+    )
+    user_id: str = Column(String(256), nullable=True)
+    device_id: str = Column(String(256), nullable=True)
+    decision: DecisionEnum = Column(PgEnum(DecisionEnum), nullable=False)
+    trust_score: float = Column(Float, nullable=True)
+    source_ip: str = Column(String(64), nullable=True)
+    target_host: str = Column(String(256), nullable=True)
+    target_port: int = Column(Numeric, nullable=True)
+    request_path: str = Column(String(512), nullable=True)
+    request_method: str = Column(String(16), nullable=True)
+    response_status: int = Column(Numeric, nullable=True)
+    reason: str = Column(Text, nullable=True)
+    timestamp: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<ConnectorAccessLog {self.log_id} decision={self.decision}>"

@@ -23,6 +23,7 @@ import {
   WeightConfig,
   AuditEvent,
   Pillar,
+  CustomPolicy,
   DEFAULT_TENANT_LICENSES,
   DEFAULT_WEIGHT_CONFIG,
   ComputedScores,
@@ -30,6 +31,7 @@ import {
 import { allControls, mockControlResults } from '../data/controls.seed';
 import { computeScores } from '../lib/scoring';
 import * as testConfigService from '../services/testConfigService';
+import * as customPolicyService from '../services/customPolicyService';
 
 // ============================================================================
 // USER TYPE
@@ -62,8 +64,9 @@ interface ZeroTrustState {
   weightConfig: WeightConfig;
   auditEvents: AuditEvent[];
   currentUser: User;
-  customControls: Control[]; // User-defined controls
+  customControls: Control[]; // User-defined controls (legacy custom tests)
   disabledControlIds: Set<string>; // Controls that are disabled
+  customPolicies: CustomPolicy[]; // Customer-defined policies (new dual-layer)
   
   // API sync status
   isLoading: boolean;
@@ -78,6 +81,13 @@ interface ZeroTrustState {
   syncToAPI: (testId: string, update: Record<string, unknown>) => Promise<void>;
   createCustomTestInAPI: (control: Control) => Promise<string | null>;
   deleteCustomTestInAPI: (testId: string) => Promise<boolean>;
+  
+  // Actions - Custom Policies
+  loadCustomPolicies: (pillar?: string) => Promise<void>;
+  addCustomPolicy: (data: Parameters<typeof customPolicyService.createCustomPolicy>[0]) => Promise<CustomPolicy | null>;
+  updateCustomPolicy: (policyId: string, data: Parameters<typeof customPolicyService.updateCustomPolicy>[1]) => Promise<void>;
+  removeCustomPolicy: (policyId: string) => Promise<void>;
+  runCustomPolicyCheck: (policyId: string) => Promise<{ status: string } | null>;
   
   // Actions - Controls
   setControls: (controls: Control[]) => void;
@@ -133,6 +143,7 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
       currentUser: DEFAULT_USER,
       customControls: [],
       disabledControlIds: new Set<string>(),
+      customPolicies: [],
       isLoading: false,
       lastSyncedAt: null,
       syncError: null,
@@ -186,6 +197,9 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
             isLoading: false,
             lastSyncedAt: new Date().toISOString(),
           });
+          
+          // Also load custom policies (separate from custom tests)
+          get().loadCustomPolicies();
         } catch (error) {
           console.error('[ZeroTrustStore] loadFromAPI failed:', error);
           set({ 
@@ -257,6 +271,71 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
         } catch (error) {
           console.error('Failed to delete custom test from API:', error);
           return false;
+        }
+      },
+      
+      // Actions - Custom Policies
+      loadCustomPolicies: async (pillar) => {
+        try {
+          const policies = await customPolicyService.listCustomPolicies(pillar);
+          set({ customPolicies: policies });
+        } catch (error) {
+          console.error('[ZeroTrustStore] loadCustomPolicies failed:', error);
+        }
+      },
+      
+      addCustomPolicy: async (data) => {
+        try {
+          const policy = await customPolicyService.createCustomPolicy(data);
+          set(state => ({
+            customPolicies: [policy, ...state.customPolicies],
+          }));
+          return policy;
+        } catch (error) {
+          console.error('Failed to create custom policy:', error);
+          return null;
+        }
+      },
+      
+      updateCustomPolicy: async (policyId, data) => {
+        try {
+          const updated = await customPolicyService.updateCustomPolicy(policyId, data);
+          set(state => ({
+            customPolicies: state.customPolicies.map(p =>
+              p.policyId === policyId ? updated : p
+            ),
+          }));
+        } catch (error) {
+          console.error('Failed to update custom policy:', error);
+        }
+      },
+      
+      removeCustomPolicy: async (policyId) => {
+        try {
+          await customPolicyService.deleteCustomPolicy(policyId);
+          set(state => ({
+            customPolicies: state.customPolicies.filter(p => p.policyId !== policyId),
+          }));
+        } catch (error) {
+          console.error('Failed to delete custom policy:', error);
+        }
+      },
+      
+      runCustomPolicyCheck: async (policyId) => {
+        try {
+          const result = await customPolicyService.runCustomPolicy(policyId);
+          // Update the policy in store with new result
+          set(state => ({
+            customPolicies: state.customPolicies.map(p =>
+              p.policyId === policyId
+                ? { ...p, lastTestResult: result.status, lastRunAt: result.timestamp }
+                : p
+            ),
+          }));
+          return result;
+        } catch (error) {
+          console.error('Failed to run custom policy:', error);
+          return null;
         }
       },
       
@@ -814,6 +893,7 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
 
 export const selectControls = (state: ZeroTrustState) => state.controls;
 export const selectCustomControls = (state: ZeroTrustState) => state.customControls;
+export const selectCustomPolicies = (state: ZeroTrustState) => state.customPolicies;
 export const selectDisabledControlIds = (state: ZeroTrustState) => state.disabledControlIds;
 export const selectControlResults = (state: ZeroTrustState) => state.controlResults;
 export const selectTenantLicenses = (state: ZeroTrustState) => state.tenantLicenses;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   FaHistory,
   FaSearch,
@@ -16,9 +16,11 @@ import {
   FaChevronRight,
   FaShieldAlt,
   FaEye,
+  FaCircle,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 import api from "../api";
+import { useSocket } from "../hooks/useSocket";
 
 interface Attempt {
   attempt_id: string;
@@ -77,6 +79,28 @@ const LogsPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedAttempt, setSelectedAttempt] = useState<Attempt | null>(null);
   const itemsPerPage = 20;
+
+  // Real-time updates via Socket.IO
+  const handleLiveAttempt = useCallback((data: AttemptApiResponse) => {
+    const newAttempt: Attempt = {
+      attempt_id: data.attempt_id,
+      user_id: data.user_id,
+      device_id: data.device_id,
+      ip_address: data.ip_address,
+      location: data.geo_location
+        ? [data.geo_location.city, data.geo_location.country].filter(Boolean).join(", ")
+        : undefined,
+      timestamp: data.timestamp,
+      decision: mapDecision(data.decision || data.result),
+      result: data.result,
+      total_score: data.total_score,
+      reason: data.reason,
+      risk_level: calculateRiskLevel(data.total_score),
+    };
+    setAttempts((prev) => [newAttempt, ...prev]);
+  }, []);
+
+  const { isConnected } = useSocket<AttemptApiResponse>("access_attempt", handleLiveAttempt);
 
   const mapDecision = (result: string): Attempt["decision"] => {
     if (result === "allow" || result === "deny" || result === "review" || result === "mfa_required" || result === "block") {
@@ -212,7 +236,15 @@ const LogsPage: React.FC = () => {
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Access Logs</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
+            Access Logs
+            {isConnected && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                <FaCircle size={6} className="animate-pulse" />
+                Live
+              </span>
+            )}
+          </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Monitor authentication and access attempts
           </p>

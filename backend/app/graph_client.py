@@ -210,6 +210,35 @@ class GraphClient:
         """Get authentication methods policy."""
         return self.get("policies/authenticationMethodsPolicy")
 
+    # ==================== ZT Assessment Identity Checks ====================
+
+    def get_applications(self, select: Optional[str] = None) -> List[Dict]:
+        """Get all application registrations (beta)."""
+        params = {}
+        if select:
+            params["$select"] = select
+        return self.get_all_pages("applications", use_beta=True, params=params)
+
+    def get_service_principals(self, select: Optional[str] = None) -> List[Dict]:
+        """Get all service principals (beta)."""
+        params = {}
+        if select:
+            params["$select"] = select
+        return self.get_all_pages("servicePrincipals", use_beta=True, params=params)
+
+    def get_sign_ins(self, top: int = 200, filter_str: Optional[str] = None) -> List[Dict]:
+        """Get sign-in logs (beta). Requires AuditLog.Read.All."""
+        params: Dict[str, Any] = {"$top": top, "$orderby": "createdDateTime desc"}
+        if filter_str:
+            params["$filter"] = filter_str
+        return self.get_all_pages("auditLogs/signIns", use_beta=True, params=params)
+
+    def get_user_registration_details(self) -> List[Dict]:
+        """Get user registration details for auth methods (v1.0)."""
+        return self.get_all_pages(
+            "reports/authenticationMethods/userRegistrationDetails",
+        )
+
     # ==================== Device Tests ====================
 
     def get_managed_devices(self) -> List[Dict]:

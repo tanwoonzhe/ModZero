@@ -1,0 +1,5 @@
+aiohttp==3.11.11
+python-socketio[asyncio_client]==5.12.1
+pyjwt[crypto]==2.10.1
+cryptography==44.0.0
+pyyaml==6.0.2
