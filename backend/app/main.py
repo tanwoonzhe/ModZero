@@ -13,6 +13,7 @@ from fastapi.openapi.utils import get_openapi
 from .settings import get_settings
 from .db import init_db
 from .routers import api_router
+from .routers import public_resource_router
 from .init_superuser import create_initial_superuser
 from .sio_server import get_sio_app
 
@@ -66,6 +67,9 @@ app.add_middleware(
 
 # Include API router under /api
 app.include_router(api_router, prefix="/api")
+
+# Product-facing protected-resource routes (/r/{slug}) — mounted at root.
+app.include_router(public_resource_router)
 
 # Mount Socket.IO server
 sio_asgi_app = get_sio_app()

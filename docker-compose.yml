@@ -21,6 +21,8 @@ services:
   # ── FastAPI Backend (Controller) ────────────────────────────────
   backend:
     build: ./backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       DATABASE_URL: ${DATABASE_URL}
       SECRET_KEY: ${SECRET_KEY}
@@ -61,12 +63,21 @@ services:
       - "5173:80"
     restart: unless-stopped
 
-  # ── Sample Internal Resource (simulates intranet) ───────────────
+  # ── Demo Internal Resource (simulates an independently running site) ──
+  # The intranet is an independent service in ModZero's non-invasive
+  # protection model. It is published on host port 2026 so it can be
+  # reached directly (http://localhost:2026/) just like any real
+  # corporate site. ModZero does NOT own this service — it only
+  # registers it as a Resource and provides a trust-gated alternative
+  # route at /r/<slug>. Deleting the Resource record must NOT stop
+  # this container.
   intranet:
     image: nginx:alpine
     volumes:
       - ./intranet/index.html:/usr/share/nginx/html/index.html:ro
-    # No ports exposed externally — only accessible via connector
+    ports:
+      - "2026:80"
+    restart: unless-stopped
 
   # ── ModZero Connector ──────────────────────────────────────────
   # For the demo, this connector enrolls with the controller and

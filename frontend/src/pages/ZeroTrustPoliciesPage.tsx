@@ -502,6 +502,9 @@ const ZeroTrustPoliciesPage: React.FC = () => {
             </div>
           </div>
           
+          {/* FYP Module Weights + Access Threshold Card */}
+          <FypModuleWeightsCard />
+          
           {/* Control Weights Card */}
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
             <div className="p-6 border-b border-gray-200 dark:border-gray-700">
@@ -800,3 +803,112 @@ const ZeroTrustPoliciesPage: React.FC = () => {
 };
 
 export default ZeroTrustPoliciesPage;
+
+/* ------------------------------------------------------------------ */
+/*  FYP Module Weights + Access Threshold                             */
+/* ------------------------------------------------------------------ */
+
+import { FaCog, FaLaptop, FaNetworkWired, FaShieldAlt as FaShieldAltB } from 'react-icons/fa';
+
+const FypModuleWeightsCard: React.FC = () => {
+  const moduleWeights = useZeroTrustStore(s => s.moduleWeights);
+  const setModuleWeight = useZeroTrustStore(s => s.setModuleWeight);
+  const accessThreshold = useZeroTrustStore(s => s.accessThreshold);
+  const setAccessThreshold = useZeroTrustStore(s => s.setAccessThreshold);
+  const identityResults = useZeroTrustStore(s => s.identityCheckResults);
+  const deviceResults = useZeroTrustStore(s => s.deviceCheckResults);
+  const moduleCustomTests = useZeroTrustStore(s => s.moduleCustomTests);
+  const total = moduleWeights.device_posture + moduleWeights.context_analysis + moduleWeights.trust_scoring_engine || 1;
+
+  const modules = [
+    {
+      key: 'device_posture' as const,
+      label: 'Device Posture',
+      icon: FaLaptop,
+      color: 'text-indigo-600',
+      feeders: [
+        `${deviceResults.length} device baseline test${deviceResults.length === 1 ? '' : 's'} (D-001..D-005)`,
+        `${moduleCustomTests.filter(t => t.module === 'device_posture').length} custom test(s)`,
+      ],
+    },
+    {
+      key: 'context_analysis' as const,
+      label: 'Context Analysis',
+      icon: FaNetworkWired,
+      color: 'text-amber-600',
+      feeders: [
+        `${moduleCustomTests.filter(t => t.module === 'context_analysis').length} custom test(s)`,
+      ],
+    },
+    {
+      key: 'trust_scoring_engine' as const,
+      label: 'Trust Scoring Engine',
+      icon: FaShieldAltB,
+      color: 'text-emerald-600',
+      feeders: [
+        `${identityResults.length} identity baseline test(s)`,
+        `${moduleCustomTests.filter(t => t.module === 'trust_scoring_engine').length} custom test(s)`,
+      ],
+    },
+  ];
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+          <FaCog className="text-indigo-600" /> FYP Module Weights
+        </h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          Align with the three ModZero modules (Device Posture / Context Analysis / Trust Scoring
+          Engine). These weights drive the Overview trust score and the protected-resource access
+          decision. Each module is fed by specific Identity and Devices tests (listed below).
+        </p>
+      </div>
+      <div className="p-6 space-y-6">
+        {modules.map(m => {
+          const raw = moduleWeights[m.key];
+          const pct = Math.round((raw / total) * 100);
+          const Icon = m.icon;
+          return (
+            <div key={m.key} className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Icon className={m.color} />
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{m.label}</span>
+                </div>
+                <span className="text-sm text-gray-500 font-mono">
+                  raw {raw} · <strong>{pct}%</strong> of total
+                </span>
+              </div>
+              <input
+                type="range" min={0} max={100} value={raw}
+                onChange={e => setModuleWeight(m.key, Number(e.target.value))}
+                className="w-full"
+              />
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Fed by: {m.feeders.join(' + ')}
+              </div>
+            </div>
+          );
+        })}
+
+        <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="font-medium text-gray-900 dark:text-gray-100">Access Threshold</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Minimum trust score required to access the protected resource at localhost:2026.
+              </div>
+            </div>
+            <span className="text-lg font-bold text-indigo-600">{accessThreshold} / 100</span>
+          </div>
+          <input
+            type="range" min={0} max={100} value={accessThreshold}
+            onChange={e => setAccessThreshold(Number(e.target.value))}
+            className="w-full mt-2"
+          />
+        </div>
+      </div>
+    </div>
+  );
+};

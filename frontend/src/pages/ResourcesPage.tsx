@@ -12,10 +12,9 @@ import {
   FaChevronRight,
   FaCircle,
   FaSyncAlt,
-  FaExternalLinkAlt,
-  FaEdit,
   FaTrash,
   FaTimes,
+  FaPlug,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 import api from "../api";
@@ -38,6 +37,8 @@ interface Network {
   location?: string;
   resources: Resource[];
   last_check?: string;
+  connector_name?: string;
+  connector_count?: number;
 }
 
 const healthColors = {
@@ -65,70 +66,16 @@ const ResourcesPage: React.FC = () => {
   const [showAddResourceModal, setShowAddResourceModal] = useState(false);
   const [selectedNetworkForResource, setSelectedNetworkForResource] = useState<string | null>(null);
 
-  // Mock data for demo
-  const getMockNetworks = (): Network[] => [
-    {
-      network_id: "1",
-      name: "Corporate HQ Network",
-      cidr_range: "10.0.0.0/16",
-      connector_health: "green",
-      location: "New York, US",
-      last_check: new Date().toISOString(),
-      resources: [
-        { resource_id: "r1", name: "DC-Primary", type: "server", connector_status: "online", ip_address: "10.0.1.10", port: 443 },
-        { resource_id: "r2", name: "SQL-Prod", type: "database", connector_status: "online", ip_address: "10.0.2.20", port: 1433 },
-        { resource_id: "r3", name: "File-Server", type: "server", connector_status: "online", ip_address: "10.0.1.30", port: 445 },
-      ],
-    },
-    {
-      network_id: "2",
-      name: "Azure Cloud VNet",
-      cidr_range: "172.16.0.0/12",
-      connector_health: "green",
-      location: "East US 2",
-      last_check: new Date().toISOString(),
-      resources: [
-        { resource_id: "r4", name: "Azure-VM-Web", type: "cloud", connector_status: "online", ip_address: "172.16.1.50", port: 443 },
-        { resource_id: "r5", name: "Azure-SQL-DB", type: "database", connector_status: "online", ip_address: "172.16.2.10", port: 1433 },
-      ],
-    },
-    {
-      network_id: "3",
-      name: "Remote Office - London",
-      cidr_range: "192.168.10.0/24",
-      connector_health: "amber",
-      location: "London, UK",
-      last_check: new Date(Date.now() - 300000).toISOString(),
-      resources: [
-        { resource_id: "r6", name: "LON-DC-01", type: "server", connector_status: "degraded", ip_address: "192.168.10.10" },
-        { resource_id: "r7", name: "LON-Workstation", type: "desktop", connector_status: "offline" },
-      ],
-    },
-    {
-      network_id: "4",
-      name: "Legacy DMZ",
-      cidr_range: "10.100.0.0/24",
-      connector_health: "red",
-      location: "On-Premises",
-      last_check: new Date(Date.now() - 3600000).toISOString(),
-      resources: [
-        { resource_id: "r8", name: "Legacy-WebApp", type: "server", connector_status: "offline", ip_address: "10.100.0.50" },
-      ],
-    },
-  ];
-
   const fetchNetworks = async () => {
     setLoadError(null);
     try {
       const res = await api.get<Network[]>("/resources");
       setNetworks(res.data);
+      // Auto-expand all networks after fetch
+      setExpandedNetworks(new Set(res.data.map((n) => n.network_id)));
     } catch (err: any) {
       console.error(err);
-      // Use mock data for demo
-      setNetworks(getMockNetworks());
-      if (err.response?.status !== 404) {
-        setLoadError("Using demo data - API not connected");
-      }
+      setLoadError(err.response?.data?.detail || "Failed to load networks from API");
     } finally {
       setLoading(false);
     }
@@ -136,15 +83,36 @@ const ResourcesPage: React.FC = () => {
 
   useEffect(() => {
     fetchNetworks();
-    // Expand all networks initially
-    setExpandedNetworks(new Set(["1", "2", "3", "4"]));
   }, []);
 
   const handleRefresh = async () => {
     setRefreshing(true);
+    setLoading(true);
     await fetchNetworks();
     setRefreshing(false);
     toast.success("Resources refreshed");
+  };
+
+  const handleDeleteNetwork = async (networkId: string, name: string) => {
+    if (!confirm(`Delete network "${name}" and all its resources? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/resources/networks/${networkId}`);
+      toast.success("Network deleted");
+      await fetchNetworks();
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to delete network");
+    }
+  };
+
+  const handleDeleteResource = async (networkId: string, resourceId: string, name: string) => {
+    if (!confirm(`Delete resource "${name}"?`)) return;
+    try {
+      await api.delete(`/resources/networks/${networkId}/resources/${resourceId}`);
+      toast.success("Resource deleted");
+      await fetchNetworks();
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to delete resource");
+    }
   };
 
   const toggleNetwork = (networkId: string) => {
@@ -323,14 +291,20 @@ const ResourcesPage: React.FC = () => {
                           <span>CIDR: {network.cidr_range}</span>
                           {network.location && <span>• {network.location}</span>}
                           <span>• {network.resources.length} resources</span>
+                          {network.connector_name && (
+                            <span className="flex items-center gap-1">
+                              • <FaPlug className="text-xs" /> {network.connector_name}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <button className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg">
-                        <FaEdit size={14} />
-                      </button>
-                      <button className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteNetwork(network.network_id, network.name); }}
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg"
+                        title="Delete network"
+                      >
                         <FaTrash size={14} />
                       </button>
                       {isExpanded ? (
@@ -388,8 +362,12 @@ const ResourcesPage: React.FC = () => {
                                   </div>
                                 </td>
                                 <td className="px-5 py-4 whitespace-nowrap">
-                                  <button className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded">
-                                    <FaExternalLinkAlt size={12} />
+                                  <button
+                                    onClick={() => handleDeleteResource(network.network_id, resource.resource_id, resource.name)}
+                                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                                    title="Delete resource"
+                                  >
+                                    <FaTrash size={12} />
                                   </button>
                                 </td>
                               </tr>
@@ -440,11 +418,11 @@ const ResourcesPage: React.FC = () => {
 
       {/* Add Network Modal */}
       {showAddNetworkModal && (
-        <AddNetworkModal 
+        <AddNetworkModal
           onClose={() => setShowAddNetworkModal(false)}
-          onAdd={(network) => {
-            setNetworks(prev => [...prev, { ...network, network_id: `${Date.now()}`, resources: [] }]);
+          onSaved={async () => {
             setShowAddNetworkModal(false);
+            await fetchNetworks();
             toast.success("Network added successfully");
           }}
         />
@@ -457,13 +435,10 @@ const ResourcesPage: React.FC = () => {
             setShowAddResourceModal(false);
             setSelectedNetworkForResource(null);
           }}
-          onAdd={(resource) => {
-            setNetworks(prev => prev.map(n => 
-              n.network_id === selectedNetworkForResource 
-                ? { ...n, resources: [...n.resources, { ...resource, resource_id: `r${Date.now()}` }] }
-                : n
-            ));
-            // Don't close modal here - let the modal handle its own closing after batch add
+          onSaved={async () => {
+            setShowAddResourceModal(false);
+            setSelectedNetworkForResource(null);
+            await fetchNetworks();
           }}
           networkId={selectedNetworkForResource}
         />
@@ -475,37 +450,29 @@ const ResourcesPage: React.FC = () => {
 // Add Network Modal Component
 const AddNetworkModal: React.FC<{
   onClose: () => void;
-  onAdd: (network: Omit<Network, 'network_id' | 'resources'>) => void;
-}> = ({ onClose, onAdd }) => {
+  onSaved: () => Promise<void>;
+}> = ({ onClose, onSaved }) => {
   const [name, setName] = useState("");
   const [cidrRange, setCidrRange] = useState("");
   const [location, setLocation] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    
+    setError(null);
     try {
-      // Try to save to backend API
       await api.post('/resources/networks', {
         name,
         cidr_range: cidrRange,
-        location
+        location: location || undefined,
       });
-    } catch (error) {
-      console.log("API save failed, using local state");
+      await onSaved();
+    } catch (err: any) {
+      setError(err.response?.data?.detail || "Failed to create network");
+      setSaving(false);
     }
-    
-    onAdd({
-      name,
-      cidr_range: cidrRange,
-      connector_health: "green",
-      location,
-      last_check: new Date().toISOString(),
-    });
-    
-    setSaving(false);
   };
 
   return (
@@ -568,6 +535,7 @@ const AddNetworkModal: React.FC<{
               {saving ? "Saving..." : "Add Network"}
             </button>
           </div>
+          {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
         </form>
       </div>
     </div>
@@ -577,9 +545,9 @@ const AddNetworkModal: React.FC<{
 // Add Resource Modal Component - supports adding multiple resources
 const AddResourceModal: React.FC<{
   onClose: () => void;
-  onAdd: (resource: Omit<Resource, 'resource_id'>) => void;
+  onSaved: () => Promise<void>;
   networkId: string;
-}> = ({ onClose, onAdd, networkId }) => {
+}> = ({ onClose, onSaved, networkId }) => {
   const [resources, setResources] = useState<Array<{
     name: string;
     type: string;
@@ -605,37 +573,20 @@ const AddResourceModal: React.FC<{
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    
+    const valid = resources.filter(r => r.name.trim());
     try {
-      // Save each resource to API and update local state
-      for (const resource of resources) {
-        if (resource.name.trim()) {
-          try {
-            // Try to save to backend API
-            await api.post(`/resources/networks/${networkId}/resources`, {
-              name: resource.name,
-              type: resource.type,
-              ip_address: resource.ipAddress || undefined,
-              port: resource.port ? parseInt(resource.port) : undefined,
-            });
-          } catch (error) {
-            console.log("API save failed, using local state");
-          }
-          
-          // Add to local state
-          onAdd({
-            name: resource.name,
-            type: resource.type,
-            connector_status: "online",
-            ip_address: resource.ipAddress || undefined,
-            port: resource.port ? parseInt(resource.port) : undefined,
-          });
-        }
+      for (const resource of valid) {
+        await api.post(`/resources/networks/${networkId}/resources`, {
+          name: resource.name,
+          type: resource.type,
+          ip_address: resource.ipAddress || undefined,
+          port: resource.port ? parseInt(resource.port) : undefined,
+        });
       }
-      onClose();
-    } catch (error) {
-      console.error("Failed to save resources:", error);
-    } finally {
+      toast.success(`Added ${valid.length} resource(s)`);
+      await onSaved();
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to save resources");
       setSaving(false);
     }
   };

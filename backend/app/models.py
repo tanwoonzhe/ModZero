@@ -400,6 +400,7 @@ class RemoteNetwork(Base):
     )
     name: str = Column(String(128), unique=True, nullable=False)
     cidr_range: str = Column(String(64), nullable=False)
+    location: str = Column(String(128), nullable=True)
     status: NetworkStatusEnum = Column(PgEnum(NetworkStatusEnum), default=NetworkStatusEnum.ACTIVE)
     connector_health: NetworkHealthEnum = Column(
         PgEnum(NetworkHealthEnum), default=NetworkHealthEnum.GREEN
@@ -428,6 +429,9 @@ class Resource(Base):
     )
     name: str = Column(String(128), nullable=False)
     description: str = Column(Text, nullable=True)
+    resource_type: str = Column(String(64), nullable=True, default="server")
+    ip_address: str = Column(String(64), nullable=True)
+    port: int = Column(Numeric, nullable=True)
     connector_status: ConnectorStatusEnum = Column(
         PgEnum(ConnectorStatusEnum), default=ConnectorStatusEnum.UP
     )

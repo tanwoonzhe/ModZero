@@ -1,22 +1,22 @@
 """Connector management API endpoints.
 
 Provides:
-  - POST /connectors/enroll          — one-time enroll token exchange
-  - POST /connectors/{id}/heartbeat  — periodic status update
-  - GET  /connectors/{id}/policies   — resource/policy list for a connector
-  - GET  /connectors                 — list all connectors (dashboard)
-  - POST /admin/connectors/tokens    — create enroll token
-  - GET  /admin/connectors/tokens    — list enroll tokens
-  - POST /admin/connectors/resources — create a connector resource
-  - GET  /admin/connectors/resources — list connector resources
-  - POST /auth/introspect            — token introspection for connectors
-  - GET  /.well-known/jwks.json      — JWKS endpoint (stub)
+  - POST /connectors/enroll          ??one-time enroll token exchange
+  - POST /connectors/{id}/heartbeat  ??periodic status update
+  - GET  /connectors/{id}/policies   ??resource/policy list for a connector
+  - GET  /connectors                 ??list all connectors (dashboard)
+  - POST /admin/connectors/tokens    ??create enroll token
+  - GET  /admin/connectors/tokens    ??list enroll tokens
+  - POST /admin/connectors/resources ??create a connector resource
+  - GET  /admin/connectors/resources ??list connector resources
+  - POST /auth/introspect            ??token introspection for connectors
+  - GET  /.well-known/jwks.json      ??JWKS endpoint (stub)
 """
 
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
@@ -36,7 +36,7 @@ from ..settings import get_settings
 
 router = APIRouter()
 
-# ─── Pydantic schemas ───────────────────────────────────────────────
+# ?�?�?� Pydantic schemas ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 class EnrollRequest(BaseModel):
     token: str
@@ -151,7 +151,7 @@ class DeployCommandResponse(BaseModel):
     curl_command: str
 
 
-# ─── Helpers ─────────────────────────────────────────────────────────
+# ?�?�?� Helpers ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 def _hash_token(token: str) -> str:
     """SHA-256 hash of a token string."""
@@ -205,7 +205,7 @@ def _verify_connector_auth(request: Request, db: Session) -> Connector:
     return connector
 
 
-# ─── Enrollment ──────────────────────────────────────────────────────
+# ?�?�?� Enrollment ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 @router.post("/connectors/enroll", status_code=201, response_model=EnrollResponse,
              tags=["connectors"])
@@ -222,7 +222,7 @@ def enroll_connector(body: EnrollRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid or expired enroll token")
 
     # Check expiry
-    if enroll_token.expires_at < datetime.utcnow():
+    if enroll_token.expires_at < datetime.now(timezone.utc):
         enroll_token.status = EnrollTokenStatusEnum.EXPIRED
         db.commit()
         raise HTTPException(status_code=401, detail="Enroll token has expired")
@@ -244,13 +244,13 @@ def enroll_connector(body: EnrollRequest, db: Session = Depends(get_db)):
         deployed_by=body.deployed_by,
         status=ConnectorOnlineStatusEnum.ONLINE,
         labels={"hostname": body.hostname, "deployed_by": body.deployed_by},
-        last_heartbeat=datetime.utcnow(),
+        last_heartbeat=datetime.now(timezone.utc),
     )
     db.add(connector)
 
     # Mark token as used
     enroll_token.status = EnrollTokenStatusEnum.USED
-    enroll_token.used_at = datetime.utcnow()
+    enroll_token.used_at = datetime.now(timezone.utc)
     enroll_token.used_by_connector_id = connector_id
     db.commit()
 
@@ -260,7 +260,7 @@ def enroll_connector(body: EnrollRequest, db: Session = Depends(get_db)):
     )
 
 
-# ─── Heartbeat ───────────────────────────────────────────────────────
+# ?�?�?� Heartbeat ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 @router.post("/connectors/{connector_id}/heartbeat",
              response_model=HeartbeatResponse, tags=["connectors"])
@@ -282,17 +282,17 @@ def connector_heartbeat(
     connector.labels = body.labels or connector.labels
     connector.uptime = body.uptime
     connector.status = ConnectorOnlineStatusEnum.ONLINE
-    connector.last_heartbeat = datetime.utcnow()
+    connector.last_heartbeat = datetime.now(timezone.utc)
     connector.network = body.network or connector.network
     db.commit()
 
     return HeartbeatResponse(
         status="ok",
-        server_time=datetime.utcnow().isoformat(),
+        server_time=datetime.now(timezone.utc).isoformat(),
     )
 
 
-# ─── Policy/resource fetch ──────────────────────────────────────────
+# ?�?�?� Policy/resource fetch ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 @router.get("/connectors/{connector_id}/policies", tags=["connectors"])
 def get_connector_policies(
@@ -332,7 +332,7 @@ def get_connector_policies(
     }
 
 
-# ─── List connectors (dashboard) ────────────────────────────────────
+# ?�?�?� List connectors (dashboard) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 @router.get("/connectors", response_model=List[ConnectorOut], tags=["connectors"])
 def list_connectors(
@@ -344,9 +344,9 @@ def list_connectors(
 
     result = []
     for c in connectors:
-        # Check if connector is stale (no heartbeat in 60s → offline)
+        # Check if connector is stale (no heartbeat in 60s ??offline)
         if c.last_heartbeat:
-            time_since = (datetime.utcnow() - c.last_heartbeat).total_seconds()
+            time_since = (datetime.now(timezone.utc) - c.last_heartbeat).total_seconds()
             if time_since > 60:
                 c.status = ConnectorOnlineStatusEnum.OFFLINE
             elif time_since > 30:
@@ -379,7 +379,7 @@ def list_connectors(
     return result
 
 
-# ─── Admin: enroll tokens ───────────────────────────────────────────
+# ?�?�?� Admin: enroll tokens ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 @router.post("/admin/connectors/tokens", response_model=CreateTokenResponse,
              tags=["connectors-admin"])
@@ -393,7 +393,7 @@ def create_enroll_token(
     # Generate plaintext token
     plaintext_token = secrets.token_urlsafe(32)
     token_hash = _hash_token(plaintext_token)
-    expires_at = datetime.utcnow() + timedelta(minutes=body.expires_minutes)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=body.expires_minutes)
 
     enroll = EnrollToken(
         token_hash=token_hash,
@@ -435,7 +435,7 @@ def list_enroll_tokens(
 
     # Auto-expire stale tokens
     for t in tokens:
-        if t.status == EnrollTokenStatusEnum.ACTIVE and t.expires_at < datetime.utcnow():
+        if t.status == EnrollTokenStatusEnum.ACTIVE and t.expires_at < datetime.now(timezone.utc):
             t.status = EnrollTokenStatusEnum.EXPIRED
     db.commit()
 
@@ -452,7 +452,7 @@ def list_enroll_tokens(
     ]
 
 
-# ─── Admin: connector resources ──────────────────────────────────────
+# ?�?�?� Admin: connector resources ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 @router.post("/admin/connectors/resources", response_model=ResourceOut,
              status_code=201, tags=["connectors-admin"])
@@ -543,12 +543,12 @@ def delete_connector(
     db.commit()
 
 
-# ─── Token introspection ────────────────────────────────────────────
+# ?�?�?� Token introspection ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 @router.post("/auth/introspect", response_model=IntrospectResponse,
              tags=["connectors"])
 def introspect_token(body: IntrospectRequest):
-    """Introspect an access token — used by connectors to validate user tokens."""
+    """Introspect an access token ??used by connectors to validate user tokens."""
     payload = decode_access_token(body.token)
     if payload is None:
         return IntrospectResponse(active=False)

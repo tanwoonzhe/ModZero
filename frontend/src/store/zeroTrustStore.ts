@@ -53,6 +53,228 @@ const DEFAULT_USER: User = {
 };
 
 // ============================================================================
+// MODULE CUSTOM TEST TYPE  (FYP three-module architecture)
+// ============================================================================
+
+export type FypModule = 'device_posture' | 'context_analysis' | 'trust_scoring_engine';
+
+/**
+ * Custom-test "check types". Each one is a small, testable predicate the
+ * Run button can evaluate in a demo-friendly way.  Scoped per module so
+ * the form can offer only the predicates relevant for that module.
+ */
+export type CheckType =
+  // device_posture
+  | 'device_compliant'
+  | 'av_healthy'
+  | 'firewall_enabled'
+  | 'disk_encryption_enabled'
+  | 'av_signatures_fresh'
+  | 'intune_compliant'
+  // context_analysis
+  | 'known_location'
+  | 'trusted_network'
+  | 'unusual_network_flag'
+  | 'admin_requires_trusted_network'
+  | 'approved_region'
+  | 'not_marked_risky'
+  // trust_scoring_engine
+  | 'overall_score_above_threshold'
+  | 'module_score_above_threshold'
+  | 'device_score_above_threshold'
+  | 'context_score_above_threshold'
+  | 'custom';
+
+export interface ModuleCustomTest {
+  id: string;
+  module: FypModule;
+  pillar: 'Identity' | 'Devices';
+  title: string;
+  description: string;
+  rationale: string;                   // Why this test matters for the module
+  checkType: CheckType;                // What the predicate semantically checks
+  threshold?: number;                  // Optional 0-100 threshold (for *_score_above_threshold checks)
+  detectionMode: 'manual' | 'heuristic';
+  lastStatus: 'pass' | 'fail' | 'warning' | 'not_run';
+  lastRun: string | null;
+  createdAt: string;
+  weight: number;                      // 1-10, contributes to module score
+}
+
+const SEED_MODULE_TESTS: ModuleCustomTest[] = [
+  // ---------- Identity pillar ----------
+  // Device Posture module
+  {
+    id: 'mct-id-dp-1', module: 'device_posture', pillar: 'Identity',
+    title: 'Require compliant device before access',
+    description: 'The device requesting access must be marked compliant by MDM (e.g. Intune) before SSO issues a token.',
+    rationale: 'Device compliance at sign-in is the foundation of Zero Trust on the identity side.',
+    checkType: 'device_compliant',
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 8,
+  },
+  {
+    id: 'mct-id-dp-2', module: 'device_posture', pillar: 'Identity',
+    title: 'Require endpoint AV healthy',
+    description: 'Endpoint anti-virus must report healthy (running, signatures current) before the identity grants access.',
+    rationale: 'A sick AV agent means the endpoint cannot be trusted for sensitive identity operations.',
+    checkType: 'av_healthy',
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 7,
+  },
+  // Context Analysis module
+  {
+    id: 'mct-id-ca-1', module: 'context_analysis', pillar: 'Identity',
+    title: 'Block access from unknown location',
+    description: 'Deny sign-in when the source IP is outside configured named locations.',
+    rationale: 'Unknown-location access is a classic context signal for compromised credentials.',
+    checkType: 'known_location',
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 7,
+  },
+  {
+    id: 'mct-id-ca-2', module: 'context_analysis', pillar: 'Identity',
+    title: 'Flag access from unusual network',
+    description: 'Raise a warning when the user signs in from an ASN / network they have not used before.',
+    rationale: 'Unusual network patterns often precede account takeover.',
+    checkType: 'unusual_network_flag',
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 5,
+  },
+  {
+    id: 'mct-id-ca-3', module: 'context_analysis', pillar: 'Identity',
+    title: 'Require trusted network for admin access',
+    description: 'Privileged roles must sign in from a trusted corporate network; otherwise require step-up MFA.',
+    rationale: 'Privileged access should be constrained by network context, not only credentials.',
+    checkType: 'admin_requires_trusted_network',
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 8,
+  },
+  // Trust Scoring Engine module
+  {
+    id: 'mct-id-ts-1', module: 'trust_scoring_engine', pillar: 'Identity',
+    title: 'Deny access if overall trust score below threshold',
+    description: 'Refuse identity-side access when the aggregated trust score is below the configured policy threshold.',
+    rationale: 'The overall score is the final gate that consumes posture + context.',
+    checkType: 'overall_score_above_threshold', threshold: 60,
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 10,
+  },
+  {
+    id: 'mct-id-ts-2', module: 'trust_scoring_engine', pillar: 'Identity',
+    title: 'Require minimum module score before accessing protected intranet',
+    description: 'Each of the three FYP modules must individually score above the configured per-module threshold.',
+    rationale: 'Prevents a single high-scoring module from masking a weak one.',
+    checkType: 'module_score_above_threshold', threshold: 50,
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 8,
+  },
+
+  // ---------- Devices pillar ----------
+  // Device Posture module
+  {
+    id: 'mct-dv-dp-1', module: 'device_posture', pillar: 'Devices',
+    title: 'Firewall enabled',
+    description: 'Host firewall active and applying the corporate profile.',
+    rationale: 'A disabled firewall is a strong device-posture failure.',
+    checkType: 'firewall_enabled',
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 6,
+  },
+  {
+    id: 'mct-dv-dp-2', module: 'device_posture', pillar: 'Devices',
+    title: 'Disk encryption enabled',
+    description: 'BitLocker / FileVault encryption enabled on system drives.',
+    rationale: 'Unencrypted endpoints leak data when lost.',
+    checkType: 'disk_encryption_enabled',
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 7,
+  },
+  {
+    id: 'mct-dv-dp-3', module: 'device_posture', pillar: 'Devices',
+    title: 'AV signatures up to date',
+    description: 'Defender / third-party AV signatures fresher than 24 hours.',
+    rationale: 'Stale signatures are the most direct posture miss.',
+    checkType: 'av_signatures_fresh',
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 6,
+  },
+  {
+    id: 'mct-dv-dp-4', module: 'device_posture', pillar: 'Devices',
+    title: 'Device is compliant in Intune',
+    description: 'Intune reports the device as compliant against the assigned configuration profile.',
+    rationale: 'MDM compliance is the canonical device-posture signal.',
+    checkType: 'intune_compliant',
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 8,
+  },
+  // Context Analysis module
+  {
+    id: 'mct-dv-ca-1', module: 'context_analysis', pillar: 'Devices',
+    title: 'Device seen from approved region',
+    description: 'Device most recent check-in IP resolves to an approved country / region.',
+    rationale: 'Geolocation is a cheap but useful context signal for stolen devices.',
+    checkType: 'approved_region',
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 5,
+  },
+  {
+    id: 'mct-dv-ca-2', module: 'context_analysis', pillar: 'Devices',
+    title: 'Device connected from trusted network',
+    description: 'Device egress IP / ASN is on the trusted corporate network list.',
+    rationale: 'Trusted network context lets posture-weak devices still be accepted for low-risk tasks.',
+    checkType: 'trusted_network',
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 5,
+  },
+  {
+    id: 'mct-dv-ca-3', module: 'context_analysis', pillar: 'Devices',
+    title: 'Device not marked risky recently',
+    description: 'Device has not been raised as risky by Defender / MDE in the last 7 days.',
+    rationale: 'Recently-risky devices must not silently regain access.',
+    checkType: 'not_marked_risky',
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 6,
+  },
+  // Trust Scoring Engine module
+  {
+    id: 'mct-dv-ts-1', module: 'trust_scoring_engine', pillar: 'Devices',
+    title: 'Device posture score above threshold',
+    description: 'Device Posture module score must be above the configured threshold.',
+    rationale: 'Per-module enforcement prevents weak posture being averaged away.',
+    checkType: 'device_score_above_threshold', threshold: 60,
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 7,
+  },
+  {
+    id: 'mct-dv-ts-2', module: 'trust_scoring_engine', pillar: 'Devices',
+    title: 'Context score above threshold',
+    description: 'Context Analysis module score must be above the configured threshold.',
+    rationale: 'A device with strong posture but bad context should still be questioned.',
+    checkType: 'context_score_above_threshold', threshold: 50,
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 6,
+  },
+  {
+    id: 'mct-dv-ts-3', module: 'trust_scoring_engine', pillar: 'Devices',
+    title: 'Overall access trust score above threshold',
+    description: 'Weighted overall trust score across all three modules must be above the policy threshold.',
+    rationale: 'This is the headline output of the trust scoring engine for a device.',
+    checkType: 'overall_score_above_threshold', threshold: 70,
+    detectionMode: 'heuristic', lastStatus: 'not_run', lastRun: null,
+    createdAt: new Date().toISOString(), weight: 10,
+  },
+];
+
+const DEFAULT_MODULE_WEIGHTS = {
+  device_posture: 40,
+  context_analysis: 30,
+  trust_scoring_engine: 30,
+};
+
+const DEFAULT_ACCESS_THRESHOLD = 60;
+
+// ============================================================================
 // STORE STATE TYPE
 // ============================================================================
 
@@ -67,6 +289,23 @@ interface ZeroTrustState {
   customControls: Control[]; // User-defined controls (legacy custom tests)
   disabledControlIds: Set<string>; // Controls that are disabled
   customPolicies: CustomPolicy[]; // Customer-defined policies (new dual-layer)
+
+  // Identity check results (persisted across navigation)
+  identityCheckResults: any[];
+  identityCheckSummary: any | null;
+  identityIsMock: boolean;
+
+  // Device check results (persisted across navigation)
+  deviceCheckResults: any[];
+  deviceCheckSummary: any | null;
+  deviceIsMock: boolean;
+
+  // Module weights (the 3 FYP modules) + access threshold
+  moduleWeights: { device_posture: number; context_analysis: number; trust_scoring_engine: number };
+  accessThreshold: number; // 0-100, trust score required to access protected resource
+
+  // Module-aligned custom tests (Identity page + Devices page each have 3 module tabs)
+  moduleCustomTests: ModuleCustomTest[];
   
   // API sync status
   isLoading: boolean;
@@ -87,7 +326,6 @@ interface ZeroTrustState {
   addCustomPolicy: (data: Parameters<typeof customPolicyService.createCustomPolicy>[0]) => Promise<CustomPolicy | null>;
   updateCustomPolicy: (policyId: string, data: Parameters<typeof customPolicyService.updateCustomPolicy>[1]) => Promise<void>;
   removeCustomPolicy: (policyId: string) => Promise<void>;
-  runCustomPolicyCheck: (policyId: string) => Promise<{ status: string } | null>;
   
   // Actions - Controls
   setControls: (controls: Control[]) => void;
@@ -121,6 +359,22 @@ interface ZeroTrustState {
   
   // Actions - User
   setCurrentUser: (user: User) => void;
+
+  // Actions - Identity Checks
+  setIdentityCheckState: (results: any[], summary: any, isMock: boolean) => void;
+
+  // Actions - Device Checks
+  setDeviceCheckState: (results: any[], summary: any, isMock: boolean) => void;
+
+  // Actions - Module Weights / Threshold
+  setModuleWeight: (module: 'device_posture' | 'context_analysis' | 'trust_scoring_engine', value: number) => void;
+  setAccessThreshold: (value: number) => void;
+
+  // Actions - Module Custom Tests
+  addModuleCustomTest: (test: Omit<ModuleCustomTest, 'id' | 'createdAt'>) => void;
+  updateModuleCustomTest: (id: string, updates: Partial<ModuleCustomTest>) => void;
+  deleteModuleCustomTest: (id: string) => void;
+  runModuleCustomTest: (id: string, status: 'pass' | 'fail' | 'warning') => void;
   
   // Computed getters
   getScores: () => ComputedScores;
@@ -144,6 +398,15 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
       customControls: [],
       disabledControlIds: new Set<string>(),
       customPolicies: [],
+      identityCheckResults: [],
+      identityCheckSummary: null,
+      identityIsMock: false,
+      deviceCheckResults: [],
+      deviceCheckSummary: null,
+      deviceIsMock: false,
+      moduleWeights: { ...DEFAULT_MODULE_WEIGHTS },
+      accessThreshold: DEFAULT_ACCESS_THRESHOLD,
+      moduleCustomTests: SEED_MODULE_TESTS,
       isLoading: false,
       lastSyncedAt: null,
       syncError: null,
@@ -318,24 +581,6 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
           }));
         } catch (error) {
           console.error('Failed to delete custom policy:', error);
-        }
-      },
-      
-      runCustomPolicyCheck: async (policyId) => {
-        try {
-          const result = await customPolicyService.runCustomPolicy(policyId);
-          // Update the policy in store with new result
-          set(state => ({
-            customPolicies: state.customPolicies.map(p =>
-              p.policyId === policyId
-                ? { ...p, lastTestResult: result.status, lastRunAt: result.timestamp }
-                : p
-            ),
-          }));
-          return result;
-        } catch (error) {
-          console.error('Failed to run custom policy:', error);
-          return null;
         }
       },
       
@@ -802,6 +1047,50 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
       setCurrentUser: (user) => {
         set({ currentUser: user });
       },
+
+      // Actions - Identity Checks
+      setIdentityCheckState: (results, summary, isMock) => {
+        set({ identityCheckResults: results, identityCheckSummary: summary, identityIsMock: isMock });
+      },
+
+      // Actions - Device Checks
+      setDeviceCheckState: (results, summary, isMock) => {
+        set({ deviceCheckResults: results, deviceCheckSummary: summary, deviceIsMock: isMock });
+      },
+
+      // Actions - Module Weights / Threshold
+      setModuleWeight: (module, value) => {
+        set(state => ({ moduleWeights: { ...state.moduleWeights, [module]: Math.max(0, Math.min(100, value)) } }));
+      },
+      setAccessThreshold: (value) => {
+        set({ accessThreshold: Math.max(0, Math.min(100, value)) });
+      },
+
+      // Actions - Module Custom Tests
+      addModuleCustomTest: (test) => {
+        const id = `mct-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+        set(state => ({
+          moduleCustomTests: [
+            ...state.moduleCustomTests,
+            { ...test, id, createdAt: new Date().toISOString() },
+          ],
+        }));
+      },
+      updateModuleCustomTest: (id, updates) => {
+        set(state => ({
+          moduleCustomTests: state.moduleCustomTests.map(t => t.id === id ? { ...t, ...updates } : t),
+        }));
+      },
+      deleteModuleCustomTest: (id) => {
+        set(state => ({ moduleCustomTests: state.moduleCustomTests.filter(t => t.id !== id) }));
+      },
+      runModuleCustomTest: (id, status) => {
+        set(state => ({
+          moduleCustomTests: state.moduleCustomTests.map(t =>
+            t.id === id ? { ...t, lastStatus: status, lastRun: new Date().toISOString() } : t
+          ),
+        }));
+      },
       
       // Computed getters
       getScores: () => {
@@ -836,7 +1125,7 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
     {
       name: 'modzero-zerotrust',
       storage: createJSONStorage(() => localStorage),
-      version: 3, // Increment this when control IDs change to force refresh
+      version: 4, // Bumped to force refresh of module custom test seeds (new checkType/threshold fields)
       partialize: (state) => ({
         // Only persist these fields
         weightConfig: state.weightConfig,
@@ -845,27 +1134,42 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
         controlResults: state.controlResults,
         customControls: state.customControls,
         disabledControlIds: Array.from(state.disabledControlIds), // Convert Set to Array for JSON
+        identityCheckResults: state.identityCheckResults,
+        identityCheckSummary: state.identityCheckSummary,
+        identityIsMock: state.identityIsMock,
+        deviceCheckResults: state.deviceCheckResults,
+        deviceCheckSummary: state.deviceCheckSummary,
+        deviceIsMock: state.deviceIsMock,
+        moduleWeights: state.moduleWeights,
+        accessThreshold: state.accessThreshold,
+        moduleCustomTests: state.moduleCustomTests,
       }),
       // Merge persisted state with initial state, ensuring new controls get their mock results
       merge: (persistedState: any, currentState: ZeroTrustState) => {
         const persisted = persistedState as Partial<ZeroTrustState> & { disabledControlIds?: string[] };
-        
+
+        // Drop keys whose persisted value is undefined so currentState seed values win.
+        const persistedDefined: Partial<ZeroTrustState> = {};
+        for (const [k, v] of Object.entries(persisted)) {
+          if (v !== undefined) (persistedDefined as any)[k] = v;
+        }
+
         // Get persisted control results as a map for quick lookup
         const persistedResultsMap = new Map<string, ControlResult>();
         (persisted.controlResults || []).forEach(r => persistedResultsMap.set(r.controlId, r));
-        
+
         // Merge: use persisted results if they exist, otherwise use mock results
         const mergedResults: ControlResult[] = mockControlResults.map(mockResult => {
           const persisted = persistedResultsMap.get(mockResult.controlId);
           return persisted || mockResult;
         });
-        
+
         // Convert disabledControlIds back to Set
         const disabledSet = new Set<string>(persisted.disabledControlIds || []);
-        
+
         return {
           ...currentState,
-          ...persisted,
+          ...persistedDefined,
           controlResults: mergedResults,
           disabledControlIds: disabledSet,
         };
@@ -873,12 +1177,19 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
       // Migrate from old versions - reset controlResults when version changes
       migrate: (persistedState: any, version: number) => {
         if (version < 3) {
-          // Old version - reset controlResults to use new mock data
           return {
             ...persistedState,
-            controlResults: undefined, // Will be replaced with mockControlResults in merge
+            controlResults: undefined,
             customControls: [],
             disabledControlIds: [],
+          };
+        }
+        if (version < 4) {
+          // v4: module custom tests got new fields (checkType, threshold).
+          // Drop the cached list so the store falls back to the fresh seed.
+          return {
+            ...persistedState,
+            moduleCustomTests: undefined,
           };
         }
         return persistedState;
@@ -922,3 +1233,75 @@ export const selectIsAdmin = (state: ZeroTrustState) =>
 
 export const selectIsControlEnabled = (controlId: string) => (state: ZeroTrustState) =>
   !state.disabledControlIds.has(controlId);
+
+export const selectModuleCustomTests = (state: ZeroTrustState) => state.moduleCustomTests;
+export const selectModuleWeights = (state: ZeroTrustState) => state.moduleWeights;
+export const selectAccessThreshold = (state: ZeroTrustState) => state.accessThreshold;
+export const selectDeviceCheckResults = (state: ZeroTrustState) => state.deviceCheckResults;
+export const selectDeviceCheckSummary = (state: ZeroTrustState) => state.deviceCheckSummary;
+export const selectIdentityCheckResults = (state: ZeroTrustState) => state.identityCheckResults;
+export const selectIdentityCheckSummary = (state: ZeroTrustState) => state.identityCheckSummary;
+
+/**
+ * Compute the overall trust score (0-100) for the current user/device
+ * using the three FYP modules and their weights.
+ *
+ * - Device Posture: combines the 5 Devices baseline checks + 'device_posture' module custom tests.
+ * - Context Analysis: aggregates 'context_analysis' module custom tests only (pre-auth signals).
+ * - Trust Scoring Engine: aggregates 'trust_scoring_engine' module custom tests AND the
+ *   5 Identity baseline checks (since identity risk is the TSE's main identity-side input).
+ *
+ * Not-run tests count as neutral (50). Warning = 50, pass = 100, fail = 0.
+ */
+export interface TrustScore {
+  overall: number;
+  devicePostureScore: number;
+  contextAnalysisScore: number;
+  trustScoringEngineScore: number;
+  lastUpdated: string | null;
+  identityScore: number;
+  deviceScore: number;
+}
+
+export function selectTrustScore(state: ZeroTrustState): TrustScore {
+  const statusToScore = (s: string) => s === 'pass' ? 100 : s === 'warning' ? 50 : s === 'fail' ? 0 : 50;
+
+  const idResults: any[] = state.identityCheckResults || [];
+  const dvResults: any[] = state.deviceCheckResults || [];
+  const customs = state.moduleCustomTests;
+
+  const avg = (arr: number[]) => arr.length === 0 ? 50 : Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+
+  const identityScore = idResults.length
+    ? Math.round(idResults.reduce((s, r) => s + statusToScore(r.status), 0) / idResults.length)
+    : 50;
+  const deviceScore = dvResults.length
+    ? Math.round(dvResults.reduce((s, r) => s + statusToScore(r.status), 0) / dvResults.length)
+    : 50;
+
+  const dpCustom = customs.filter(t => t.module === 'device_posture').map(t => statusToScore(t.lastStatus));
+  const caCustom = customs.filter(t => t.module === 'context_analysis').map(t => statusToScore(t.lastStatus));
+  const tsCustom = customs.filter(t => t.module === 'trust_scoring_engine').map(t => statusToScore(t.lastStatus));
+
+  const devicePostureScore = avg([deviceScore, ...dpCustom]);
+  const contextAnalysisScore = avg(caCustom);
+  const trustScoringEngineScore = avg([identityScore, ...tsCustom]);
+
+  const w = state.moduleWeights;
+  const total = w.device_posture + w.context_analysis + w.trust_scoring_engine || 1;
+  const overall = Math.round(
+    (devicePostureScore * w.device_posture + contextAnalysisScore * w.context_analysis + trustScoringEngineScore * w.trust_scoring_engine) / total
+  );
+
+  const lastUpdated = state.identityCheckSummary?.last_run || state.deviceCheckSummary?.last_run || null;
+
+  return {
+    overall,
+    devicePostureScore,
+    contextAnalysisScore,
+    trustScoringEngineScore,
+    lastUpdated,
+    identityScore,
+    deviceScore,
+  };
+}

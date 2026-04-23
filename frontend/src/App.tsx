@@ -8,19 +8,16 @@ import LogsPage from "./pages/LogsPage";
 import UsersPage from "./pages/UsersPage";
 import UserDetailPage from "./pages/UserDetailPage";
 import DevicesPage from "./pages/DevicesPage";
-import DevicesTestingPage from "./pages/DevicesTestingPage";
 import PoliciesPage from "./pages/PoliciesPage";
 import ResourcesPage from "./pages/ResourcesPage";
 import TemplatesPage from "./pages/TemplatesPage";
 import SettingsPage from "./pages/SettingsPage";
-import IdentityPage from "./pages/IdentityPage";
 import UserProfilePage from "./pages/UserProfilePage";
 import NotFoundPage from "./pages/NotFoundPage";
 import ZeroTrustPoliciesPage from "./pages/ZeroTrustPoliciesPage";
-import IdentityTestingPageLive from "./pages/IdentityTestingPageLive";
-import DevicesTestingPageLive from "./pages/DevicesTestingPageLive";
-import ZeroTrustTestingPage from "./pages/ZeroTrustTestingPage";
 import ConnectorsPage from "./pages/ConnectorsPage";
+import IdentityPageV2 from "./pages/IdentityPageV2";
+import DevicesPageV2 from "./pages/DevicesPageV2";
 import { useZeroTrustStore } from "./store/zeroTrustStore";
 import api from "./api";
 
@@ -82,12 +79,10 @@ function App() {
         <Layout>
           <Routes>
             <Route path="/" element={<DashboardPage />} />
-            <Route path="/identity" element={<IdentityPage />} />
-            <Route path="/identity-testing" element={<IdentityTestingPageLive />} />
-            <Route path="/devices-testing" element={<DevicesTestingPageLive />} />
-            {/* Old demo testing pages - kept as backup */}
-            <Route path="/identity2" element={<ZeroTrustTestingPage pillar="Identity" title="Identity Testing (Demo)" description="Zero Trust Identity assessment demo page" />} />
-            <Route path="/devices2" element={<ZeroTrustTestingPage pillar="Devices" title="Devices Testing (Demo)" description="Zero Trust Devices assessment demo page" />} />
+            <Route path="/identity" element={<IdentityPageV2 />} />
+            <Route path="/devices-testing" element={<DevicesPageV2 />} />
+            {/* /resource-access merged into Overview (DashboardPage) */}
+            <Route path="/resource-access" element={<Navigate to="/" replace />} />
             <Route path="/devices" element={<DevicesPage />} />
             <Route path="/logs" element={<LogsPage />} />
             <Route path="/users" element={<UsersPage />} />

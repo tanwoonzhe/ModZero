@@ -1,68 +1,174 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Internal Intranet - ModZero Demo</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0;
-            color: #fff;
-        }
-        .container {
-            background: rgba(255,255,255,0.15);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 40px 50px;
-            text-align: center;
-            border: 1px solid rgba(255,255,255,0.2);
-            max-width: 600px;
-        }
-        h1 { font-size: 2em; margin-bottom: 10px; }
-        .badge {
-            display: inline-block;
-            background: rgba(255,255,255,0.2);
-            padding: 6px 16px;
-            border-radius: 20px;
-            font-size: 0.85em;
-            margin-bottom: 20px;
-        }
-        p { line-height: 1.6; opacity: 0.9; }
-        .success {
-            background: rgba(34, 197, 94, 0.3);
-            border: 1px solid rgba(34, 197, 94, 0.5);
-            border-radius: 12px;
-            padding: 15px 20px;
-            margin-top: 20px;
-        }
-        .info {
-            font-size: 0.8em;
-            opacity: 0.6;
-            margin-top: 25px;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Internal Demo Portal — ModZero Protected</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+    .topbar {
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+      padding: 14px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .topbar-logo { display: flex; align-items: center; gap: 10px; font-size: 1.1rem; font-weight: 700; color: #f8fafc; }
+    .topbar-badge {
+      background: #22c55e22; color: #4ade80; border: 1px solid #4ade8044;
+      padding: 4px 12px; border-radius: 99px; font-size: 0.75rem; font-weight: 600;
+    }
+    .hero {
+      background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e293b 100%);
+      padding: 56px 32px 48px; text-align: center; border-bottom: 1px solid #334155;
+    }
+    .hero h1 { font-size: 2.4rem; font-weight: 800; color: #fff; margin-bottom: 12px; }
+    .hero p { font-size: 1.05rem; color: #94a3b8; max-width: 560px; margin: 0 auto 24px; line-height: 1.6; }
+    .hero-chips { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    .chip { background: #ffffff18; border: 1px solid #ffffff22; padding: 6px 16px; border-radius: 99px; font-size: 0.8rem; color: #c7d2fe; }
+    .main { max-width: 1100px; margin: 40px auto; padding: 0 24px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 14px; padding: 24px; }
+    .card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .card-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; }
+    .card-title { font-size: 1rem; font-weight: 700; color: #f1f5f9; }
+    .card-subtitle { font-size: 0.8rem; color: #64748b; margin-top: 2px; }
+    .info-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #33415522; font-size: 0.85rem; }
+    .info-row:last-child { border-bottom: none; }
+    .info-label { color: #64748b; }
+    .info-value { color: #cbd5e1; font-family: monospace; font-size: 0.82rem; }
+    .status { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .dot-green { background: #4ade80; box-shadow: 0 0 6px #4ade8088; }
+    .dot-amber { background: #fbbf24; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th { text-align: left; padding: 8px 10px; color: #64748b; font-weight: 600; border-bottom: 1px solid #334155; }
+    td { padding: 8px 10px; color: #cbd5e1; border-bottom: 1px solid #1e293b; }
+    tr:last-child td { border-bottom: none; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 0.72rem; font-weight: 600; }
+    .tag-green { background: #16a34a22; color: #4ade80; border: 1px solid #4ade8044; }
+    .tag-amber { background: #d9770622; color: #fbbf24; border: 1px solid #fbbf2444; }
+    .tag-blue  { background: #3730a322; color: #818cf8; border: 1px solid #818cf844; }
+    .access-banner {
+      background: #14532d22; border: 1px solid #22c55e44; border-radius: 12px;
+      padding: 20px 24px; display: flex; align-items: flex-start; gap: 16px; margin-bottom: 24px;
+    }
+    .access-banner h3 { font-size: 0.95rem; font-weight: 700; color: #4ade80; margin-bottom: 4px; }
+    .access-banner p  { font-size: 0.82rem; color: #86efac; line-height: 1.5; }
+    .footer { text-align: center; padding: 32px; color: #334155; font-size: 0.78rem; border-top: 1px solid #1e293b; margin-top: 48px; }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Internal Intranet</h1>
-        <div class="badge">ModZero Protected Resource</div>
-        <p>
-            This is a simulated internal resource accessible only through
-            the ModZero Connector's zero-trust reverse proxy.
-        </p>
-        <div class="success">
-            If you can see this page, your request was successfully
-            authenticated and proxied through the ModZero Connector.
-        </div>
-        <div class="info">
-            Server: nginx (demo) &middot; Resource ID: intranet-demo
-        </div>
+  <div class="topbar">
+    <div class="topbar-logo">🛡️ AcmeCorp Internal Portal</div>
+    <span class="topbar-badge">● ModZero Protected</span>
+  </div>
+
+  <div class="hero">
+    <h1>Internal Demo Portal</h1>
+    <p>This resource is registered in ModZero as a protected internal service. Access is managed via the Zero Trust connector.</p>
+    <div class="hero-chips">
+      <span class="chip">🌐 Network: demo-network</span>
+      <span class="chip">🔌 Connector: DESKTOP-T6E1NIC-default</span>
+      <span class="chip">🚪 Port: 2026</span>
     </div>
+  </div>
+
+  <div class="main">
+    <div class="access-banner">
+      <div style="font-size:1.6rem">✅</div>
+      <div>
+        <h3>Resource Accessible</h3>
+        <p>You are viewing this page on port 2026 (via nginx inside Docker).
+        In a full Zero Trust deployment, the ModZero Connector proxies this page to authenticated users
+        and injects identity headers (X-User-Id, X-User-Email) from the verified JWT.</p>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon" style="background:#6366f122">🖥️</div>
+          <div><div class="card-title">System Status</div><div class="card-subtitle">Internal services health</div></div>
+        </div>
+        <div class="info-row"><span class="info-label">Web Portal</span><span class="status"><span class="dot dot-green"></span>Online</span></div>
+        <div class="info-row"><span class="info-label">Database</span><span class="status"><span class="dot dot-green"></span>Online</span></div>
+        <div class="info-row"><span class="info-label">File Server</span><span class="status"><span class="dot dot-green"></span>Online</span></div>
+        <div class="info-row"><span class="info-label">Mail Relay</span><span class="status"><span class="dot dot-amber"></span>Degraded</span></div>
+        <div class="info-row"><span class="info-label">Backup Agent</span><span class="status"><span class="dot dot-green"></span>Online</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon" style="background:#22c55e22">🔗</div>
+          <div><div class="card-title">ModZero Registration</div><div class="card-subtitle">How this resource is registered</div></div>
+        </div>
+        <div class="info-row"><span class="info-label">Target Host (Docker)</span><span class="info-value">intranet</span></div>
+        <div class="info-row"><span class="info-label">Target Port (internal)</span><span class="info-value">80</span></div>
+        <div class="info-row"><span class="info-label">External Port</span><span class="info-value">2026</span></div>
+        <div class="info-row"><span class="info-label">Protocol</span><span class="info-value">http</span></div>
+        <div class="info-row"><span class="info-label">Path Prefix</span><span class="info-value">/</span></div>
+        <div class="info-row"><span class="info-label">Network</span><span class="info-value">demo-network</span></div>
+      </div>
+
+      <div class="card" style="grid-column: span 2;">
+        <div class="card-header">
+          <div class="card-icon" style="background:#f59e0b22">📋</div>
+          <div><div class="card-title">Simulated Access Log</div><div class="card-subtitle">In production, populated from connector audit events</div></div>
+        </div>
+        <table>
+          <thead><tr><th>Time</th><th>User</th><th>Resource</th><th>Action</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td id="t1">—</td><td>admin@acmecorp.com</td><td>Internal Demo Portal</td><td>GET /</td><td><span class="tag tag-green">Allowed</span></td></tr>
+            <tr><td id="t2">—</td><td>john.doe@acmecorp.com</td><td>HR Portal</td><td>GET /hr/payroll</td><td><span class="tag tag-green">Allowed</span></td></tr>
+            <tr><td id="t3">—</td><td>guest@external.com</td><td>Internal Wiki</td><td>GET /wiki/internal</td><td><span class="tag tag-amber">Denied</span></td></tr>
+            <tr><td id="t4">—</td><td>alice@acmecorp.com</td><td>File Server</td><td>GET /files/reports</td><td><span class="tag tag-green">Allowed</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon" style="background:#3b82f622">📁</div>
+          <div><div class="card-title">Resources on This Network</div><div class="card-subtitle">Inventoried in ModZero</div></div>
+        </div>
+        <div class="info-row"><span class="info-label">Internal Demo Portal</span><span><span class="tag tag-green">This page</span></span></div>
+        <div class="info-row"><span class="info-label">HR Portal</span><span><span class="tag tag-blue">http/443</span></span></div>
+        <div class="info-row"><span class="info-label">Internal Wiki</span><span><span class="tag tag-blue">http/8080</span></span></div>
+        <div class="info-row"><span class="info-label">SQL Server</span><span><span class="tag tag-blue">tcp/1433</span></span></div>
+        <div class="info-row"><span class="info-label">File Server</span><span><span class="tag tag-blue">smb/445</span></span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon" style="background:#a855f722">🛡️</div>
+          <div><div class="card-title">Zero Trust Policy Check</div><div class="card-subtitle">Simulated evaluation result</div></div>
+        </div>
+        <div class="info-row"><span class="info-label">Identity Verified</span><span class="status"><span class="dot dot-green"></span>Yes</span></div>
+        <div class="info-row"><span class="info-label">Device Compliant</span><span class="status"><span class="dot dot-green"></span>Yes</span></div>
+        <div class="info-row"><span class="info-label">Connector Online</span><span class="status"><span class="dot dot-green"></span>Yes</span></div>
+        <div class="info-row"><span class="info-label">Network Match</span><span class="status"><span class="dot dot-green"></span>demo-network</span></div>
+        <div class="info-row"><span class="info-label">Access Decision</span><span class="status"><span class="dot dot-green"></span><strong style="color:#4ade80">ALLOW</strong></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">AcmeCorp Internal Portal &mdash; Protected by ModZero Zero Trust Access &mdash; Port 2026</div>
+
+  <script>
+    const now = new Date();
+    const fmt = (d) => d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    document.getElementById('t1').textContent = fmt(new Date(now - 12000));
+    document.getElementById('t2').textContent = fmt(new Date(now - 74000));
+    document.getElementById('t3').textContent = fmt(new Date(now - 183000));
+    document.getElementById('t4').textContent = fmt(new Date(now - 412000));
+  </script>
 </body>
 </html>

@@ -4,6 +4,8 @@ from fastapi import APIRouter
 
 from . import auth, users, devices, attempts, policies, templates, resources, azure, assessment, security_tests
 from . import identity_tests, device_tests, test_config, connectors, client_api, identity_checks, custom_policies
+from . import device_checks as device_checks_router
+from . import resource_access as resource_access_router
 
 api_router = APIRouter()
 
@@ -32,4 +34,10 @@ api_router.include_router(test_config.router, prefix="/test-config", tags=["test
 api_router.include_router(connectors.router, tags=["connectors"])
 api_router.include_router(client_api.router, tags=["client"])
 api_router.include_router(identity_checks.router, tags=["identity-checks-zt"])
+api_router.include_router(device_checks_router.router, tags=["device-checks-zt"])
+api_router.include_router(resource_access_router.router, tags=["resource-access"])
+
+# Public product-facing route for protected resources (/r/{slug}).
+# Exposed via main.py at the app root, NOT under /api.
+public_resource_router = resource_access_router.public_router
 api_router.include_router(custom_policies.router, prefix="/custom-policies", tags=["custom-policies"])

@@ -288,8 +288,11 @@ export interface AuditEvent {
 export type EnforcementMode = "informational" | "enforced";
 
 /**
- * Customer-defined security policy
- * Separate from built-in baseline checks (SecurityTestDefinition).
+ * Customer-defined security policy.
+ *
+ * Policies define enforcement rules, scope, thresholds, and organizational
+ * interpretation.  Detection logic (Graph API / Checklist / Manual) belongs
+ * exclusively in Custom Tests.
  */
 export interface CustomPolicy {
   /** UUID from backend */
@@ -314,12 +317,6 @@ export interface CustomPolicy {
   risk?: "High" | "Medium" | "Low";
   /** Severity level */
   severity?: string;
-  /** Detection mode */
-  detectionMode?: DetectionMode;
-  /** Graph API query configuration */
-  graphQueryConfig?: GraphQueryConfig;
-  /** Checklist configuration */
-  checklistConfig?: ChecklistConfig;
   /** Threshold/condition configuration */
   thresholdConfig?: Record<string, unknown>;
   /** Last evaluation result */

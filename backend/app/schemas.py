@@ -361,10 +361,9 @@ class CustomPolicyBase(BaseModel):
     is_enabled: bool = True
     risk: Optional[str] = None
     severity: Optional[str] = None
-    detection_mode: Optional[str] = None  # manual | graph_query | checklist
-    graph_query_config: Optional[Dict] = None
-    checklist_config: Optional[Dict] = None
-    threshold_config: Optional[Dict] = None
+    # Policies define enforcement rules and thresholds, not detection logic.
+    # Detection (Graph API, Checklist, Manual) belongs to Custom Tests.
+    threshold_config: Optional[Dict] = None  # e.g., {"metric": "mfa_coverage", "operator": "gte", "value": 95}
 
 
 class CustomPolicyCreate(CustomPolicyBase):
@@ -382,9 +381,6 @@ class CustomPolicyUpdate(BaseModel):
     is_enabled: Optional[bool] = None
     risk: Optional[str] = None
     severity: Optional[str] = None
-    detection_mode: Optional[str] = None
-    graph_query_config: Optional[Dict] = None
-    checklist_config: Optional[Dict] = None
     threshold_config: Optional[Dict] = None
 
 

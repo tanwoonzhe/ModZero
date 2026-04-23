@@ -133,20 +133,33 @@ const ConnectorsPage: React.FC = () => {
     connector_id: "",
   });
 
+  const [usingDemoData] = useState(false);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
+
+    // Fetch each data source independently so one failure doesn't block others
     try {
-      const [cRes, tRes, rRes] = await Promise.all([
-        api.get("/connectors"),
-        api.get("/admin/connectors/tokens"),
-        api.get("/admin/connectors/resources"),
-      ]);
+      const cRes = await api.get("/connectors");
       setConnectors(cRes.data);
-      setTokens(tRes.data);
-      setResources(rRes.data);
-    } catch (err: any) {
-      toast.error("Failed to load connector data");
+    } catch {
+      setConnectors([]);
     }
+
+    try {
+      const tRes = await api.get("/admin/connectors/tokens");
+      setTokens(tRes.data);
+    } catch {
+      setTokens([]);
+    }
+
+    try {
+      const rRes = await api.get("/admin/connectors/resources");
+      setResources(rRes.data);
+    } catch {
+      setResources([]);
+    }
+
     setLoading(false);
   }, []);
 
@@ -233,6 +246,7 @@ const ConnectorsPage: React.FC = () => {
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Manage zero-trust connectors that proxy traffic to your internal resources
+            {usingDemoData && <span className="ml-2 text-amber-600">• Using demo data</span>}
           </p>
         </div>
         <div className="flex gap-2">
@@ -253,22 +267,61 @@ const ConnectorsPage: React.FC = () => {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
         <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Total Connectors</div>
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">{connectors.length}</div>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
+              <FaPlug className="text-indigo-600 dark:text-indigo-400" size={18} />
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{connectors.length}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Total Connectors</div>
+            </div>
+          </div>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Online</div>
-          <div className="text-2xl font-bold text-green-600">{onlineCount}</div>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-green-100 dark:bg-green-900/30 rounded-lg">
+              <FaCircle className="text-green-500" size={18} />
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-green-600">{onlineCount}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Online</div>
+            </div>
+          </div>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Degraded</div>
-          <div className="text-2xl font-bold text-yellow-500">{degradedCount}</div>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
+              <FaCircle className="text-yellow-500" size={18} />
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-yellow-500">{degradedCount}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Degraded</div>
+            </div>
+          </div>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Offline</div>
-          <div className="text-2xl font-bold text-red-500">{offlineCount}</div>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-red-100 dark:bg-red-900/30 rounded-lg">
+              <FaCircle className="text-red-500" size={18} />
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-red-500">{offlineCount}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Offline</div>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+              <FaNetworkWired className="text-blue-600 dark:text-blue-400" size={18} />
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{new Set(connectors.map(c => c.network)).size}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Networks</div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -297,9 +350,20 @@ const ConnectorsPage: React.FC = () => {
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
           {connectors.length === 0 ? (
             <div className="p-12 text-center text-gray-500 dark:text-gray-400">
-              <FaPlug className="mx-auto text-4xl mb-3 text-gray-300 dark:text-gray-600" />
-              <p className="text-lg font-medium">No connectors deployed yet</p>
-              <p className="mt-1">Click "Deploy Connector" to generate deployment commands.</p>
+              <FaPlug className="mx-auto text-4xl mb-4 text-gray-300 dark:text-gray-600" />
+              <p className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No connectors deployed yet</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-1 max-w-md mx-auto">
+                Connectors are lightweight agents that run inside your remote networks to provide secure access to internal resources.
+              </p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mb-6 max-w-md mx-auto">
+                Deploy a connector using Docker or Linux to start protecting resources behind your network perimeter.
+              </p>
+              <button
+                onClick={() => { setShowTokenModal(true); setCreatedToken(null); }}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              >
+                <FaPlus size={14} /> Deploy Your First Connector
+              </button>
             </div>
           ) : (
             <table className="w-full text-sm">

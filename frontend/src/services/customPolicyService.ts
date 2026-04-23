@@ -1,8 +1,9 @@
 /**
  * Custom Policy API Service
- * 
+ *
  * Provides API calls for customer-defined security policies.
- * These are separate from built-in baseline checks.
+ * Policies define enforcement rules, scope, and thresholds.
+ * Detection logic (Graph API / Checklist / Manual) belongs in Custom Tests.
  */
 
 import api from '../api';
@@ -24,9 +25,6 @@ export interface CustomPolicyApiResponse {
   isEnabled: boolean;
   risk?: string;
   severity?: string;
-  detectionMode?: string;
-  graphQueryConfig?: Record<string, unknown>;
-  checklistConfig?: Record<string, unknown>;
   thresholdConfig?: Record<string, unknown>;
   lastTestResult?: string;
   lastRunAt?: string;
@@ -71,9 +69,6 @@ export function apiResponseToCustomPolicy(r: CustomPolicyApiResponse): CustomPol
     isEnabled: r.isEnabled,
     risk: capitalizeRisk(r.risk),
     severity: r.severity,
-    detectionMode: r.detectionMode as CustomPolicy['detectionMode'],
-    graphQueryConfig: r.graphQueryConfig as CustomPolicy['graphQueryConfig'],
-    checklistConfig: r.checklistConfig as CustomPolicy['checklistConfig'],
     thresholdConfig: r.thresholdConfig,
     lastTestResult: r.lastTestResult,
     lastRunAt: r.lastRunAt,
@@ -119,9 +114,6 @@ export async function createCustomPolicy(data: {
   is_enabled?: boolean;
   risk?: string;
   severity?: string;
-  detection_mode?: string;
-  graph_query_config?: Record<string, unknown>;
-  checklist_config?: Record<string, unknown>;
   threshold_config?: Record<string, unknown>;
 }): Promise<CustomPolicy> {
   const response = await api.post<CustomPolicyApiResponse>('/custom-policies/', data);
@@ -144,9 +136,6 @@ export async function updateCustomPolicy(
     is_enabled: boolean;
     risk: string;
     severity: string;
-    detection_mode: string;
-    graph_query_config: Record<string, unknown>;
-    checklist_config: Record<string, unknown>;
     threshold_config: Record<string, unknown>;
   }>
 ): Promise<CustomPolicy> {
@@ -159,18 +148,5 @@ export async function updateCustomPolicy(
  */
 export async function deleteCustomPolicy(policyId: string): Promise<{ deleted: boolean }> {
   const response = await api.delete(`/custom-policies/${policyId}`);
-  return response.data;
-}
-
-/**
- * Run a custom policy check
- */
-export async function runCustomPolicy(policyId: string): Promise<{
-  status: string;
-  details?: string;
-  rawData?: unknown;
-  timestamp?: string;
-}> {
-  const response = await api.post(`/custom-policies/${policyId}/run`);
   return response.data;
 }

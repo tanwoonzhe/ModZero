@@ -36,7 +36,6 @@ async def heartbeat_loop(connector_id: str, connector_secret: str,
                          on_status_change=None):
     """Send periodic heartbeats to the controller."""
     ssl_ctx = get_ssl_context()
-    connector = aiohttp.TCPConnector(ssl=ssl_ctx)
     headers = {
         "X-Connector-Id": connector_id,
         "X-Connector-Secret": connector_secret,
@@ -56,7 +55,11 @@ async def heartbeat_loop(connector_id: str, connector_secret: str,
             "network": NETWORK,
         }
         try:
-            async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with aiohttp.ClientSession(
+                connector=aiohttp.TCPConnector(ssl=ssl_ctx),
+                connector_owner=True,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as session:
                 url = api_url(f"/connectors/{connector_id}/heartbeat")
                 async with session.post(url, json=payload, headers=headers) as resp:
                     if resp.status == 200:
@@ -74,7 +77,6 @@ async def policy_poll_loop(connector_id: str, connector_secret: str,
                            policy_store: dict):
     """Poll the controller for resource/policy updates."""
     ssl_ctx = get_ssl_context()
-    connector = aiohttp.TCPConnector(ssl=ssl_ctx)
     headers = {
         "X-Connector-Id": connector_id,
         "X-Connector-Secret": connector_secret,
@@ -82,7 +84,11 @@ async def policy_poll_loop(connector_id: str, connector_secret: str,
 
     while True:
         try:
-            async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with aiohttp.ClientSession(
+                connector=aiohttp.TCPConnector(ssl=ssl_ctx),
+                connector_owner=True,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as session:
                 url = api_url(f"/connectors/{connector_id}/policies")
                 async with session.get(url, json=None, headers=headers) as resp:
                     if resp.status == 200:
