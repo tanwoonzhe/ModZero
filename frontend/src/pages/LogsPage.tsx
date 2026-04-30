@@ -21,6 +21,7 @@ import {
 import toast from "react-hot-toast";
 import api from "../api";
 import { useSocket } from "../hooks/useSocket";
+import AccessDecisionsLog from "../components/AccessDecisionsLog";
 
 interface Attempt {
   attempt_id: string;
@@ -78,6 +79,7 @@ const LogsPage: React.FC = () => {
   const [dateFilter, setDateFilter] = useState<string>("24h");
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedAttempt, setSelectedAttempt] = useState<Attempt | null>(null);
+  const [tab, setTab] = useState<"access" | "attempts">("access");
   const itemsPerPage = 20;
 
   // Real-time updates via Socket.IO
@@ -268,6 +270,33 @@ const LogsPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Tab switcher: Access decisions (Phase 1/2) vs legacy login attempts */}
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
+        <button
+          onClick={() => setTab("access")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
+            tab === "access"
+              ? "border-indigo-500 text-indigo-600 dark:text-indigo-400"
+              : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+          }`}
+        >
+          Access Decisions
+        </button>
+        <button
+          onClick={() => setTab("attempts")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
+            tab === "attempts"
+              ? "border-indigo-500 text-indigo-600 dark:text-indigo-400"
+              : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+          }`}
+        >
+          Login Attempts
+        </button>
+      </div>
+
+      {tab === "access" && <AccessDecisionsLog />}
+
+      {tab === "attempts" && (<>
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5">
@@ -599,6 +628,7 @@ const LogsPage: React.FC = () => {
           </div>
         </div>
       )}
+      </>)}
     </div>
   );
 };

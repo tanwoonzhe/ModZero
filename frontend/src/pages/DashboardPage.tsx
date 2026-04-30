@@ -27,6 +27,7 @@ import toast from "react-hot-toast";
 
 import TrustScoreCard from "../components/TrustScoreCard";
 import ProtectedResourceAccessPanel from "../components/ProtectedResourceAccessPanel";
+import AccessControlOverviewPanel from "../components/AccessControlOverviewPanel";
 
 // Colors matching Zero Trust Assessment
 const chartColors = {
@@ -165,6 +166,9 @@ const DashboardPage: React.FC = () => {
     <div className="space-y-6 pb-12">
       {/* FYP Trust Score Card (current user + current device) */}
       <TrustScoreCard />
+
+      {/* Live access-control state from /audit/status-overview */}
+      <AccessControlOverviewPanel />
 
       {/* Protected resource access panel (moved here from the old Resource Access page) */}
       <ProtectedResourceAccessPanel />
