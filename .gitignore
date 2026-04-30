@@ -65,3 +65,5 @@ backend/app/static/client/*.rpm
 backend/app/static/client/*.tar.gz
 electron-client/release/
 
+backend/app/static/client/ModZero-win-portable-*/
+
