@@ -33,7 +33,7 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import Response, RedirectResponse, HTMLResponse
+from fastapi.responses import Response, RedirectResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -503,6 +503,68 @@ class ConnectorClient:
                 content=body,
             )
 
+    def _build_request(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        method: str,
+        target_url: str,
+        headers: dict[str, str],
+        body: bytes,
+        query_string: bytes,
+        user_id: str,
+        device_id: Optional[str],
+        resource_id: str,
+    ) -> httpx.Request:
+        ts = str(int(time.time()))
+        sig = self._sign(ts, method, target_url)
+        hop_url = f"{self._base}{self.HOP_PATH}"
+        if query_string:
+            hop_url = f"{hop_url}?{query_string.decode('latin-1')}"
+
+        drop = {"host", "content-length", "connection", "keep-alive",
+                "transfer-encoding", "upgrade", "proxy-authorization",
+                "proxy-authenticate", "te", "trailers"}
+        fwd_headers = {k: v for k, v in headers.items() if k.lower() not in drop}
+        fwd_headers["X-ModZero-Target"] = target_url
+        fwd_headers["X-ModZero-Timestamp"] = ts
+        fwd_headers["X-ModZero-Signature"] = sig
+        fwd_headers["X-ModZero-User"] = user_id
+        if device_id:
+            fwd_headers["X-ModZero-Device"] = device_id
+        fwd_headers["X-ModZero-Resource"] = resource_id
+        return client.build_request(
+            method=method, url=hop_url, headers=fwd_headers, content=body,
+        )
+
+    def open_stream(self, **kwargs):
+        """Streaming hop. Returns an async context manager yielding a
+        streaming `httpx.Response` (use `aiter_raw()`); closes the client
+        on exit. Used by the /r/<slug> proxy to stream large bodies and
+        chunked responses (file downloads, JSON streams, HTML pages with
+        late-loaded assets) without buffering."""
+        client = httpx.AsyncClient(timeout=60.0, follow_redirects=False)
+        req = self._build_request(client, **kwargs)
+        return _StreamingHop(client, req)
+
+
+class _StreamingHop:
+    def __init__(self, client: httpx.AsyncClient, req: httpx.Request) -> None:
+        self._client = client
+        self._req = req
+        self._resp: Optional[httpx.Response] = None
+
+    async def __aenter__(self) -> httpx.Response:
+        self._resp = await self._client.send(self._req, stream=True)
+        return self._resp
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        try:
+            if self._resp is not None:
+                await self._resp.aclose()
+        finally:
+            await self._client.aclose()
+
 
 _connector = ConnectorClient()
 
@@ -533,6 +595,125 @@ _DENY_HTML = """<!doctype html>
 
 def _deny(reason: str, slug: str, status: int = 403) -> HTMLResponse:
     return HTMLResponse(_DENY_HTML.format(reason=reason, slug=slug), status_code=status)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2A: response-header rewriting helpers
+# ---------------------------------------------------------------------------
+
+def _rewrite_location(value: str, *, slug: str, upstream_host: str,
+                      upstream_port: int, upstream_scheme: str) -> str:
+    """Rewrite an upstream Location header so the browser stays inside /r/<slug>.
+
+    Handles:
+      * absolute URLs that point at the upstream origin (http://intranet/foo
+        -> /r/<slug>/foo)
+      * absolute URLs that point at a *different* origin (left untouched —
+        the user's browser will go off to the public internet, which is
+        what the upstream service requested)
+      * absolute paths (/foo -> /r/<slug>/foo)
+      * relative paths (foo -> /r/<slug>/foo, relative to current request)
+    """
+    if not value:
+        return value
+    base = f"/r/{slug}"
+    # Absolute URL?
+    if value.startswith("http://") or value.startswith("https://"):
+        from urllib.parse import urlparse
+        u = urlparse(value)
+        same_origin = (
+            (u.hostname or "").lower() == upstream_host.lower()
+            and (u.port or (443 if u.scheme == "https" else 80)) == upstream_port
+        )
+        if not same_origin:
+            return value  # external redirect — leave as-is
+        new_path = u.path or "/"
+        if u.query:
+            new_path = f"{new_path}?{u.query}"
+        if u.fragment:
+            new_path = f"{new_path}#{u.fragment}"
+        if not new_path.startswith("/"):
+            new_path = "/" + new_path
+        return base + new_path
+    # Absolute path
+    if value.startswith("/"):
+        return base + value
+    # Relative — best-effort: prepend base/.
+    return f"{base}/{value}"
+
+
+def _rewrite_set_cookie(value: str, *, slug: str) -> str:
+    """Rewrite a single Set-Cookie header value.
+
+    * Drops Domain= (cookie binds to the controller host instead).
+    * Rewrites Path=... to be scoped under /r/<slug>.
+    * Drops Secure when the controller is HTTP (Phase 1 demo) — kept
+      otherwise. We do not introspect the request scheme here; the
+      controller-level cookie_secure setting governs Secure for our own
+      session cookie. Upstream's Secure flag is preserved as-is to be
+      conservative.
+    """
+    if not value:
+        return value
+    base = f"/r/{slug}"
+    parts = [p.strip() for p in value.split(";")]
+    out: list[str] = []
+    seen_path = False
+    for i, p in enumerate(parts):
+        if i == 0:
+            out.append(p)  # name=value
+            continue
+        lower = p.lower()
+        if lower.startswith("domain="):
+            continue  # strip
+        if lower.startswith("path="):
+            seen_path = True
+            old = p.split("=", 1)[1] if "=" in p else "/"
+            new = base + (old if old.startswith("/") else "/" + old)
+            out.append(f"Path={new}")
+            continue
+        out.append(p)
+    if not seen_path:
+        out.append(f"Path={base}/")
+    return "; ".join(out)
+
+
+# Hop-by-hop response headers we never relay back to the browser.
+_RESPONSE_DROP = {
+    "content-encoding", "transfer-encoding", "connection", "keep-alive",
+    "content-length", "upgrade", "proxy-authenticate", "proxy-authorization",
+    "te", "trailers",
+}
+
+
+def _build_response_headers(upstream_headers, *, slug: str,
+                            upstream_host: str, upstream_port: int,
+                            upstream_scheme: str) -> list[tuple[str, str]]:
+    """Translate upstream response headers for the client.
+
+    Returns a list of (name, value) tuples (preserving multiple Set-Cookie).
+    """
+    out: list[tuple[str, str]] = []
+    # httpx headers iterable preserves duplicates via .multi_items() / raw.
+    items = (
+        upstream_headers.multi_items()
+        if hasattr(upstream_headers, "multi_items")
+        else list(upstream_headers.items())
+    )
+    for name, value in items:
+        lname = name.lower()
+        if lname in _RESPONSE_DROP:
+            continue
+        if lname == "location":
+            value = _rewrite_location(
+                value, slug=slug,
+                upstream_host=upstream_host, upstream_port=upstream_port,
+                upstream_scheme=upstream_scheme,
+            )
+        elif lname == "set-cookie":
+            value = _rewrite_set_cookie(value, slug=slug)
+        out.append((name, value))
+    return out
 
 
 def _latest_snapshot(db: Session, user_id: str, resource_id: str) -> Optional[TrustSnapshot]:
@@ -650,9 +831,20 @@ async def protected_resource(
         upstream_path = "/" + upstream_path
     target_url = f"{scheme}://{hostport}{upstream_path}"
 
+    # WebSocket upgrade is not yet supported through the connector hop —
+    # documented as Phase 2 future work. Reject cleanly.
+    if request.headers.get("upgrade", "").lower() == "websocket":
+        _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=did,
+               resource_id=rid, reason="websocket upgrade not supported (future work)",
+               path=audit_path)
+        raise HTTPException(
+            status_code=501,
+            detail="WebSocket upgrade through ModZero is not yet supported.",
+        )
+
     body = await request.body()
     try:
-        upstream = await _connector.forward(
+        hop = _connector.open_stream(
             method=request.method,
             target_url=target_url,
             headers=dict(request.headers),
@@ -662,19 +854,43 @@ async def protected_resource(
             device_id=did,
             resource_id=rid,
         )
+        upstream = await hop.__aenter__()
     except httpx.HTTPError as e:
         _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=did,
                resource_id=rid, reason=f"connector unreachable: {e}", path=audit_path)
         raise HTTPException(status_code=502, detail=f"Connector unreachable: {e}") from e
 
-    drop = {"content-encoding", "transfer-encoding", "connection", "content-length"}
-    out_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in drop}
-    _audit(db, decision=AccessDecisionEnum.ALLOW, user_id=uid, device_id=did,
-           resource_id=rid, reason=f"proxied {request.method} -> {upstream.status_code}",
-           path=audit_path)
-    return Response(
-        content=upstream.content,
-        status_code=upstream.status_code,
-        headers=out_headers,
-        media_type=upstream.headers.get("content-type"),
+    rewritten = _build_response_headers(
+        upstream.headers, slug=slug,
+        upstream_host=host, upstream_port=port, upstream_scheme=scheme,
     )
+    status_code = upstream.status_code
+    media_type = upstream.headers.get("content-type")
+
+    async def body_iterator():
+        try:
+            async for chunk in upstream.aiter_raw():
+                yield chunk
+        finally:
+            await hop.__aexit__(None, None, None)
+
+    _audit(db, decision=AccessDecisionEnum.ALLOW, user_id=uid, device_id=did,
+           resource_id=rid, reason=f"proxied {request.method} -> {status_code}",
+           path=audit_path)
+
+    response = StreamingResponse(
+        body_iterator(),
+        status_code=status_code,
+        media_type=media_type,
+    )
+    # Replace the auto-set headers with our rewritten list (preserving
+    # duplicates such as multiple Set-Cookie). Clear first so we don't
+    # double-emit Content-Type.
+    response.raw_headers = [
+        (name.encode("latin-1"), value.encode("latin-1"))
+        for name, value in rewritten
+        if name.lower() != "content-type"
+    ]
+    if media_type:
+        response.raw_headers.append((b"content-type", media_type.encode("latin-1")))
+    return response

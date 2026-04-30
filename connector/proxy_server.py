@@ -142,32 +142,57 @@ async def _forward_handler(request: web.Request) -> web.StreamResponse:
     body = await request.read()
 
     try:
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=30),
+        session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=60),
             auto_decompress=False,
-        ) as session:
-            async with session.request(
+        )
+        try:
+            upstream = await session.request(
                 request.method, target_url,
                 headers=upstream_headers, data=body, allow_redirects=False,
-            ) as upstream:
-                resp_body = await upstream.read()
-                resp_headers = {
-                    k: v for k, v in upstream.headers.items()
-                    if k.lower() not in _HOP_BY_HOP and k.lower() != "content-encoding"
-                }
-                user = request.headers.get("X-ModZero-User", "")
-                rid = request.headers.get("X-ModZero-Resource", "")
-                logger.info(
-                    "forward: user=%s resource=%s %s %s -> %d",
-                    user, rid, request.method, target_url, upstream.status,
-                )
-                return web.Response(
-                    status=upstream.status, headers=resp_headers, body=resp_body,
-                )
+            )
+        except aiohttp.ClientError as exc:
+            await session.close()
+            logger.warning("forward: upstream error %s -> %s", target_url, exc)
+            return web.json_response(
+                {"error": "bad_gateway", "detail": f"upstream error: {exc}"},
+                status=502,
+            )
+
+        # Phase 2A: stream the upstream response back to the controller.
+        # We deliberately keep multiple Set-Cookie headers intact by
+        # iterating the raw header list rather than the case-folded dict.
+        from multidict import CIMultiDict
+        resp_headers = CIMultiDict()
+        for k, v in upstream.headers.items():
+            if k.lower() in _HOP_BY_HOP or k.lower() == "content-encoding":
+                continue
+            resp_headers.add(k, v)
+
+        out = web.StreamResponse(status=upstream.status, headers=resp_headers)
+        await out.prepare(request)
+
+        user = request.headers.get("X-ModZero-User", "")
+        rid = request.headers.get("X-ModZero-Resource", "")
+        logger.info(
+            "forward: user=%s resource=%s %s %s -> %d (streaming)",
+            user, rid, request.method, target_url, upstream.status,
+        )
+
+        try:
+            async for chunk in upstream.content.iter_chunked(64 * 1024):
+                if not chunk:
+                    continue
+                await out.write(chunk)
+            await out.write_eof()
+        finally:
+            upstream.release()
+            await session.close()
+        return out
     except aiohttp.ClientError as exc:
-        logger.warning("forward: upstream error %s -> %s", target_url, exc)
+        logger.warning("forward: streaming error %s -> %s", target_url, exc)
         return web.json_response(
-            {"error": "bad_gateway", "detail": f"upstream error: {exc}"},
+            {"error": "bad_gateway", "detail": f"streaming error: {exc}"},
             status=502,
         )
 

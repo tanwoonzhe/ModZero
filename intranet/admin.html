@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Admin — Demo Intranet</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header><h1>🛠 Admin (protected)</h1><a href="/">Home</a></header>
+  <main>
+    <p>Restricted internal admin panel. Reachable only via ModZero zero-trust gate.</p>
+    <form method="POST" action="/api/echo">
+      <label>Note: <input name="note" value="ping" /></label>
+      <button type="submit">POST /api/echo</button>
+    </form>
+  </main>
+</body>
+</html>

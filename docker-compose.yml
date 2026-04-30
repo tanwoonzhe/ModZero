@@ -82,6 +82,10 @@ services:
     image: nginx:alpine
     volumes:
       - ./intranet/index.html:/usr/share/nginx/html/index.html:ro
+      - ./intranet/users.html:/usr/share/nginx/html/users.html:ro
+      - ./intranet/admin.html:/usr/share/nginx/html/admin.html:ro
+      - ./intranet/static:/usr/share/nginx/html/static:ro
+      - ./intranet/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     # No `ports:` mapping — internal-only by design.
     restart: unless-stopped
     networks:
