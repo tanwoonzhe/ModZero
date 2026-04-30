@@ -53,3 +53,15 @@ yarn-error.log*
 
 # Tauri
 client/src-tauri/target/
+
+# Desktop-client artifacts published to the Settings download tile
+backend/app/static/client/*.zip
+backend/app/static/client/*.exe
+backend/app/static/client/*.msi
+backend/app/static/client/*.dmg
+backend/app/static/client/*.AppImage
+backend/app/static/client/*.deb
+backend/app/static/client/*.rpm
+backend/app/static/client/*.tar.gz
+electron-client/release/
+

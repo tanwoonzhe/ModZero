@@ -48,6 +48,12 @@ npm run electron
 To produce an installer (Windows shown):
 
 ```powershell
+# Easiest path — portable .zip, no admin / no Developer Mode needed.
+# Auto-publishes to backend/app/static/client/ so the Settings page picks it up.
+npm run package:zip:win
+
+# Full NSIS installer (requires Windows Developer Mode ON, or elevated shell,
+# because electron-builder's winCodeSign archive contains symlinks):
 npm run package:win
 # The .exe lands in electron-client/release/. Copy it to
 # backend/app/static/client/ to expose it via Settings → Desktop Client.

@@ -26,9 +26,9 @@ router = APIRouter(prefix="/client-app", tags=["client-app"])
 CLIENT_DIR = Path(__file__).resolve().parent.parent / "static" / "client"
 
 PLATFORM_GLOBS: Dict[str, List[str]] = {
-    "win": ["*.exe", "*.msi"],
-    "mac": ["*.dmg", "*.pkg"],
-    "linux": ["*.AppImage", "*.deb", "*.rpm"],
+    "win": ["*.exe", "*.msi", "ModZero-win*.zip"],
+    "mac": ["*.dmg", "*.pkg", "ModZero-mac*.zip"],
+    "linux": ["*.AppImage", "*.deb", "*.rpm", "*.tar.gz"],
 }
 
 PLATFORM_LABEL: Dict[str, str] = {
@@ -95,8 +95,15 @@ def client_app_info() -> ClientAppInfo:
             "npm run build:main",
             "npm run dev          # in one terminal (Vite + tsc watch)",
             "npm run electron     # in a second terminal (launches the app)",
-            "# To produce an installer:",
-            "npm run package:win  # or package:mac / package:linux",
+            "",
+            "# To produce a Windows portable .zip (no admin / no Dev Mode needed):",
+            "npm run package:zip:win   # auto-publishes to backend/app/static/client/",
+            "",
+            "# Or full installers via electron-builder (requires Windows Developer Mode",
+            "# OR an elevated PowerShell, due to symlinks in winCodeSign-2.6.0.7z):",
+            "npm run package:win  # NSIS .exe + portable .exe",
+            "npm run package:mac  # .dmg",
+            "npm run package:linux  # .AppImage + .deb",
             "# Drop the resulting file into backend/app/static/client/ to enable",
             "# the Settings page download button.",
         ],
