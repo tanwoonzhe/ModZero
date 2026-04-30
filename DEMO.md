@@ -27,6 +27,37 @@ docker compose ps
 Open the UI at <http://localhost:5173>. Sign in as the seeded admin
 (username `admin` / password `admin123` — see `INITIAL_SUPERUSER_*` in `.env`).
 
+### 1a. (Optional) Run the desktop client
+
+The Electron desktop client lives in `electron-client/`. It mints the signed
+device-posture payload `/gate` requires, so use it for any flow that needs an
+actual access ticket beyond the regression script.
+
+```powershell
+cd electron-client
+npm install
+npm run build:main
+
+# Terminal A — Vite renderer + tsc watch
+npm run dev
+
+# Terminal B — launch the Electron shell
+npm run electron
+```
+
+To produce an installer (Windows shown):
+
+```powershell
+npm run package:win
+# The .exe lands in electron-client/release/. Copy it to
+# backend/app/static/client/ to expose it via Settings → Desktop Client.
+```
+
+The web UI's **Settings → Desktop Client** card auto-detects any installer
+dropped into `backend/app/static/client/` (`*.exe`, `*.dmg`, `*.AppImage`, etc.)
+and surfaces a per-platform Download button. When no artifact is present the
+card shows the run-from-source steps above.
+
 ## 2. Verify the protected (private) resource is *not* directly reachable
 
 ```powershell

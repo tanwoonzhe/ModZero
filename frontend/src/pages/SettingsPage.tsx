@@ -14,6 +14,7 @@ import {
   FaSun,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
+import ClientAppDownloadCard from "../components/ClientAppDownloadCard";
 
 const SettingsPage: React.FC = () => {
   const [connectionStatus, setConnectionStatus] = useState<AzureConnectionTest | null>(null);
@@ -85,6 +86,9 @@ const SettingsPage: React.FC = () => {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Settings</h1>
+
+      {/* Desktop Client download */}
+      <ClientAppDownloadCard />
 
       {/* Appearance Settings */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
