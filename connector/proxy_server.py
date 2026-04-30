@@ -106,9 +106,11 @@ async def _forward_handler(request: web.Request) -> web.StreamResponse:
     target = request.headers.get("X-ModZero-Target", "")
     ts = request.headers.get("X-ModZero-Timestamp", "")
     sig = request.headers.get("X-ModZero-Signature", "")
+    nonce = request.headers.get("X-ModZero-Nonce", "")
 
     ok, reason = verify_controller_signature(
         ts_header=ts, sig_header=sig, method=request.method, target_url=target,
+        nonce_header=nonce,
     )
     if not ok:
         logger.warning("forward: signature rejected: %s target=%s", reason, target)

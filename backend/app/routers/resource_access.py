@@ -27,6 +27,7 @@ import json
 import logging
 import re
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import quote
@@ -346,6 +347,16 @@ def gate(
     """Server-side trust decision for a registered Resource."""
     uid = str(user.user_id)
 
+    # Phase 2C — per-(user, resource) rate limit on the PDP.
+    from app.services.rate_limit import allow as _rl_allow
+    ok, retry = _rl_allow(f"gate:{uid}:{req.resource_id}", limit=30, window_seconds=60)
+    if not ok:
+        _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=None,
+               resource_id=str(req.resource_id), reason="rate limit exceeded (gate)",
+               path="/api/resource-access/gate")
+        raise HTTPException(status_code=429, detail="rate limit exceeded",
+                            headers={"Retry-After": str(retry)})
+
     row = (
         db.query(Resource, RemoteNetwork)
         .join(RemoteNetwork, Resource.network_id == RemoteNetwork.network_id)
@@ -461,8 +472,11 @@ class ConnectorClient:
         self._base = cfg.connector_base_url.rstrip("/")
         self._secret = cfg.connector_hop_secret.encode("utf-8")
 
-    def _sign(self, ts: str, method: str, target_url: str) -> str:
-        msg = f"{ts}|{method.upper()}|{target_url}".encode("utf-8")
+    def _sign(self, ts: str, nonce: str, method: str, target_url: str) -> str:
+        # Phase 2C: include per-request nonce so the connector's replay cache
+        # can reject duplicates without false-positives on legitimate retries
+        # within the same wall-clock second.
+        msg = f"{ts}|{nonce}|{method.upper()}|{target_url}".encode("utf-8")
         return hmac.new(self._secret, msg, hashlib.sha256).hexdigest()
 
     async def forward(
@@ -478,7 +492,8 @@ class ConnectorClient:
         resource_id: str,
     ) -> httpx.Response:
         ts = str(int(time.time()))
-        sig = self._sign(ts, method, target_url)
+        nonce = uuid.uuid4().hex
+        sig = self._sign(ts, nonce, method, target_url)
         hop_url = f"{self._base}{self.HOP_PATH}"
         if query_string:
             hop_url = f"{hop_url}?{query_string.decode('latin-1')}"
@@ -489,6 +504,7 @@ class ConnectorClient:
         fwd_headers = {k: v for k, v in headers.items() if k.lower() not in drop}
         fwd_headers["X-ModZero-Target"] = target_url
         fwd_headers["X-ModZero-Timestamp"] = ts
+        fwd_headers["X-ModZero-Nonce"] = nonce
         fwd_headers["X-ModZero-Signature"] = sig
         fwd_headers["X-ModZero-User"] = user_id
         if device_id:
@@ -517,7 +533,8 @@ class ConnectorClient:
         resource_id: str,
     ) -> httpx.Request:
         ts = str(int(time.time()))
-        sig = self._sign(ts, method, target_url)
+        nonce = uuid.uuid4().hex
+        sig = self._sign(ts, nonce, method, target_url)
         hop_url = f"{self._base}{self.HOP_PATH}"
         if query_string:
             hop_url = f"{hop_url}?{query_string.decode('latin-1')}"
@@ -528,6 +545,7 @@ class ConnectorClient:
         fwd_headers = {k: v for k, v in headers.items() if k.lower() not in drop}
         fwd_headers["X-ModZero-Target"] = target_url
         fwd_headers["X-ModZero-Timestamp"] = ts
+        fwd_headers["X-ModZero-Nonce"] = nonce
         fwd_headers["X-ModZero-Signature"] = sig
         fwd_headers["X-ModZero-User"] = user_id
         if device_id:
@@ -768,6 +786,16 @@ async def protected_resource(
     cookie_name = f"{COOKIE_PREFIX}{rid}"
     cfg = get_settings()
     audit_path = f"/r/{slug}" + (f"/{path}" if path else "")
+
+    # Phase 2C — per-(client-ip, resource) rate limit on the PEP.
+    from app.services.rate_limit import allow as _rl_allow
+    client_ip = request.client.host if request.client else "unknown"
+    ok, retry = _rl_allow(f"r:{client_ip}:{rid}", limit=120, window_seconds=60)
+    if not ok:
+        _audit(db, decision=AccessDecisionEnum.DENY, user_id=None, device_id=None,
+               resource_id=rid, reason="rate limit exceeded (proxy)", path=audit_path)
+        raise HTTPException(status_code=429, detail="rate limit exceeded",
+                            headers={"Retry-After": str(retry)})
 
     # 1. Bootstrap: exchange one-shot ticket for HttpOnly cookie.
     if t:

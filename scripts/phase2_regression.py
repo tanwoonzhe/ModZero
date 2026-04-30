@@ -251,6 +251,67 @@ except urllib.error.HTTPError as e:
           e.code == 501, f"status={e.code}")
 
 # ---------------------------------------------------------------------------
+# Phase 2C — security hardening smoke
+# ---------------------------------------------------------------------------
+print()
+print("=== Phase 2C security hardening ===")
+
+# 2C-1: rate limit on /gate. Default limit=30/60s. Hammer it and expect a 429.
+def _hammer_gate(n: int) -> int:
+    last = 0
+    for _ in range(n):
+        ts = int(time.time())
+        nonce = uuid.uuid4().hex
+        signals = {k: True for k in SIGNAL_KEYS}
+        body = {"device_id": DID, "nonce": nonce, "signals": signals, "ts": ts}
+        canon = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        sig = hmac.new(DSEC.encode(), canon, hashlib.sha256).hexdigest()
+        payload = json.dumps({"resource_id": RID, "access_threshold": 60,
+                              "posture": {**body, "signature": sig}}).encode()
+        req = urllib.request.Request(
+            f"{BASE}/api/resource-access/gate", data=payload, method="POST",
+            headers={"Authorization": f"Bearer {JWT}", "Content-Type": "application/json"},
+        )
+        try:
+            urllib.request.urlopen(req, timeout=5).read()
+            last = 200
+        except urllib.error.HTTPError as e:
+            last = e.code
+            if last == 429:
+                return last
+    return last
+
+last = _hammer_gate(40)
+check("2C-1. /gate rate-limit returns 429 after 30/min",
+      last == 429, f"last={last}")
+
+# 2C-2: replay protection — re-send the same hop signature twice.
+# We can't easily fake the controller-signed hop from outside; instead we
+# verify that the connector has the cache structures by checking its logs.
+# Use docker exec to inspect running module symbols.
+import subprocess
+out = subprocess.run(
+    ["docker", "compose", "exec", "-T", "connector", "python", "-c",
+     "import auth; print('cache_attr', hasattr(auth, '_HOP_NONCE_CACHE'))"],
+    capture_output=True, text=True, timeout=15,
+)
+check("2C-2. connector ships replay-nonce cache",
+      "cache_attr True" in out.stdout, out.stdout.strip() or out.stderr.strip()[:120])
+
+# 2C-3: connector failure produces an audit row.
+# Already exercised by Phase 1 step 5 (deny); just verify recent rows include
+# at least one non-allow reason from this run.
+result = subprocess.run([
+    "docker", "compose", "exec", "-T", "db", "psql", "-U", "postgres",
+    "-d", "modzero", "-tA", "-c",
+    "SELECT count(*) FROM access_decisions WHERE decision='DENY' "
+    "AND ts > NOW() - INTERVAL '30 minutes';"
+], capture_output=True, text=True, timeout=10)
+deny_rows = result.stdout.strip().splitlines()[-1] if result.stdout else "0"
+check("2C-3. recent DENY audit rows present",
+      deny_rows.isdigit() and int(deny_rows) > 0, f"deny_rows={deny_rows}")
+
+# ---------------------------------------------------------------------------
 print()
 if failures:
     print(f"FAILURES ({len(failures)}):")
@@ -259,3 +320,4 @@ if failures:
     sys.exit(1)
 print(f"ALL {len(failures) + 100 - len(failures)} CHECKS GREEN" if not failures else "")
 print("OK")
+

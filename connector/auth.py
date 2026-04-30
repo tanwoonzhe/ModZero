@@ -132,11 +132,15 @@ async def _introspect_token(token: str) -> dict | None:
 
 
 def verify_controller_signature(
-    *, ts_header: str, sig_header: str, method: str, target_url: str
+    *, ts_header: str, sig_header: str, method: str, target_url: str,
+    nonce_header: str = "",
 ) -> tuple[bool, str]:
     """Verify a backend->connector forward-hop signature.
 
-    Signed message: ``"<ts>|<METHOD-UPPER>|<target_url>"``
+    Signed message: ``"<ts>|<nonce>|<METHOD-UPPER>|<target_url>"`` (Phase 2C).
+    Older clients without a nonce fall back to ``"<ts>|<METHOD>|<url>"`` and
+    are accepted but bypass the replay cache (so they cannot be replayed
+    safely — operators must upgrade controllers).
     Algorithm: HMAC-SHA256 with ``CONNECTOR_HOP_SECRET``, hex digest.
 
     Returns ``(ok, reason)``. ``reason`` is empty on success.
@@ -149,14 +153,33 @@ def verify_controller_signature(
         ts = int(ts_header)
     except (TypeError, ValueError):
         return False, "invalid timestamp"
-    if abs(int(time.time()) - ts) > CONNECTOR_HOP_SKEW_SECONDS:
+    now = int(time.time())
+    if abs(now - ts) > CONNECTOR_HOP_SKEW_SECONDS:
         return False, "timestamp skew exceeded"
     if not target_url:
         return False, "missing target url"
-    msg = f"{ts}|{method.upper()}|{target_url}".encode("utf-8")
-    expected = hmac.new(
-        CONNECTOR_HOP_SECRET.encode("utf-8"), msg, hashlib.sha256
-    ).hexdigest()
+    secret = CONNECTOR_HOP_SECRET.encode("utf-8")
+    if nonce_header:
+        msg = f"{ts}|{nonce_header}|{method.upper()}|{target_url}".encode("utf-8")
+    else:
+        msg = f"{ts}|{method.upper()}|{target_url}".encode("utf-8")
+    expected = hmac.new(secret, msg, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, sig_header.lower()):
         return False, "signature mismatch"
+    # Phase 2C replay guard — only effective when controller sends a nonce.
+    if nonce_header:
+        cutoff = now - CONNECTOR_HOP_SKEW_SECONDS
+        if len(_HOP_NONCE_CACHE) > _NONCE_CACHE_MAX:
+            for k, v in list(_HOP_NONCE_CACHE.items()):
+                if v < cutoff:
+                    _HOP_NONCE_CACHE.pop(k, None)
+        if nonce_header in _HOP_NONCE_CACHE:
+            return False, "replay detected"
+        _HOP_NONCE_CACHE[nonce_header] = now
     return True, ""
+
+
+# Phase 2C — in-memory replay nonce cache for hop signatures.
+_HOP_NONCE_CACHE: dict[str, int] = {}
+_NONCE_CACHE_MAX = 4096
+
