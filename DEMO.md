@@ -25,7 +25,7 @@ docker compose ps
 ```
 
 Open the UI at <http://localhost:5173>. Sign in as the seeded admin
-(`admin@modzero.local` / `Admin123!` by default).
+(username `admin` / password `admin123` — see `INITIAL_SUPERUSER_*` in `.env`).
 
 ## 2. Verify the protected (private) resource is *not* directly reachable
 
@@ -47,77 +47,79 @@ docker compose exec connector sh -c "wget -qO- http://intranet/ | head -c 200"
 You should see HTML from the private intranet — proving the connector has
 network reach that the host does not.
 
-## 4. Request access via signed posture (Phase 1 trust evaluation)
+## 4. Run the end-to-end regression (canonical demo path)
 
-Use the seeded credentials and let the client submit posture; the backend
-issues an access ticket if `score >= threshold`.
+The web console intentionally **cannot** mint access tickets — `/gate`
+requires an HMAC-signed posture payload from an enrolled device. The
+regression script simulates an enrolled desktop client end-to-end.
 
 ```powershell
-# Run the bundled regression script — it logs in, posts posture, and exercises
-# the full protected-resource flow.
 python scripts\phase2_regression.py
 ```
 
-All 19 checks should report **PASS**. The script prints the access ticket and
-the latest `AccessDecision` rows it created.
+All **100 checks** should report `[PASS]`, ending with `ALL 100 CHECKS GREEN`.
+While it runs it:
 
-## 5. Access the protected resource through ModZero
+- Logs in as the seeded admin and obtains a JWT.
+- POSTs signed posture to `/api/resource-access/gate` (score 100 → ALLOW).
+- Receives an access ticket and pulls `/r/demo-intranet/` (HTTP 200 with
+  intranet HTML).
+- Exercises Phase 2A paths: `/users`, static asset, `/api/status`,
+  relative + absolute redirect rewriting, `Set-Cookie` `Path` rewriting,
+  POST round-trip, query-string preservation, WebSocket upgrade rejection.
+- Exercises Phase 2C: `/gate` 30/min rate limit returns **429**, replay-nonce
+  cache active, recent DENY rows present.
 
-```powershell
-# Replace <TOKEN> with the access ticket emitted by step 4 (or copy it from
-# the browser DevTools after the UI grants access).
-curl.exe -i -H "Authorization: Bearer <TOKEN>" http://localhost:8000/r/demo-intranet/
-```
+## 5. Confirm the deny path
 
-Expected: **HTTP 200** with the intranet HTML and a `X-ModZero-Resource:
-demo-intranet` response header.
-
-## 6. Exercise the complex web app paths (Phase 2A)
-
-Each of these should return **200** through the connector tunnel:
-
-```powershell
-$headers = @{ Authorization = "Bearer <TOKEN>" }
-Invoke-WebRequest http://localhost:8000/r/demo-intranet/users      -Headers $headers
-Invoke-WebRequest http://localhost:8000/r/demo-intranet/admin      -Headers $headers
-Invoke-WebRequest http://localhost:8000/r/demo-intranet/api/status -Headers $headers
-Invoke-WebRequest http://localhost:8000/r/demo-intranet/redirect   -Headers $headers -MaximumRedirection 0
-Invoke-WebRequest http://localhost:8000/r/demo-intranet/set-cookie -Headers $headers
-```
-
-`/redirect` should return **302** with the `Location` rewritten to stay under
-`/r/demo-intranet/...`. `/set-cookie` should rewrite the `Set-Cookie` `Path` to
-the resource prefix.
-
-## 7. Exercise the deny path
-
-Drop the user's posture below threshold (or revoke the device) and retry the
-same request — the response must be **403** and a `category=deny` row must
-appear in the Access Logs page within ~1 second.
+The regression already triggers DENY (low score, missing ticket, rate-limit).
+If you want to reproduce it manually:
 
 ```powershell
-# Quick way: tamper with the bearer to invalidate the ticket
-curl.exe -i -H "Authorization: Bearer not-a-real-token" `
-    http://localhost:8000/r/demo-intranet/
+# No ticket — backend must refuse
+curl.exe -i http://localhost:8000/r/demo-intranet/
+# Expected: HTTP 403 (proxy refuses without a valid access ticket)
 ```
 
-Expected: **401/403** and a fresh entry in
-`http://localhost:5173/logs` (Access Decisions tab).
+A fresh row with `decision=deny` should appear in **Access Logs → Access
+Decisions** within ~1 second.
 
-## 8. Inspect audit logs in the UI
+## 6. Confirm the proxy is the only ingress
+
+```powershell
+# Direct hit on the resource hostname must still fail from the host
+try { Invoke-WebRequest http://intranet/ -TimeoutSec 3 } catch { $_.Exception.Message }
+# Expected: NXDOMAIN / connection refused — only /r/<slug> works.
+```
+
+## 7. Confirm the audit trail
+
+```powershell
+$h = @{ Authorization = "Bearer $env:JWT" }
+(Invoke-RestMethod "http://localhost:8000/api/audit/access-decisions?limit=5" -Headers $h) |
+    Format-Table ts, decision, category, score, threshold, path -AutoSize
+```
+
+Expected: a mix of `allow` and `deny` rows with categories `allow`, `deny`,
+`rate_limit`, optionally `proxy_failure`.
+
+## 8. Inspect audit + status in the UI
 
 1. Navigate to **Access Logs** in the sidebar.
-2. The **Access Decisions** tab is the default. Confirm the rows produced by
-   steps 4–7 are visible with the correct **decision**, **category**
+2. The **Access Decisions** tab is the default. Confirm rows produced by the
+   regression script are visible with the correct **decision**, **category**
    (`allow` / `deny` / `rate_limit` / `proxy_failure` / `bootstrap_deny`),
    **score / threshold**, **path**, and **timestamp**.
-3. Use the category tiles, resource dropdown, user dropdown, and search box to
-   filter — each filter should round-trip through `/audit/access-decisions`.
+3. Click each category tile to filter; pick a value from the resource and
+   user dropdowns; type into the search box (it filters on `reason` and
+   `path`). Each filter round-trips through `/api/audit/access-decisions`.
 4. Switch to the **Login Attempts** tab to confirm the legacy view still
-   works.
+   renders.
 5. Return to **Overview** and verify the **Access-Control State** card shows
-   the latest trust score, last allow/deny timestamps, connector heartbeat,
-   and 24h totals — all updating live.
+   the latest trust score, last allow/deny age, connector online count
+   (the demo connector should be online; any stale connector rows are
+   labelled `✗`), 24h totals, and the per-resource table (`/r/demo-intranet`
+   → `http://intranet`).
 
 ---
 

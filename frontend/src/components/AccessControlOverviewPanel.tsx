@@ -124,6 +124,13 @@ const AccessControlOverviewPanel: React.FC = () => {
   const onlineConnectors = data.connectors.filter((c) => c.online).length;
   const totalConnectors = data.connectors.length;
   const connectorTone = totalConnectors === 0 ? "warn" : onlineConnectors === totalConnectors ? "ok" : "bad";
+  // Pick a representative connector for the hint: prefer an online one, then
+  // the freshest heartbeat. Avoids highlighting a stale legacy row when a
+  // healthy connector is also registered.
+  const featuredConnector = [...data.connectors].sort((a, b) => {
+    if (a.online !== b.online) return a.online ? -1 : 1;
+    return (b.last_heartbeat || "").localeCompare(a.last_heartbeat || "");
+  })[0];
 
   const protectedCount = data.resources.filter((r) => r.slug).length;
   // Latest snapshot across all resources for the headline trust score.
@@ -207,10 +214,10 @@ const AccessControlOverviewPanel: React.FC = () => {
           tone={connectorTone as any}
           value={`${onlineConnectors}/${totalConnectors} online`}
           hint={
-            data.connectors[0]
-              ? `${data.connectors[0].name} ${
-                  data.connectors[0].online ? "✓" : "✗"
-                } heartbeat ${fmtAgo(data.connectors[0].last_heartbeat)}`
+            featuredConnector
+              ? `${featuredConnector.name} ${
+                  featuredConnector.online ? "✓" : "✗"
+                } heartbeat ${fmtAgo(featuredConnector.last_heartbeat)}`
               : "no connectors"
           }
         />
