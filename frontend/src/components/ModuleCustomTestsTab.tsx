@@ -9,6 +9,7 @@ import React, { useState, useMemo } from 'react';
 import {
   FaPlus, FaEdit, FaTrash, FaPlay, FaCheckCircle, FaTimesCircle,
   FaExclamationTriangle, FaClock, FaLaptop, FaNetworkWired, FaShieldAlt,
+  FaInfoCircle, FaWrench, FaDatabase, FaFlask,
 } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import {
@@ -119,10 +120,11 @@ const ModuleCustomTestsTab: React.FC<Props> = ({ pillar }) => {
   }, [pillarTests]);
 
   const handleSimulateRun = (t: ModuleCustomTest) => {
-    // Heuristic/demo: randomise a result weighted by weight — pragmatic FYP behaviour
-    const r = Math.random();
-    const status: 'pass' | 'warning' | 'fail' = r > 0.6 ? 'pass' : r > 0.3 ? 'warning' : 'fail';
-    runTest(t.id, status);
+    // Store picks the status and synthesises a full CustomTestResult
+    // (status, currentValue, expectedValue, reason, remediation, source).
+    runTest(t.id);
+    const fresh = useZeroTrustStore.getState().moduleCustomTests.find(x => x.id === t.id);
+    const status = fresh?.lastStatus ?? 'not_run';
     toast.success(`Ran "${t.title}" → ${status}`);
   };
 
@@ -194,6 +196,7 @@ const ModuleCustomTestsTab: React.FC<Props> = ({ pillar }) => {
           {visibleTests.map(t => {
             const ss = STATUS_STYLE[t.lastStatus] || STATUS_STYLE.not_run;
             const SIcon = ss.icon;
+            const result = t.lastResult;
             return (
               <div key={t.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
                 <div className="flex items-start gap-3">
@@ -205,6 +208,11 @@ const ModuleCustomTestsTab: React.FC<Props> = ({ pillar }) => {
                       <span className="text-xs text-gray-400 font-mono">{t.id}</span>
                       <span className="text-xs text-gray-500">weight {t.weight}/10</span>
                       {t.lastRun && <span className="text-xs text-gray-400">· last run {new Date(t.lastRun).toLocaleString()}</span>}
+                      {result?.isSimulated && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded border border-purple-200 bg-purple-50 text-purple-700">
+                          <FaFlask size={9} /> Simulated
+                        </span>
+                      )}
                     </div>
                     <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t.title}</h4>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{t.description}</p>
@@ -221,6 +229,51 @@ const ModuleCustomTestsTab: React.FC<Props> = ({ pillar }) => {
                     <p className="text-xs text-gray-500 dark:text-gray-400 italic mt-1">
                       <strong className="not-italic">Why this matters for {MODULE_META[t.module].label}:</strong> {t.rationale}
                     </p>
+
+                    {/* Rich result block — only after the test has been run */}
+                    {result && (
+                      <div className={`mt-3 rounded-md border ${ss.bg} p-3 space-y-2`}>
+                        <div className="text-sm font-semibold flex items-center gap-2">
+                          <SIcon size={12} /> {result.summary}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <div className="rounded border border-gray-200 bg-white/60 dark:bg-gray-900/40 p-2">
+                            <div className="font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1 mb-0.5">
+                              <FaInfoCircle size={10} /> Current value
+                            </div>
+                            <div className="font-mono text-gray-800 dark:text-gray-200 break-words">{result.currentValue}</div>
+                          </div>
+                          <div className="rounded border border-gray-200 bg-white/60 dark:bg-gray-900/40 p-2">
+                            <div className="font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1 mb-0.5">
+                              <FaCheckCircle size={10} /> Expected value
+                            </div>
+                            <div className="font-mono text-gray-800 dark:text-gray-200 break-words">{result.expectedValue}</div>
+                          </div>
+                        </div>
+
+                        <div className="text-xs">
+                          <div className="font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1 mb-0.5">
+                            <FaExclamationTriangle size={10} /> {t.lastStatus === 'pass' ? 'Why it passed' : 'Why it failed'}
+                          </div>
+                          <div className="text-gray-800 dark:text-gray-200">{result.reason}</div>
+                        </div>
+
+                        <div className="text-xs">
+                          <div className="font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1 mb-0.5">
+                            <FaWrench size={10} /> Recommended action
+                          </div>
+                          <div className="text-gray-800 dark:text-gray-200">{result.remediation}</div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 text-[11px] text-gray-600 dark:text-gray-400 pt-1 border-t border-gray-200/60">
+                          <span className="inline-flex items-center gap-1">
+                            <FaDatabase size={10} /> Source: <span className="font-mono">{result.source}</span>
+                          </span>
+                          <span>Module contribution: <strong>{result.moduleContribution}</strong>/100</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-col gap-1">
                     <button

@@ -85,6 +85,30 @@ export type CheckType =
   | 'context_score_above_threshold'
   | 'custom';
 
+/**
+ * Rich result payload produced each time a custom test is run.
+ * Modelled on the built-in BaselineCheckCard so the fail/pass cards can
+ * actually tell the admin *what* was checked, *what value* was detected,
+ * *what value* was expected, and *what to change* to fix it.
+ *
+ * Because the FYP prototype does not yet ingest real posture / context
+ * telemetry, every value is explicitly marked `isSimulated: true` and the
+ * `source` string is a placeholder (e.g. "Intune compliance API (simulated)")
+ * so the UI can distinguish simulated evidence from real evidence.
+ */
+export interface CustomTestResult {
+  status: 'pass' | 'fail' | 'warning';
+  summary: string;              // One-line result summary
+  currentValue: string;         // Detected / observed state
+  expectedValue: string;        // Expected / threshold
+  reason: string;               // Why it passed or failed
+  remediation: string;          // What the admin should change
+  source: string;               // Data source (real or "(simulated)")
+  isSimulated: boolean;         // true while backed by demo heuristics
+  moduleContribution: number;   // 0-100 this test's contribution to its module score
+  evaluatedAt: string;          // ISO timestamp
+}
+
 export interface ModuleCustomTest {
   id: string;
   module: FypModule;
@@ -97,8 +121,354 @@ export interface ModuleCustomTest {
   detectionMode: 'manual' | 'heuristic';
   lastStatus: 'pass' | 'fail' | 'warning' | 'not_run';
   lastRun: string | null;
+  lastResult?: CustomTestResult | null; // Full structured result from the most recent run
   createdAt: string;
   weight: number;                      // 1-10, contributes to module score
+}
+
+/**
+ * Per-checkType evidence templates.
+ *
+ * These templates drive the simulated CustomTestResult produced each time
+ * an admin clicks "Run" on a custom test.  They intentionally mimic the
+ * shape of real posture / context telemetry so the result card matches
+ * the built-in BaselineCheckCard format:
+ *   status, summary, currentValue, expectedValue, reason, remediation, source.
+ *
+ * Everything here is flagged `isSimulated: true` on the resulting card so
+ * the UI can show a clear "Simulated result – demo data" badge and not
+ * mislead anyone into thinking the detected state is real.
+ */
+interface CheckEvidenceTemplate {
+  source: string;
+  expected: string;
+  pass:    { currentValue: string; summary: string; reason: string; remediation: string };
+  warning: { currentValue: string; summary: string; reason: string; remediation: string };
+  fail:    { currentValue: string; summary: string; reason: string; remediation: string };
+}
+
+const CHECK_EVIDENCE_TEMPLATES: Record<Exclude<CheckType, 'custom'>, CheckEvidenceTemplate> = {
+  // -------- device_posture --------
+  device_compliant: {
+    source: 'Intune / MDM compliance API (simulated)',
+    expected: 'Device marked compliant by MDM at sign-in',
+    pass:    { currentValue: 'complianceState = compliant, lastReported = 12 min ago',
+               summary: 'Device reports compliant in MDM',
+               reason:  'MDM returned compliant within the freshness window.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'complianceState = compliant, lastReported = 3 days ago',
+               summary: 'Compliance signal is stale',
+               reason:  'Device has not checked in with MDM recently — state may no longer reflect reality.',
+               remediation: 'Force an MDM sync on the endpoint (Settings → Accounts → Access work or school → Sync).' },
+    fail:    { currentValue: 'complianceState = noncompliant (policy: "Corp-Baseline-v3")',
+               summary: 'Device is non-compliant in MDM',
+               reason:  'MDM policy "Corp-Baseline-v3" marks the device as non-compliant.',
+               remediation: 'Open Intune → Devices → select the device → review failed settings and remediate, then re-sync.' },
+  },
+  av_healthy: {
+    source: 'Endpoint posture agent / Defender (simulated)',
+    expected: 'AV service running AND signatures < 24h old',
+    pass:    { currentValue: 'Defender: running, signatures age = 4h',
+               summary: 'Endpoint AV is healthy',
+               reason:  'AV service is active and signatures are within the 24h freshness window.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'Defender: running, signatures age = 28h',
+               summary: 'AV signatures slightly stale',
+               reason:  'Signatures are just over the 24h threshold.',
+               remediation: 'Trigger a signature update: `Update-MpSignature` or let the scheduled task run.' },
+    fail:    { currentValue: 'Defender service = stopped, signatures age = 5 days',
+               summary: 'Endpoint AV is not healthy',
+               reason:  'AV service is stopped and signatures are 5 days old — endpoint is effectively unprotected.',
+               remediation: 'Start the AV service (`Start-Service WinDefend`) and run `Update-MpSignature`.' },
+  },
+  firewall_enabled: {
+    source: 'Host firewall inventory (simulated)',
+    expected: 'Host firewall enabled on the corporate (Domain) profile',
+    pass:    { currentValue: 'Domain=on, Private=on, Public=on',
+               summary: 'Host firewall is enabled on all profiles',
+               reason:  'All three profiles (Domain/Private/Public) report enabled.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'Domain=on, Private=on, Public=off',
+               summary: 'Public profile firewall disabled',
+               reason:  'Public profile is off — risk when roaming on untrusted networks.',
+               remediation: 'Enable Public profile: `Set-NetFirewallProfile -Profile Public -Enabled True`.' },
+    fail:    { currentValue: 'Domain=off, Private=off, Public=off',
+               summary: 'Host firewall is disabled',
+               reason:  'Firewall is off on all profiles — device posture cannot be trusted.',
+               remediation: 'Enable all profiles: `Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True`.' },
+  },
+  disk_encryption_enabled: {
+    source: 'BitLocker / FileVault inventory (simulated)',
+    expected: 'System drive fully encrypted',
+    pass:    { currentValue: 'C:\\ BitLocker = FullyEncrypted (XTS-AES 256)',
+               summary: 'Disk encryption is enabled',
+               reason:  'System drive is fully encrypted with the approved cipher.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'C:\\ BitLocker = EncryptionInProgress (47%)',
+               summary: 'Encryption still in progress',
+               reason:  'BitLocker is encrypting the drive but has not finished — partial protection.',
+               remediation: 'Leave the device powered and connected until encryption reaches 100%.' },
+    fail:    { currentValue: 'C:\\ BitLocker = Off',
+               summary: 'System drive is NOT encrypted',
+               reason:  'BitLocker is disabled — a lost/stolen device would leak data.',
+               remediation: 'Enable BitLocker via GPO / Intune or manually: `Enable-BitLocker -MountPoint "C:"`.' },
+  },
+  av_signatures_fresh: {
+    source: 'Defender signature inventory (simulated)',
+    expected: 'AV signatures < 24 hours old',
+    pass:    { currentValue: 'signatures age = 3h 12m',
+               summary: 'AV signatures are fresh',
+               reason:  'Last update within the 24h window.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'signatures age = 29h',
+               summary: 'Signatures marginally stale',
+               reason:  'Just over 24h since last update.',
+               remediation: 'Run `Update-MpSignature` or verify the signature update task is healthy.' },
+    fail:    { currentValue: 'signatures age = 6 days',
+               summary: 'Signatures dangerously stale',
+               reason:  'Definitions are 6 days old — new threats are not being detected.',
+               remediation: 'Force update: `Update-MpSignature`. If it fails, check WSUS/Defender update source.' },
+  },
+  intune_compliant: {
+    source: 'Microsoft Graph /deviceManagement/managedDevices (simulated)',
+    expected: 'managedDevice.complianceState = "compliant"',
+    pass:    { currentValue: 'complianceState = compliant',
+               summary: 'Intune reports device compliant',
+               reason:  'Assigned compliance profile is satisfied.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'complianceState = inGracePeriod',
+               summary: 'Device in compliance grace period',
+               reason:  'Device failed policy but is inside the admin-configured grace window.',
+               remediation: 'Investigate and remediate before grace period expires.' },
+    fail:    { currentValue: 'complianceState = noncompliant',
+               summary: 'Intune reports device non-compliant',
+               reason:  'One or more compliance settings failed.',
+               remediation: 'Intune admin centre → Devices → this device → "View compliance" → fix the failing settings.' },
+  },
+  // -------- context_analysis --------
+  known_location: {
+    source: 'Azure AD sign-in logs + Named Locations (simulated)',
+    expected: 'Sign-in IP inside a configured named location',
+    pass:    { currentValue: 'IP 10.20.1.42 matches named location "HQ Office"',
+               summary: 'Access from known named location',
+               reason:  'Source IP matches a configured named location.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'IP 203.0.113.7 matches "Home-UserX" (personal)',
+               summary: 'Access from personal named location',
+               reason:  'Recognised but lower-trust location.',
+               remediation: 'Require step-up MFA for sensitive apps when accessed from personal locations.' },
+    fail:    { currentValue: 'IP 198.51.100.22 (no named location)',
+               summary: 'Access from unknown location',
+               reason:  'Source IP is not inside any configured named location.',
+               remediation: 'Add the IP to Named Locations if legitimate, or enforce CA policy blocking unknown locations.' },
+  },
+  trusted_network: {
+    source: 'Device egress telemetry + trusted-ASN list (simulated)',
+    expected: 'Egress ASN on the trusted corporate network list',
+    pass:    { currentValue: 'ASN AS64501 (Corp-HQ) — trusted',
+               summary: 'Connected from trusted network',
+               reason:  'Egress ASN is on the trusted list.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'ASN AS15169 (Google LLC) — home/VPN',
+               summary: 'Non-corporate but low-risk network',
+               reason:  'Recognised consumer ASN — acceptable for low-risk resources.',
+               remediation: 'Restrict high-risk apps to trusted ASNs via Conditional Access.' },
+    fail:    { currentValue: 'ASN AS14061 (DigitalOcean) — untrusted',
+               summary: 'Not connected from a trusted network',
+               reason:  'Egress ASN is not on the trusted list.',
+               remediation: 'Require the user to VPN into corporate or deny access from untrusted ASNs.' },
+  },
+  unusual_network_flag: {
+    source: 'Sign-in behaviour analytics (simulated)',
+    expected: 'No unusual-network flag in the last 24h',
+    pass:    { currentValue: 'unusualNetwork = false',
+               summary: 'No unusual-network flags raised',
+               reason:  'Risk engine did not raise the flag on recent sign-ins.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'unusualNetwork = true (low confidence)',
+               summary: 'Soft unusual-network flag',
+               reason:  'Risk engine raised a low-confidence flag.',
+               remediation: 'Monitor subsequent sign-ins; consider MFA re-challenge.' },
+    fail:    { currentValue: 'unusualNetwork = true (high confidence, new ASN)',
+               summary: 'Unusual-network flag raised',
+               reason:  'User signed in from a network they have never used before — possible account takeover.',
+               remediation: 'Force re-authentication and review recent sign-ins; rotate credentials if suspicious.' },
+  },
+  admin_requires_trusted_network: {
+    source: 'Privileged sign-in logs (simulated)',
+    expected: 'Privileged role sign-ins only from trusted networks',
+    pass:    { currentValue: 'Last admin sign-in from ASN AS64501 (Corp-HQ)',
+               summary: 'Admin access from trusted network',
+               reason:  'Privileged sign-in originated from a trusted ASN.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'Last admin sign-in from home ASN (MFA satisfied)',
+               summary: 'Admin access from personal network with MFA',
+               reason:  'Policy allowed the sign-in because step-up MFA succeeded.',
+               remediation: 'Consider restricting privileged roles to corporate networks only.' },
+    fail:    { currentValue: 'Admin sign-in from ASN AS14061 (DigitalOcean), no step-up MFA',
+               summary: 'Admin signed in from untrusted network without step-up',
+               reason:  'Privileged role was used from an untrusted ASN and no step-up challenge was required.',
+               remediation: 'Create a CA policy: require trusted network OR step-up MFA for roles tagged privileged.' },
+  },
+  approved_region: {
+    source: 'GeoIP on last device check-in (simulated)',
+    expected: 'Device last seen from an approved country/region',
+    pass:    { currentValue: 'Last check-in: MY (Malaysia) — approved',
+               summary: 'Device seen in approved region',
+               reason:  'Last check-in country is on the approved list.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'Last check-in: SG (Singapore) — allowed with caution',
+               summary: 'Nearby but not primary region',
+               reason:  'Country is on the soft-allow list.',
+               remediation: 'Validate the device is roaming legitimately.' },
+    fail:    { currentValue: 'Last check-in: RU (Russia) — not approved',
+               summary: 'Device seen from non-approved region',
+               reason:  'Last check-in country is not on the approved list.',
+               remediation: 'Investigate possible theft / compromise; block or wipe the device if unauthorised.' },
+  },
+  not_marked_risky: {
+    source: 'Defender for Endpoint risk API (simulated)',
+    expected: 'No "risky device" event in the last 7 days',
+    pass:    { currentValue: 'riskLevel = none (last 7d)',
+               summary: 'Device not marked risky recently',
+               reason:  'MDE has not raised the device as risky in the past week.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'riskLevel = low (last 7d)',
+               summary: 'Device had low-risk incidents',
+               reason:  'MDE raised low-severity incidents recently.',
+               remediation: 'Review incidents in Defender portal and close out false positives.' },
+    fail:    { currentValue: 'riskLevel = high (3 days ago, still active)',
+               summary: 'Device recently marked risky by MDE',
+               reason:  'Active high-severity risk on the device.',
+               remediation: 'Isolate the device in Defender, run AV scan, reset credentials used on it.' },
+  },
+  // -------- trust_scoring_engine --------
+  overall_score_above_threshold: {
+    source: 'Trust Scoring Engine output (simulated)',
+    expected: '{threshold} / 100',  // substituted at render time
+    pass:    { currentValue: '{score} / 100',
+               summary: 'Overall trust score meets threshold',
+               reason:  'Aggregated score across the three modules is at or above the configured threshold.',
+               remediation: 'No action required.' },
+    warning: { currentValue: '{score} / 100',
+               summary: 'Overall trust score marginal',
+               reason:  'Score is within 10 points of the threshold — access may be denied under load.',
+               remediation: 'Raise the weakest module (usually posture or context) to restore headroom.' },
+    fail:    { currentValue: '{score} / 100',
+               summary: 'Overall trust score below threshold',
+               reason:  'Aggregated trust score is below the configured policy threshold.',
+               remediation: 'Resolve the failing Posture/Context custom tests, or (with caution) lower the access threshold.' },
+  },
+  module_score_above_threshold: {
+    source: 'Per-module scoring (simulated)',
+    expected: 'Every module >= {threshold}',
+    pass:    { currentValue: 'device={dp}, context={ca}, engine={ts}',
+               summary: 'All module scores above threshold',
+               reason:  'Every FYP module is at or above the threshold.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'device={dp}, context={ca}, engine={ts}',
+               summary: 'Weakest module within 10 points of threshold',
+               reason:  'One module is close to failing the per-module gate.',
+               remediation: 'Strengthen the weakest module’s custom tests.' },
+    fail:    { currentValue: 'device={dp}, context={ca}, engine={ts}',
+               summary: 'At least one module is below threshold',
+               reason:  'Per-module gate failed — high posture cannot mask a weak context (or vice versa).',
+               remediation: 'Identify the failing module in the Modules tab and fix its underlying custom tests.' },
+  },
+  device_score_above_threshold: {
+    source: 'Device Posture module score (simulated)',
+    expected: '>= {threshold}',
+    pass:    { currentValue: 'device={dp}',
+               summary: 'Device Posture score meets threshold',
+               reason:  'Posture module is at or above the threshold.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'device={dp}',
+               summary: 'Device Posture marginal',
+               reason:  'Posture score is within 10 points of threshold.',
+               remediation: 'Fix the most-failed posture checks (AV, firewall, encryption).' },
+    fail:    { currentValue: 'device={dp}',
+               summary: 'Device Posture score below threshold',
+               reason:  'Posture module is below threshold — endpoint health insufficient.',
+               remediation: 'Remediate failing posture custom tests or raise posture-module weight.' },
+  },
+  context_score_above_threshold: {
+    source: 'Context Analysis module score (simulated)',
+    expected: '>= {threshold}',
+    pass:    { currentValue: 'context={ca}',
+               summary: 'Context Analysis score meets threshold',
+               reason:  'Context module is at or above the threshold.',
+               remediation: 'No action required.' },
+    warning: { currentValue: 'context={ca}',
+               summary: 'Context Analysis marginal',
+               reason:  'Context score is within 10 points of threshold.',
+               remediation: 'Review named locations / trusted networks; enable more context signals.' },
+    fail:    { currentValue: 'context={ca}',
+               summary: 'Context Analysis score below threshold',
+               reason:  'Context module is below threshold — sign-in environment not trusted.',
+               remediation: 'Configure named locations, trusted networks, and enable the unusual-network flag.' },
+  },
+};
+
+/**
+ * Build a CustomTestResult for a given test + status.  Pure function,
+ * deterministic given its inputs; callers randomise `status` as needed.
+ *
+ * `scores` carries the current module/overall scores so threshold-based
+ * checks can quote the real current number.
+ */
+function buildCustomTestResult(
+  test: ModuleCustomTest,
+  status: 'pass' | 'fail' | 'warning',
+  scores: { overall: number; device_posture: number; context_analysis: number; trust_scoring_engine: number },
+): CustomTestResult {
+  const nowIso = new Date().toISOString();
+
+  // Manual / freeform custom tests have no backing evidence — be honest.
+  if (test.checkType === 'custom') {
+    return {
+      status,
+      summary: status === 'pass'
+        ? 'Manual test marked as passed by the admin'
+        : status === 'warning'
+          ? 'Manual test marked as needs review'
+          : 'Manual test marked as failed',
+      currentValue: 'Manual / custom input — no automated evidence',
+      expectedValue: test.description || 'Admin-defined condition',
+      reason: 'This is a manual test; the status was set by the admin rather than evaluated from telemetry.',
+      remediation: status === 'pass'
+        ? 'No action required.'
+        : 'Review the manual checklist and update the status after remediating.',
+      source: 'Manual / custom input',
+      isSimulated: true,
+      moduleContribution: Math.round((test.weight / 10) * (status === 'pass' ? 100 : status === 'warning' ? 50 : 0)),
+      evaluatedAt: nowIso,
+    };
+  }
+
+  const tpl = CHECK_EVIDENCE_TEMPLATES[test.checkType];
+  const slot = tpl[status];
+
+  // Threshold substitution for scoring-engine checks
+  const threshold = test.threshold ?? 60;
+  const sub = (s: string): string => s
+    .replace('{threshold}', String(threshold))
+    .replace('{score}', String(scores.overall))
+    .replace('{dp}', String(scores.device_posture))
+    .replace('{ca}', String(scores.context_analysis))
+    .replace('{ts}', String(scores.trust_scoring_engine));
+
+  return {
+    status,
+    summary: sub(slot.summary),
+    currentValue: sub(slot.currentValue),
+    expectedValue: sub(tpl.expected),
+    reason: sub(slot.reason),
+    remediation: sub(slot.remediation),
+    source: tpl.source,
+    isSimulated: true,
+    moduleContribution: Math.round((test.weight / 10) * (status === 'pass' ? 100 : status === 'warning' ? 50 : 0)),
+    evaluatedAt: nowIso,
+  };
 }
 
 const SEED_MODULE_TESTS: ModuleCustomTest[] = [
@@ -374,7 +744,7 @@ interface ZeroTrustState {
   addModuleCustomTest: (test: Omit<ModuleCustomTest, 'id' | 'createdAt'>) => void;
   updateModuleCustomTest: (id: string, updates: Partial<ModuleCustomTest>) => void;
   deleteModuleCustomTest: (id: string) => void;
-  runModuleCustomTest: (id: string, status: 'pass' | 'fail' | 'warning') => void;
+  runModuleCustomTest: (id: string, status?: 'pass' | 'fail' | 'warning') => void;
   
   // Computed getters
   getScores: () => ComputedScores;
@@ -1085,11 +1455,73 @@ export const useZeroTrustStore = create<ZeroTrustState>()(
         set(state => ({ moduleCustomTests: state.moduleCustomTests.filter(t => t.id !== id) }));
       },
       runModuleCustomTest: (id, status) => {
-        set(state => ({
-          moduleCustomTests: state.moduleCustomTests.map(t =>
-            t.id === id ? { ...t, lastStatus: status, lastRun: new Date().toISOString() } : t
-          ),
-        }));
+        set(state => {
+          const test = state.moduleCustomTests.find(t => t.id === id);
+          if (!test) return state;
+
+          // Pull current module/overall scores for threshold-based checks.
+          // The FYP three-module architecture doesn't 1:1 match the classic
+          // five-pillar split, so we approximate: device_posture ← Devices,
+          // context_analysis ← Identity, trust_scoring_engine ← overall.
+          const s = state._cachedScores?.achievable;
+          const overall = Math.round(s?.percent ?? 0);
+          const devicesPct  = Math.round(s?.byPillar?.Devices?.percent  ?? overall);
+          const identityPct = Math.round(s?.byPillar?.Identity?.percent ?? overall);
+          const scores = {
+            overall,
+            device_posture: devicesPct,
+            context_analysis: identityPct,
+            trust_scoring_engine: overall,
+          };
+
+          // Resolve status DETERMINISTICALLY so the same test on the same
+          // (simulated) environment always returns the same answer — the
+          // previous per-click randomisation was misleading.
+          let resolved: 'pass' | 'fail' | 'warning';
+          if (status) {
+            resolved = status;
+          } else if (test.checkType === 'custom') {
+            // Manual tests can only be set by the admin; keep previous
+            // status (or default to 'warning' = needs review) rather than
+            // inventing a pass/fail.
+            resolved = (test.lastStatus === 'pass' || test.lastStatus === 'fail' || test.lastStatus === 'warning')
+              ? test.lastStatus
+              : 'warning';
+          } else if (
+            test.checkType === 'overall_score_above_threshold' ||
+            test.checkType === 'module_score_above_threshold' ||
+            test.checkType === 'trust_scoring_engine' as any ||
+            test.checkType === 'device_score_above_threshold' ||
+            test.checkType === 'context_score_above_threshold'
+          ) {
+            // Threshold checks: compute directly from actual scores.
+            const threshold = test.threshold ?? 60;
+            const actual =
+              test.checkType === 'device_score_above_threshold'  ? scores.device_posture :
+              test.checkType === 'context_score_above_threshold' ? scores.context_analysis :
+              test.checkType === 'module_score_above_threshold'  ? scores.device_posture :
+              scores.overall;
+            resolved = actual >= threshold ? 'pass' : actual >= threshold - 15 ? 'warning' : 'fail';
+          } else {
+            // Evidence-backed simulated checks: deterministic hash of the
+            // test id so the same test always returns the same simulated
+            // status until the admin edits it.
+            let h = 0;
+            for (let i = 0; i < test.id.length; i++) h = ((h << 5) - h + test.id.charCodeAt(i)) | 0;
+            const bucket = Math.abs(h) % 10;
+            resolved = bucket < 5 ? 'pass' : bucket < 8 ? 'warning' : 'fail';
+          }
+
+          const result = buildCustomTestResult(test, resolved, scores);
+
+          return {
+            moduleCustomTests: state.moduleCustomTests.map(t =>
+              t.id === id
+                ? { ...t, lastStatus: resolved, lastRun: result.evaluatedAt, lastResult: result }
+                : t
+            ),
+          };
+        });
       },
       
       // Computed getters

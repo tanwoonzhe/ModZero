@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { FaShieldAlt, FaSync, FaCheckCircle, FaTimesCircle, FaExclamationTriangle, FaLaptop, FaLock, FaFireAlt, FaBug } from "react-icons/fa";
+import ZeroTrustPanel from "./ZeroTrustPanel";
 
 interface DeviceInfo {
   device_name: string;
@@ -226,6 +227,8 @@ function App() {
           <p>Last sync: {lastSync.toLocaleTimeString()}</p>
         )}
       </div>
+
+      <ZeroTrustPanel />
     </div>
   );
 }

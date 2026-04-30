@@ -3,14 +3,23 @@
 Supports two modes:
   1. JWT verification using JWKS from the controller (default).
   2. Token introspection via POST /auth/introspect on the controller (fallback).
+
+Also exposes ``verify_controller_signature`` for the Phase 1 backend->connector
+forward hop, which authenticates the controller via a shared HMAC secret over
+``ts|METHOD|target_url``.
 """
 
+import hashlib
+import hmac
 import logging
 import time
 import aiohttp
 import jwt as pyjwt
 
-from config import api_url, get_ssl_context
+from config import (
+    api_url, get_ssl_context,
+    CONNECTOR_HOP_SECRET, CONNECTOR_HOP_SKEW_SECONDS,
+)
 
 logger = logging.getLogger("modzero.connector")
 
@@ -120,3 +129,34 @@ async def _introspect_token(token: str) -> dict | None:
     except Exception as exc:
         logger.warning("Token introspect error: %s", exc)
         return None
+
+
+def verify_controller_signature(
+    *, ts_header: str, sig_header: str, method: str, target_url: str
+) -> tuple[bool, str]:
+    """Verify a backend->connector forward-hop signature.
+
+    Signed message: ``"<ts>|<METHOD-UPPER>|<target_url>"``
+    Algorithm: HMAC-SHA256 with ``CONNECTOR_HOP_SECRET``, hex digest.
+
+    Returns ``(ok, reason)``. ``reason`` is empty on success.
+    """
+    if not CONNECTOR_HOP_SECRET:
+        return False, "connector hop secret not configured"
+    if not ts_header or not sig_header:
+        return False, "missing signature headers"
+    try:
+        ts = int(ts_header)
+    except (TypeError, ValueError):
+        return False, "invalid timestamp"
+    if abs(int(time.time()) - ts) > CONNECTOR_HOP_SKEW_SECONDS:
+        return False, "timestamp skew exceeded"
+    if not target_url:
+        return False, "missing target url"
+    msg = f"{ts}|{method.upper()}|{target_url}".encode("utf-8")
+    expected = hmac.new(
+        CONNECTOR_HOP_SECRET.encode("utf-8"), msg, hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(expected, sig_header.lower()):
+        return False, "signature mismatch"
+    return True, ""

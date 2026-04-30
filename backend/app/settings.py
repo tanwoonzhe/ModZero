@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = Field("*", env="CORS_ORIGINS")
 
+    # Cloud / public URL configuration
+    public_base_url: Optional[str] = Field(None, env="PUBLIC_BASE_URL")
+    cookie_secure: bool = Field(False, env="COOKIE_SECURE")
+    cookie_samesite: str = Field("lax", env="COOKIE_SAMESITE")
+
+    # Connector hop (backend -> connector)
+    connector_base_url: str = Field("http://connector:8443", env="CONNECTOR_BASE_URL")
+    connector_hop_secret: str = Field("change-me-connector-hop", env="CONNECTOR_HOP_SECRET")
+
     # Azure (placeholders)
     azure_tenant_id: Optional[str] = Field(None, env="AZURE_TENANT_ID")
     azure_client_id: Optional[str] = Field(None, env="AZURE_CLIENT_ID")

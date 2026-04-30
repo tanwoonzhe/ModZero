@@ -432,6 +432,13 @@ class Resource(Base):
     resource_type: str = Column(String(64), nullable=True, default="server")
     ip_address: str = Column(String(64), nullable=True)
     port: int = Column(Numeric, nullable=True)
+    # Phase 1: explicit, slug-addressable target. When set these take
+    # precedence over (ip_address, port) for the /r/<slug> data path.
+    slug: str = Column(String(128), nullable=True, unique=True, index=True)
+    target_host: str = Column(String(255), nullable=True)
+    target_port: int = Column(Numeric, nullable=True)
+    target_scheme: str = Column(String(16), nullable=True, default="http")
+    path_prefix: str = Column(String(255), nullable=True)
     connector_status: ConnectorStatusEnum = Column(
         PgEnum(ConnectorStatusEnum), default=ConnectorStatusEnum.UP
     )
@@ -442,6 +449,104 @@ class Resource(Base):
 
     def __repr__(self) -> str:
         return f"<Resource {self.name} status={self.connector_status}>"
+
+
+class DeviceEnrollment(Base):
+    """A ModZero desktop client enrolled to a user.
+
+    Stores a per-device HMAC secret used to sign posture payloads
+    submitted by the desktop client to /api/resource-access/gate.
+    The plaintext secret is returned exactly once at enrollment time.
+    """
+    __tablename__ = "device_enrollments"
+
+    device_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    user_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True
+    )
+    hmac_secret: str = Column(String(128), nullable=False)
+    device_name: str = Column(String(128), nullable=True)
+    os: str = Column(String(64), nullable=True)
+    os_version: str = Column(String(64), nullable=True)
+    enrolled_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    last_seen_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    revoked: bool = Column(Boolean, default=False, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<DeviceEnrollment {self.device_id} user={self.user_id}>"
+
+
+class TrustSnapshot(Base):
+    """Server-computed trust snapshot per (user, device, resource).
+
+    Persisted by /api/resource-access/gate after verifying a signed
+    posture payload. /r/<slug> reads the latest row to re-check trust
+    on every protected request.
+    """
+    __tablename__ = "trust_snapshots"
+
+    snapshot_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    user_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True
+    )
+    device_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("device_enrollments.device_id"), nullable=True, index=True
+    )
+    resource_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("resources.resource_id"), nullable=False, index=True
+    )
+    score: int = Column(Numeric, nullable=False)
+    threshold: int = Column(Numeric, nullable=False)
+    posture_json: dict = Column(JSON, nullable=True)
+    computed_at: datetime = Column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False, index=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<TrustSnapshot user={self.user_id} res={self.resource_id} score={self.score}>"
+
+
+class AccessDecisionEnum(str, Enum):
+    ALLOW = "allow"
+    DENY = "deny"
+
+
+class AccessDecision(Base):
+    """Append-only audit log of every access decision made by ModZero.
+
+    Written by /api/resource-access/gate (one row per call) and by
+    /r/<slug> (one row per protected request).
+    """
+    __tablename__ = "access_decisions"
+
+    decision_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True
+    )
+    user_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True, index=True
+    )
+    device_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("device_enrollments.device_id"), nullable=True, index=True
+    )
+    resource_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("resources.resource_id"), nullable=True, index=True
+    )
+    decision: AccessDecisionEnum = Column(
+        PgEnum(AccessDecisionEnum, name="access_decision_enum"),
+        nullable=False,
+    )
+    reason: str = Column(Text, nullable=True)
+    path: str = Column(String(512), nullable=True)
+    ts: datetime = Column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False, index=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<AccessDecision {self.decision} res={self.resource_id} ts={self.ts}>"
 
 
 class Template(Base):

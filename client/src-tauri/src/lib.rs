@@ -7,6 +7,8 @@
 
 mod device_info;
 mod api_client;
+mod enrollment;
+mod posture;
 
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -14,6 +16,7 @@ use tauri::{
     Manager, Runtime,
 };
 use std::sync::Mutex;
+use std::path::PathBuf;
 
 // Application state
 pub struct AppState {
@@ -199,6 +202,135 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<bool, String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Phase 1 ZTNA: device-enrollment + signed posture + /gate
+// ---------------------------------------------------------------------------
+
+fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_local_data_dir()
+        .map_err(|e| format!("no local data dir: {e}"))
+}
+
+#[derive(serde::Serialize)]
+struct EnrollResult {
+    device_id: String,
+    enrolled: bool,
+}
+
+#[tauri::command]
+async fn modzero_enroll(
+    app: tauri::AppHandle,
+    server_url: String,
+    jwt: String,
+    device_name: Option<String>,
+) -> Result<EnrollResult, String> {
+    let base = data_dir(&app)?;
+    let info = device_info::collect_device_info().map_err(|e| e.to_string())?;
+    let dev = enrollment::enroll(
+        &base,
+        &server_url,
+        &jwt,
+        device_name.as_deref(),
+        Some(&info.os_name),
+        Some(&info.os_version),
+    )
+    .await?;
+    Ok(EnrollResult { device_id: dev.device_id, enrolled: true })
+}
+
+#[tauri::command]
+async fn modzero_enrollment_status(
+    app: tauri::AppHandle,
+) -> Result<Option<String>, String> {
+    let base = data_dir(&app)?;
+    Ok(enrollment::load(&base).map(|d| d.device_id))
+}
+
+#[derive(serde::Deserialize)]
+struct GateServerResponse {
+    allowed: bool,
+    reason: String,
+    bootstrap_url: Option<String>,
+    access_url: Option<String>,
+    score: i32,
+    threshold: i32,
+}
+
+#[derive(serde::Serialize)]
+struct GateOutcome {
+    allowed: bool,
+    reason: String,
+    score: i32,
+    threshold: i32,
+    opened_url: Option<String>,
+}
+
+/// Full happy path:
+///   1. load enrollment, 2. collect signals, 3. sign posture, 4. POST /gate,
+///   5. on allow open the bootstrap URL in the default browser.
+#[tauri::command]
+async fn modzero_request_access(
+    app: tauri::AppHandle,
+    jwt: String,
+    resource_id: String,
+    access_threshold: i32,
+    simulate_good_posture: Option<bool>,
+) -> Result<GateOutcome, String> {
+    let base = data_dir(&app)?;
+    let dev = enrollment::load(&base)
+        .ok_or_else(|| "Device not enrolled. Run enrollment first.".to_string())?;
+
+    let signals = posture::collect_signals(simulate_good_posture.unwrap_or(false))?;
+    let payload = posture::sign_posture(&dev.device_id, &dev.hmac_secret, signals);
+
+    let body = serde_json::json!({
+        "resource_id": resource_id,
+        "access_threshold": access_threshold,
+        "posture": payload,
+    });
+
+    let url = format!(
+        "{}/api/resource-access/gate",
+        dev.server_url.trim_end_matches('/')
+    );
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .bearer_auth(&jwt)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("gate request failed: {e}"))?;
+
+    let status = resp.status();
+    let txt = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("gate failed: HTTP {status} {txt}"));
+    }
+    let parsed: GateServerResponse = serde_json::from_str(&txt)
+        .map_err(|e| format!("gate: bad json: {e}"))?;
+
+    let mut opened = None;
+    if parsed.allowed {
+        if let Some(boot) = parsed.bootstrap_url.clone() {
+            if let Err(e) = tauri_plugin_shell::ShellExt::shell(&app).open(&boot, None) {
+                eprintln!("open bootstrap_url failed: {e}");
+            } else {
+                opened = Some(parsed.access_url.clone().unwrap_or(boot));
+            }
+        }
+    }
+
+    Ok(GateOutcome {
+        allowed: parsed.allowed,
+        reason: parsed.reason,
+        score: parsed.score,
+        threshold: parsed.threshold,
+        opened_url: opened,
+    })
+}
+
 fn create_tray_menu<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<Menu<R>, tauri::Error> {
     let show = MenuItem::with_id(app, "show", "Show Dashboard", true, None::<&str>)?;
     let check_compliance = MenuItem::with_id(app, "check_compliance", "Check Compliance", true, None::<&str>)?;
@@ -299,6 +431,9 @@ pub fn run() {
             check_for_updates,
             calculate_trust_score,
             sync_with_server,
+            modzero_enroll,
+            modzero_enrollment_status,
+            modzero_request_access,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

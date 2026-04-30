@@ -119,7 +119,7 @@ const TrustScoreCard: React.FC = () => {
           <strong className={willAllowAccess ? 'text-green-700' : 'text-red-700'}>
             {willAllowAccess ? 'ALLOWED' : 'DENIED'}
           </strong>{' '}
-          for <code>http://localhost:2026/</code>
+          for the protected resource (via <code>/r/&lt;slug&gt;</code>)
         </span>
         <span className="text-xs text-gray-500">
           {trust.lastUpdated ? `updated ${new Date(trust.lastUpdated).toLocaleString()}` : 'no scan yet'}

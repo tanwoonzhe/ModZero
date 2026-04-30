@@ -97,42 +97,17 @@ const ProtectedResourceAccessPanel: React.FC = () => {
   };
 
   const attemptAccess = async () => {
-    const latest = selectTrustScore(useZeroTrustStore.getState());
-    const thr = useZeroTrustStore.getState().accessThreshold;
-    setChecking(true);
-    setDecision(null);
-    try {
-      const { data } = await api.post('/resource-access/gate', {
-        trust_score: latest.overall,
-        access_threshold: thr,
-        device_posture_score: latest.devicePostureScore,
-        context_analysis_score: latest.contextAnalysisScore,
-        trust_scoring_engine_score: latest.trustScoringEngineScore,
-        resource_id: selectedId || undefined,
-      });
-      setReason(data.reason || '');
-      if (data.allowed && (data.bootstrap_url || data.portal_url)) {
-        setDecision('allow');
-        const friendly = data.access_url || data.bootstrap_url || data.portal_url;
-        toast.success(
-          `Access granted to ${data.resource_name || 'resource'} via ${friendly} (${data.score} ≥ ${data.threshold})`
-        );
-        // Open the one-shot bootstrap URL — it plants the HttpOnly
-        // session cookie on the backend origin and 302-redirects the
-        // new tab to the stable /r/<slug> product URL.
-        window.open(data.bootstrap_url || data.portal_url, '_blank', 'noopener,noreferrer');
-      } else {
-        setDecision('deny');
-        toast.error(data.reason || `Access denied (${data.score} < ${data.threshold})`);
-      }
-    } catch (e: any) {
-      setDecision('deny');
-      const msg = e?.response?.data?.detail || 'Gate check failed';
-      setReason(typeof msg === 'string' ? msg : JSON.stringify(msg));
-      toast.error(typeof msg === 'string' ? msg : 'Gate check failed');
-    } finally {
-      setChecking(false);
-    }
+    // Phase 1: the web frontend cannot complete the /gate flow because
+    // /gate now requires a HMAC-signed posture payload from an enrolled
+    // ModZero desktop client. Redirect the user to the desktop app.
+    setDecision('deny');
+    const msg =
+      'Open the ModZero desktop client to request access. ' +
+      'The web console can only view trust signals and audit logs; ' +
+      'access decisions require a signed posture payload from an ' +
+      'enrolled device.';
+    setReason(msg);
+    toast.error(msg);
   };
 
   const selected = resources.find(r => r.resource_id === selectedId);
@@ -149,6 +124,11 @@ const ProtectedResourceAccessPanel: React.FC = () => {
             The access decision is made server-side by the backend gate endpoint using your
             current trust score vs the configured threshold — ModZero does not hardcode any
             target URL.
+          </p>
+          <p className="text-xs text-amber-700 dark:text-amber-400 mt-2 max-w-2xl">
+            <strong>Open the ModZero desktop client</strong> to request access — the web
+            console cannot mint access tickets because <code>/gate</code> requires a
+            HMAC-signed posture payload from an enrolled device.
           </p>
         </div>
         <div className="text-right">
@@ -171,7 +151,7 @@ const ProtectedResourceAccessPanel: React.FC = () => {
         ) : resources.length === 0 ? (
           <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3">
             No resources registered yet. Go to <strong>Resources</strong> and add a network + resource
-            (e.g. a demo intranet at <code>localhost:2026</code>) so the gate has something to protect.
+            (e.g. the demo intranet at <code>intranet:80</code> on the internal docker network) so the gate has something to protect.
             <button
               onClick={fetchResources}
               className="ml-3 underline text-amber-800"

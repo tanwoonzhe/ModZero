@@ -6,6 +6,8 @@ from . import auth, users, devices, attempts, policies, templates, resources, az
 from . import identity_tests, device_tests, test_config, connectors, client_api, identity_checks, custom_policies
 from . import device_checks as device_checks_router
 from . import resource_access as resource_access_router
+from . import device_enrollments as device_enrollments_router
+from . import audit as audit_router
 
 api_router = APIRouter()
 
@@ -36,6 +38,8 @@ api_router.include_router(client_api.router, tags=["client"])
 api_router.include_router(identity_checks.router, tags=["identity-checks-zt"])
 api_router.include_router(device_checks_router.router, tags=["device-checks-zt"])
 api_router.include_router(resource_access_router.router, tags=["resource-access"])
+api_router.include_router(device_enrollments_router.router, tags=["device-enrollments"])
+api_router.include_router(audit_router.router, tags=["audit"])
 
 # Public product-facing route for protected resources (/r/{slug}).
 # Exposed via main.py at the app root, NOT under /api.

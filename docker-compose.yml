@@ -39,6 +39,13 @@ services:
       AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
       # CORS origins (comma-separated, * for dev)
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      # Cloud / public URL configuration
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      # Backend -> connector hop
+      CONNECTOR_BASE_URL: ${CONNECTOR_BASE_URL:-http://connector:8443}
+      CONNECTOR_HOP_SECRET: ${CONNECTOR_HOP_SECRET:-dev-connector-hop-secret-change-me}
     depends_on:
       db:
         condition: service_healthy
@@ -64,20 +71,21 @@ services:
     restart: unless-stopped
 
   # ── Demo Internal Resource (simulates an independently running site) ──
-  # The intranet is an independent service in ModZero's non-invasive
-  # protection model. It is published on host port 2026 so it can be
-  # reached directly (http://localhost:2026/) just like any real
-  # corporate site. ModZero does NOT own this service — it only
-  # registers it as a Resource and provides a trust-gated alternative
-  # route at /r/<slug>. Deleting the Resource record must NOT stop
-  # this container.
+  # The intranet is an internal-only service reachable ONLY on the
+  # docker-compose network as http://intranet:80. It is intentionally
+  # NOT published to the host, so employees cannot bypass ModZero by
+  # opening http://localhost:2026 in the browser. The backend/connector
+  # can still proxy to it because they share the same docker network.
+  # Register it as a Resource with target_host=intranet target_port=80
+  # and access it via the protected route /r/<slug>.
   intranet:
     image: nginx:alpine
     volumes:
       - ./intranet/index.html:/usr/share/nginx/html/index.html:ro
-    ports:
-      - "2026:80"
+    # No `ports:` mapping — internal-only by design.
     restart: unless-stopped
+    networks:
+      - private-net
 
   # ── ModZero Connector ──────────────────────────────────────────
   # For the demo, this connector enrolls with the controller and
@@ -99,6 +107,8 @@ services:
       MODZERO_LABEL_DEPLOYED_BY: "docker-compose"
       MODZERO_CONNECTOR_LISTEN_PORT: "8443"
       MODZERO_INSECURE_SKIP_VERIFY: "true"
+      # Shared HMAC secret with the controller for /_modzero/forward hops
+      CONNECTOR_HOP_SECRET: ${CONNECTOR_HOP_SECRET:-dev-connector-hop-secret-change-me}
     depends_on:
       - backend
       - intranet
@@ -107,7 +117,20 @@ services:
     volumes:
       - connector_data:/etc/modzero-connector
     restart: unless-stopped
+    networks:
+      - default
+      - private-net
 
 volumes:
   db_data:
   connector_data:
+
+networks:
+  default:
+    driver: bridge
+  # private-net: only `connector` and private resources (intranet) attach here.
+  # Backend and frontend are NOT on this network, so they cannot reach
+  # the intranet directly — only via the connector.
+  private-net:
+    driver: bridge
+    internal: false

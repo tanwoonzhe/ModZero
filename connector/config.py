@@ -23,6 +23,11 @@ CA_BUNDLE_PATH = os.getenv("MODZERO_CA_BUNDLE_PATH", "")
 LISTEN_ADDR = os.getenv("MODZERO_CONNECTOR_LISTEN_ADDR", "0.0.0.0")
 LISTEN_PORT = int(os.getenv("MODZERO_CONNECTOR_LISTEN_PORT", "8443"))
 
+# Shared HMAC secret for backend->connector signed forward hops.
+# Phase 1: shared with controller via env. Phase 2: rotate via WSS control plane.
+CONNECTOR_HOP_SECRET = os.getenv("CONNECTOR_HOP_SECRET", "")
+CONNECTOR_HOP_SKEW_SECONDS = int(os.getenv("CONNECTOR_HOP_SKEW_SECONDS", "60"))
+
 # Intervals (seconds)
 HEARTBEAT_INTERVAL = int(os.getenv("MODZERO_HEARTBEAT_INTERVAL", "10"))
 POLICY_POLL_INTERVAL = int(os.getenv("MODZERO_POLICY_POLL_INTERVAL", "15"))
