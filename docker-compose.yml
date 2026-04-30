@@ -46,6 +46,8 @@ services:
       # Backend -> connector hop
       CONNECTOR_BASE_URL: ${CONNECTOR_BASE_URL:-http://connector:8443}
       CONNECTOR_HOP_SECRET: ${CONNECTOR_HOP_SECRET:-dev-connector-hop-secret-change-me}
+      # Phase 2B: connector transport (direct_http | wss_tunnel scaffold)
+      CONNECTOR_TRANSPORT: ${CONNECTOR_TRANSPORT:-direct_http}
     depends_on:
       db:
         condition: service_healthy

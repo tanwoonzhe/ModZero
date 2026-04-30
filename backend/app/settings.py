@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     connector_base_url: str = Field("http://connector:8443", env="CONNECTOR_BASE_URL")
     connector_hop_secret: str = Field("change-me-connector-hop", env="CONNECTOR_HOP_SECRET")
 
+    # Phase 2B: connector transport selector. "direct_http" (default) uses
+    # in-cluster HTTP from controller -> connector. "wss_tunnel" uses an
+    # outbound-dialed WebSocket from connector -> controller (scaffolded;
+    # falls back to direct_http if not implemented at runtime).
+    connector_transport: str = Field("direct_http", env="CONNECTOR_TRANSPORT")
+
     # Azure (placeholders)
     azure_tenant_id: Optional[str] = Field(None, env="AZURE_TENANT_ID")
     azure_client_id: Optional[str] = Field(None, env="AZURE_CLIENT_ID")

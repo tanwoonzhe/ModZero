@@ -567,6 +567,14 @@ class _StreamingHop:
 
 
 _connector = ConnectorClient()
+# Phase 2B: indirect through the transport selector. Today this returns the
+# same direct-HTTP client; setting CONNECTOR_TRANSPORT=wss_tunnel logs a
+# warning and continues using direct HTTP (scaffold only).
+try:
+    from app.services.connector_transport import select_transport
+    _connector = select_transport(get_settings().connector_transport, _connector)
+except Exception as _e:  # pragma: no cover - defensive
+    logger.warning("connector_transport selector unavailable: %s", _e)
 
 
 # ---------------------------------------------------------------------------
