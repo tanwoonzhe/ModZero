@@ -35,17 +35,22 @@ Open the UI at <http://localhost:5173>. Sign in as the seeded admin
 try { Invoke-WebRequest http://intranet/ -TimeoutSec 3 } catch { $_.Exception.Message }
 ```
 
-The dashboard "Access-Control State" tile **Protected resources** should list
-`/r/demo-intranet` and the **Connectors** tile should show `1/1 online`.
+The dashboard "Access-Control State" tile **Protected resources** should
+list `/r/demo-intranet`. The **Connectors** tile shows the live count
+(`<online>/<total>`) and the hint surfaces the freshest connector — the
+`demo-connector-demo-network` row should be marked `✓`. Stale rows from
+previous enrollments are intentionally still listed but counted as offline.
 
 ## 3. Verify the connector can reach the intranet
 
 ```powershell
-docker compose exec connector sh -c "wget -qO- http://intranet/ | head -c 200"
+docker compose exec connector python -c `
+    "import urllib.request; print(urllib.request.urlopen('http://intranet/').read()[:200])"
 ```
 
 You should see HTML from the private intranet — proving the connector has
-network reach that the host does not.
+network reach that the host does not. (The connector image is minimal and
+does not ship `wget` or `curl`; use Python's stdlib.)
 
 ## 4. Run the end-to-end regression (canonical demo path)
 
@@ -95,6 +100,13 @@ try { Invoke-WebRequest http://intranet/ -TimeoutSec 3 } catch { $_.Exception.Me
 ## 7. Confirm the audit trail
 
 ```powershell
+# Grab a JWT for the admin (form-encoded login).
+$tok = Invoke-RestMethod -Method POST `
+    -Uri http://localhost:8000/api/auth/login `
+    -ContentType 'application/x-www-form-urlencoded' `
+    -Body "username=admin&password=admin123"
+$env:JWT = $tok.access_token
+
 $h = @{ Authorization = "Bearer $env:JWT" }
 (Invoke-RestMethod "http://localhost:8000/api/audit/access-decisions?limit=5" -Headers $h) |
     Format-Table ts, decision, category, score, threshold, path -AutoSize

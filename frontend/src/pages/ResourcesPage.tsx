@@ -27,6 +27,12 @@ interface Resource {
   ip_address?: string;
   port?: number;
   last_seen?: string;
+  // Phase 1/2 zero-trust proxy fields (returned by /api/resources/)
+  slug?: string | null;
+  target_host?: string | null;
+  target_port?: number | null;
+  target_scheme?: string | null;
+  path_prefix?: string | null;
 }
 
 interface Network {
@@ -325,8 +331,8 @@ const ResourcesPage: React.FC = () => {
                           <tr>
                             <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
                             <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Port</th>
+                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Protected route</th>
+                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Target</th>
                             <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                             <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                           </tr>
@@ -346,12 +352,26 @@ const ResourcesPage: React.FC = () => {
                                   <span className="text-sm text-gray-500 dark:text-gray-400 capitalize">{resource.type}</span>
                                 </td>
                                 <td className="px-5 py-4 whitespace-nowrap">
-                                  <span className="text-sm font-mono text-gray-600 dark:text-gray-400">
-                                    {resource.ip_address || "-"}
-                                  </span>
+                                  {resource.slug ? (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded font-mono text-xs bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                                      /r/{resource.slug}{resource.path_prefix && resource.path_prefix !== "/" ? resource.path_prefix : ""}
+                                    </span>
+                                  ) : (
+                                    <span className="text-sm text-gray-400">—</span>
+                                  )}
                                 </td>
                                 <td className="px-5 py-4 whitespace-nowrap">
-                                  <span className="text-sm text-gray-500 dark:text-gray-400">{resource.port || "-"}</span>
+                                  <span className="text-sm font-mono text-gray-600 dark:text-gray-400">
+                                    {resource.target_host
+                                      ? `${resource.target_scheme || "http"}://${resource.target_host}${
+                                          resource.target_port && resource.target_port !== 80 && resource.target_port !== 443
+                                            ? ":" + resource.target_port
+                                            : ""
+                                        }`
+                                      : resource.ip_address
+                                      ? `${resource.ip_address}${resource.port ? ":" + resource.port : ""}`
+                                      : "-"}
+                                  </span>
                                 </td>
                                 <td className="px-5 py-4 whitespace-nowrap">
                                   <div className="flex items-center gap-2">
