@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ModZero — Connected</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; connect-src *;" />
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --muted: #94a3b8;
+      --text: #e2e8f0;
+      --accent: #6366f1;
+      --accent-h: #4f46e5;
+      --ok: #10b981;
+      --warn: #f59e0b;
+      --err: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; min-height: 100%;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+    .container { max-width: 880px; margin: 0 auto; padding: 32px 24px; }
+    .topbar { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+    .logo {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: var(--accent); color: #fff; font-weight: 700; font-size: 20px;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .topbar h1 { margin: 0; font-size: 20px; }
+    .topbar .sub { color: var(--muted); font-size: 12px; }
+    .status-pill {
+      margin-left: auto;
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 12px; border-radius: 999px;
+      background: rgba(16,185,129,.14); border: 1px solid rgba(16,185,129,.4);
+      color: #6ee7b7; font-size: 12px; font-weight: 600;
+    }
+    .status-pill.warn { background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.4); color: #fcd34d; }
+    .status-pill.err { background: rgba(239,68,68,.14); border-color: rgba(239,68,68,.4); color: #fca5a5; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+    .status-pill.warn .dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+    .status-pill.err .dot { background: var(--err); box-shadow: 0 0 8px var(--err); }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 18px; }
+    .tile {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 16px;
+    }
+    .tile .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+    .tile .value { font-size: 18px; font-weight: 600; word-break: break-all; }
+    .tile .value.small { font-size: 14px; }
+    .score { display: flex; align-items: baseline; gap: 6px; }
+    .score .big { font-size: 28px; font-weight: 700; }
+    .score .max { color: var(--muted); font-size: 13px; }
+    .bar { margin-top: 8px; height: 6px; background: #0b1220; border-radius: 4px; overflow: hidden; }
+    .bar > div { height: 100%; background: linear-gradient(90deg, var(--accent), #22d3ee); transition: width .3s; }
+
+    .row { display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+    button {
+      padding: 10px 14px; font-size: 13px; font-weight: 600;
+      border: 0; border-radius: 8px; cursor: pointer;
+    }
+    button.primary { background: var(--accent); color: #fff; }
+    button.primary:hover { background: var(--accent-h); }
+    button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    button.ghost:hover { color: var(--text); }
+
+    .panel { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .panel h2 { margin: 0 0 10px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+    .kv { display: grid; grid-template-columns: 150px 1fr; gap: 8px 16px; font-size: 13px; }
+    .kv dt { color: var(--muted); }
+    .kv dd { margin: 0; word-break: break-all; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .badge.ok { background: rgba(16,185,129,.15); color: #6ee7b7; }
+    .badge.warn { background: rgba(245,158,11,.15); color: #fcd34d; }
+    .badge.err { background: rgba(239,68,68,.15); color: #fca5a5; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <div class="logo">M</div>
+      <div>
+        <h1>ModZero Dashboard</h1>
+        <div class="sub" id="serverHint">Connected</div>
+      </div>
+      <div id="statusPill" class="status-pill"><span class="dot"></span> <span id="statusText">Connected</span></div>
+    </div>
+
+    <div class="grid">
+      <div class="tile">
+        <div class="label">Device</div>
+        <div class="value small" id="deviceName">—</div>
+      </div>
+      <div class="tile">
+        <div class="label">Server URL</div>
+        <div class="value small" id="serverUrl">—</div>
+      </div>
+      <div class="tile">
+        <div class="label">Trust Score</div>
+        <div class="score"><span class="big" id="trustScore">—</span><span class="max">/ 100</span></div>
+        <div class="bar"><div id="trustBar" style="width:0%"></div></div>
+      </div>
+      <div class="tile">
+        <div class="label">Last Heartbeat</div>
+        <div class="value small" id="lastHeartbeat">just now</div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:14px">
+      <h2>Device Posture</h2>
+      <dl class="kv" id="postureList">
+        <dt>Status</dt><dd><span class="badge ok" id="postureStatus">Healthy</span></dd>
+        <dt>Identity</dt><dd id="identity">—</dd>
+        <dt>Hostname</dt><dd id="hostname">—</dd>
+        <dt>Platform</dt><dd id="platform">—</dd>
+        <dt>Client Version</dt><dd id="clientVersion">—</dd>
+        <dt>Connected Since</dt><dd id="connectedSince">—</dd>
+      </dl>
+    </div>
+
+    <div class="row">
+      <button class="primary" id="openDashboard">Open Full Dashboard</button>
+      <button class="ghost" id="refresh">Refresh</button>
+      <button class="ghost" id="disconnect">Disconnect</button>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function fmtRelative(ts) {
+      if (!ts) return "never";
+      const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+      if (s < 5) return "just now";
+      if (s < 60) return s + "s ago";
+      if (s < 3600) return Math.floor(s / 60) + "m ago";
+      if (s < 86400) return Math.floor(s / 3600) + "h ago";
+      return Math.floor(s / 86400) + "d ago";
+    }
+
+    function setStatus(kind, label) {
+      const pill = $("statusPill");
+      pill.className = "status-pill" + (kind === "ok" ? "" : " " + kind);
+      $("statusText").textContent = label;
+    }
+
+    async function tick() {
+      const snap = await window.modzero.getSnapshot();
+      $("deviceName").textContent = snap.deviceName || "—";
+      $("hostname").textContent = snap.hostname || "—";
+      $("platform").textContent = snap.platform || "—";
+      $("identity").textContent = snap.identity || "—";
+      $("clientVersion").textContent = snap.appVersion || "—";
+      $("serverUrl").textContent = snap.url || "—";
+      $("serverHint").textContent = snap.url ? snap.url : "Connected";
+      $("connectedSince").textContent = snap.connectedSince
+        ? new Date(snap.connectedSince).toLocaleString()
+        : "—";
+
+      const score = snap.trustScore;
+      $("trustScore").textContent = score == null ? "—" : Math.round(score);
+      $("trustBar").style.width = score == null ? "0%" : Math.max(0, Math.min(100, score)) + "%";
+
+      $("lastHeartbeat").textContent = fmtRelative(snap.lastHeartbeat);
+      if (!snap.healthy) {
+        setStatus("err", "Disconnected");
+        $("postureStatus").className = "badge err";
+        $("postureStatus").textContent = "Offline";
+      } else if (snap.trustScore != null && snap.trustScore < 60) {
+        setStatus("warn", "Degraded");
+        $("postureStatus").className = "badge warn";
+        $("postureStatus").textContent = "Degraded";
+      } else {
+        setStatus("ok", "Connected");
+        $("postureStatus").className = "badge ok";
+        $("postureStatus").textContent = "Healthy";
+      }
+    }
+
+    $("openDashboard").addEventListener("click", () => window.modzero.openFullDashboard());
+    $("refresh").addEventListener("click", () => window.modzero.heartbeatNow().then(tick));
+    $("disconnect").addEventListener("click", async () => {
+      await window.modzero.disconnect();
+    });
+
+    tick();
+    setInterval(tick, 5000);
+  </script>
+</body>
+</html>
