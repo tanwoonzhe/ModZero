@@ -1302,3 +1302,83 @@ class DeviceTrustScore(Base):
 
     def __repr__(self) -> str:
         return f"<DeviceTrustScore {self.score_id} total={self.total_score}>"
+
+
+# ── Protected Resource & Access Policy (foundation) ──────────────────────────
+
+class ProtectedResource(Base):
+    """A resource exposed via ModZero, addressable by public_name."""
+    __tablename__ = "protected_resources"
+
+    id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: str = Column(String(128), nullable=False)
+    description: str = Column(Text, nullable=True)
+    resource_type: str = Column(String(32), nullable=False, default="web")  # web, ssh, rdp, database, api
+    internal_address: str = Column(String(255), nullable=True)
+    public_name: str = Column(String(128), nullable=True, unique=True, index=True)
+    required_group: str = Column(String(128), nullable=True)
+    minimum_trust_score: float = Column(Float, nullable=False, default=0.0)
+    require_intune_compliant: bool = Column(Boolean, nullable=False, default=False)
+    enabled: bool = Column(Boolean, nullable=False, default=True)
+    created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    policies = relationship(
+        "AccessPolicy", back_populates="resource", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<ProtectedResource {self.name} type={self.resource_type}>"
+
+
+class AccessPolicy(Base):
+    """Per-resource access policy. Optional layer on top of resource defaults."""
+    __tablename__ = "access_policies"
+
+    id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: str = Column(String(128), nullable=False)
+    resource_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("protected_resources.id"), nullable=False
+    )
+    required_group: str = Column(String(128), nullable=True)
+    minimum_trust_score: float = Column(Float, nullable=False, default=0.0)
+    require_intune_compliant: bool = Column(Boolean, nullable=False, default=False)
+    enabled: bool = Column(Boolean, nullable=False, default=True)
+    created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    resource = relationship("ProtectedResource", back_populates="policies")
+
+    def __repr__(self) -> str:
+        return f"<AccessPolicy {self.name} resource={self.resource_id}>"
+
+
+class AccessRequestLog(Base):
+    """Audit log for every access decision made via /api/access/request."""
+    __tablename__ = "access_request_logs"
+
+    id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True
+    )
+    device_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("devices.device_id"), nullable=True, index=True
+    )
+    resource_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("protected_resources.id"), nullable=True, index=True
+    )
+    decision: str = Column(String(16), nullable=False)  # allow | deny
+    reason: str = Column(Text, nullable=True)
+    trust_score: float = Column(Float, nullable=True)
+    timestamp: datetime = Column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False, index=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<AccessRequestLog {self.id} {self.decision} res={self.resource_id}>"

@@ -11,7 +11,7 @@ Registered routers
 
 from fastapi import APIRouter
 
-from . import auth, users, graph, devices, posture
+from . import auth, users, graph, devices, posture, protected_resources, access
 
 api_router = APIRouter()
 
@@ -27,3 +27,5 @@ api_router.include_router(users.router,   prefix="/users",   tags=["users"])
 api_router.include_router(graph.router,                      tags=["graph"])
 api_router.include_router(devices.router, prefix="/devices", tags=["devices"])
 api_router.include_router(posture.router,                    tags=["posture"])
+api_router.include_router(protected_resources.router)
+api_router.include_router(access.router)

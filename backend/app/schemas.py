@@ -454,3 +454,69 @@ class DeviceTrustScoreOut(BaseModel):
     calculated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+## Protected Resource schemas
+
+class ProtectedResourceBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    resource_type: str = "web"  # web | ssh | rdp | database | api
+    internal_address: Optional[str] = None
+    public_name: Optional[str] = None
+    required_group: Optional[str] = None
+    minimum_trust_score: float = 0.0
+    require_intune_compliant: bool = False
+    enabled: bool = True
+
+
+class ProtectedResourceCreate(ProtectedResourceBase):
+    pass
+
+
+class ProtectedResourceUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    resource_type: Optional[str] = None
+    internal_address: Optional[str] = None
+    public_name: Optional[str] = None
+    required_group: Optional[str] = None
+    minimum_trust_score: Optional[float] = None
+    require_intune_compliant: Optional[bool] = None
+    enabled: Optional[bool] = None
+
+
+class ProtectedResourceOut(ProtectedResourceBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+## Access request schemas
+
+class AccessRequestIn(BaseModel):
+    resource_id: UUID
+    device_id: Optional[UUID] = None
+
+
+class AccessDecisionOut(BaseModel):
+    decision: str  # allow | deny
+    reason: str
+    trust_score: Optional[float] = None
+    required_score: Optional[float] = None
+    resource: Optional[ProtectedResourceOut] = None
+
+
+class AccessLogOut(BaseModel):
+    id: UUID
+    user_id: UUID
+    device_id: Optional[UUID]
+    resource_id: Optional[UUID]
+    decision: str
+    reason: Optional[str]
+    trust_score: Optional[float]
+    timestamp: datetime
+
+    model_config = ConfigDict(from_attributes=True)
