@@ -12,7 +12,8 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      # pg_isready uses PGUSER/PGDATABASE which Postgres sets from POSTGRES_USER/POSTGRES_DB
+      test: ["CMD-SHELL", "pg_isready"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -22,15 +23,14 @@ services:
     build: ../backend
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    env_file:
+      # Provides DATABASE_URL, SECRET_KEY, INITIAL_SUPERUSER_*, etc.
+      # Relative to this compose file's directory — works regardless of CWD.
+      - path: ../.env
+        required: true
     environment:
-      DATABASE_URL: ${DATABASE_URL}
-      SECRET_KEY: ${SECRET_KEY}
-      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
-      ENVIRONMENT: ${ENVIRONMENT}
-      DEBUG: ${DEBUG}
-      INITIAL_SUPERUSER_USERNAME: ${INITIAL_SUPERUSER_USERNAME}
-      INITIAL_SUPERUSER_EMAIL: ${INITIAL_SUPERUSER_EMAIL}
-      INITIAL_SUPERUSER_PASSWORD: ${INITIAL_SUPERUSER_PASSWORD}
+      # These have safe defaults and/or need compose-level interpolation.
+      # environment: overrides env_file, so only list vars with reliable defaults here.
       AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
       AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
       AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
@@ -81,9 +81,7 @@ services:
       - private-net
 
   # ── ModZero Connector ──────────────────────────────────────────
-  # Enrolls with the controller and proxies traffic to intranet.
-  # Set MODZERO_ENROLL_TOKEN in .env before starting (generate via
-  # the dashboard: Connectors → Deploy Connector).
+  # Set MODZERO_ENROLL_TOKEN in .env before starting.
   connector:
     build: ../connector
     environment:
@@ -114,8 +112,6 @@ volumes:
 networks:
   default:
     driver: bridge
-  # private-net: only connector and private resources attach here.
-  # Backend and frontend are NOT on this network.
   private-net:
     driver: bridge
     internal: false

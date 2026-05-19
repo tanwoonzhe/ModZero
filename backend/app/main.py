@@ -2,26 +2,23 @@
 
 import os
 import secrets
-from fastapi import FastAPI, Request, Depends, HTTPException, status
+
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
-from fastapi.openapi.utils import get_openapi
+from sqlalchemy import text
 
 from .settings import get_settings
-from .db import init_db
+from .db import init_db, SessionLocal
 from .routers import api_router
-from .routers import public_resource_router
 from .init_superuser import create_initial_superuser
-from .sio_server import get_sio_app
 
 
 settings = get_settings()
 
-# HTTP Basic auth for docs - use same credentials as superuser
-# This allows unified login with admin/admin123 for both app and docs
 DOCS_USERNAME = os.getenv("INITIAL_SUPERUSER_USERNAME", "admin")
 DOCS_PASSWORD = os.getenv("INITIAL_SUPERUSER_PASSWORD", "admin123")
 
@@ -29,15 +26,9 @@ security = HTTPBasic()
 
 
 def verify_docs_credentials(credentials: HTTPBasicCredentials = Depends(security)):
-    """Verify credentials for accessing API documentation.
-
-    Uses the same credentials as the initial superuser for consistency.
-    Username: admin (or INITIAL_SUPERUSER_USERNAME env var)
-    Password: admin123 (or INITIAL_SUPERUSER_PASSWORD env var)
-    """
-    correct_username = secrets.compare_digest(credentials.username, DOCS_USERNAME)
-    correct_password = secrets.compare_digest(credentials.password, DOCS_PASSWORD)
-    if not (correct_username and correct_password):
+    ok_user = secrets.compare_digest(credentials.username, DOCS_USERNAME)
+    ok_pass = secrets.compare_digest(credentials.password, DOCS_PASSWORD)
+    if not (ok_user and ok_pass):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
@@ -46,21 +37,19 @@ def verify_docs_credentials(credentials: HTTPBasicCredentials = Depends(security
     return credentials
 
 
-# Create FastAPI app with docs disabled by default (we'll add protected endpoints)
 app = FastAPI(
     title=settings.project_name,
     debug=settings.debug,
-    docs_url=None,  # Disable default docs
-    redoc_url=None,  # Disable default redoc
-    openapi_url=None if not settings.debug else "/openapi.json",  # Protect OpenAPI schema in production
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
-# CORS configuration: use CORS_ORIGINS env var (comma-separated) or "*" for dev.
 _raw_cors = (settings.cors_origins or "*").strip()
-if _raw_cors == "*":
-    _cors_origins: list[str] = ["*"]
-else:
-    _cors_origins = [o.strip() for o in _raw_cors.split(",") if o.strip()]
+_cors_origins: list[str] = (
+    ["*"] if _raw_cors == "*"
+    else [o.strip() for o in _raw_cors.split(",") if o.strip()]
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -69,70 +58,57 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API router under /api
 app.include_router(api_router, prefix="/api")
 
-# Product-facing protected-resource routes (/r/{slug}) — mounted at root.
-app.include_router(public_resource_router)
 
-# Mount Socket.IO server
-sio_asgi_app = get_sio_app()
-app.mount("/socket.io", sio_asgi_app)
-
-
-# Protected documentation endpoints
 @app.get("/docs", include_in_schema=False)
 async def get_docs(credentials: HTTPBasicCredentials = Depends(verify_docs_credentials)):
-    """Swagger UI documentation (protected with HTTP Basic auth)."""
     return get_swagger_ui_html(
         openapi_url="/openapi.json",
-        title=f"{settings.project_name} - API Docs"
+        title=f"{settings.project_name} - Docs",
     )
 
 
 @app.get("/redoc", include_in_schema=False)
 async def get_redoc(credentials: HTTPBasicCredentials = Depends(verify_docs_credentials)):
-    """ReDoc documentation (protected with HTTP Basic auth)."""
     return get_redoc_html(
         openapi_url="/openapi.json",
-        title=f"{settings.project_name} - API Docs"
+        title=f"{settings.project_name} - Docs",
     )
 
 
 @app.get("/openapi.json", include_in_schema=False)
 async def get_openapi_json(credentials: HTTPBasicCredentials = Depends(verify_docs_credentials)):
-    """OpenAPI schema (protected with HTTP Basic auth)."""
     return app.openapi()
 
 
-# Public endpoint to serve setup.sh for connector installation
-@app.get("/public/connector/setup.sh", include_in_schema=False)
-async def get_setup_script():
-    """Serve the connector setup script for curl|bash installation."""
-    script_path = os.path.join(os.path.dirname(__file__), "..", "setup.sh")
-    if os.path.exists(script_path):
-        return FileResponse(script_path, media_type="text/plain")
-    # Return embedded script if file not found
-    return PlainTextResponse(
-        "#!/bin/bash\necho 'Setup script not found. Please download from the controller.'\nexit 1\n",
-        media_type="text/plain",
+@app.get("/health")
+def health() -> JSONResponse:
+    """Health check — reports app name and live DB connectivity."""
+    db_status = "unreachable"
+    try:
+        with SessionLocal() as session:
+            session.execute(text("SELECT 1"))
+        db_status = "connected"
+    except Exception:
+        pass
+    return JSONResponse(
+        {
+            "status": "ok" if db_status == "connected" else "degraded",
+            "app": settings.project_name,
+            "database": db_status,
+        },
+        status_code=200,
     )
 
 
 @app.on_event("startup")
 def on_startup() -> None:
-    """Initialize database on startup."""
     init_db()
     create_initial_superuser()
 
 
-# Serve static frontend files if present (e.g. after `npm run build`)
-frontend_dist = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")
-if os.path.exists(frontend_dist):
-    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="static")
-
-
-@app.get("/health")
-def health() -> JSONResponse:
-    """Health check endpoint."""
-    return JSONResponse({"status": "ok"})
+# Serve compiled frontend if present (production / docker build)
+_frontend_dist = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")
+if os.path.exists(_frontend_dist):
+    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="static")
