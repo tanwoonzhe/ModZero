@@ -1,22 +1,38 @@
 """
 Resource Access — non-invasive, resource-driven protected routes.
 
-Phase 1 architecture:
-  * /api/resource-access/gate (PDP): receives a SIGNED posture payload
-    from the desktop client, verifies the signature with the device's
-    enrolled HMAC secret, COMPUTES the trust score server-side
-    (clients can never set the score directly), and persists a
-    TrustSnapshot. On allow, mints an HMAC ticket bound to the
-    resource. Every call writes an AccessDecision audit row.
-  * /r/<slug> (PEP): exchanges ticket for HttpOnly cookie, re-checks
-    the latest TrustSnapshot from the DB on every request, and
-    forwards the request via the CONNECTOR (not directly). Each
-    allow/deny writes an AccessDecision audit row.
-  * Backend -> Connector hop: the backend signs the target URL and
-    metadata with CONNECTOR_HOP_SECRET (HMAC-SHA256, 60s timestamp
-    skew). The connector verifies the signature and forwards to
-    the target. The backend cannot reach private resources directly
-    (docker network split); the connector is the only data path.
+Model
+=====
+ModZero does NOT own the lifecycle of protected services. A target
+site (e.g. http://localhost:2026/) is an independent service. When
+an admin registers it as a Resource on the Resources page, ModZero:
+  - mints a stable product-facing route /r/<slug>
+  - evaluates trust before allowing access through that route
+  - reverse-proxies to the current Resource row's host:port
+
+Deleting the Resource deletes ONLY the ModZero mapping. /r/<slug>
+returns 404, but the underlying target service keeps running and is
+still reachable directly — ModZero never owned it.
+
+Flow
+====
+1. POST /api/resource-access/gate     (PDP — policy decision point):
+     - Looks up the Resource by resource_id.
+     - Compares trust_score vs access_threshold.
+     - On allow: mints an HMAC-signed ticket bound to the resource_id
+       and returns access_url (/r/<slug>) and bootstrap_url (?t=...).
+     - On deny: allowed=false, no URL.
+
+2. GET /r/{slug_or_id}     (PEP — policy enforcement point, mounted
+   at app root, NOT under /api):
+     - Resolves the Resource by slug or UUID. 404 otherwise.
+     - ?t=<ticket>: verifies, plants an HttpOnly SameSite=Lax cookie
+       scoped to /r/<slug>, then 302s to the clean URL.
+     - Otherwise reads the cookie, verifies it, and reverse-proxies
+       to _internal_target_url(res) computed from the current DB row.
+
+3. The DB row is the source of truth. Changing the target from
+   localhost:2026 to localhost:2099 does NOT change /r/<slug>.
 """
 from __future__ import annotations
 
@@ -24,43 +40,50 @@ import base64
 import hmac
 import hashlib
 import json
-import logging
 import re
 import time
-import uuid
-from datetime import datetime, timezone
-from typing import Any, Optional
-from urllib.parse import quote
+from typing import Optional
+from urllib.parse import urlparse, quote
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import Response, RedirectResponse, HTMLResponse, StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, Cookie
+from fastapi.responses import Response, RedirectResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..deps import get_current_user, get_db
-from ..models import (
-    User, Resource, RemoteNetwork,
-    DeviceEnrollment, TrustSnapshot, AccessDecision, AccessDecisionEnum,
-)
+from ..models import User, Resource, RemoteNetwork
 from ..settings import get_settings
-from ..services.trust_scoring import compute_trust_score
 
-logger = logging.getLogger("modzero.resource_access")
-
+# Two routers:
+#   - api_router: mounted under /api as usual  ->  /api/resource-access/...
+#   - public_router: mounted at app root       ->  /r/{slug}
 router = APIRouter(prefix="/resource-access", tags=["resource-access"])
 public_router = APIRouter(tags=["resource-access-public"])
 
 TICKET_TTL_SECONDS = 120
-COOKIE_PREFIX = "mz_rt_"
+COOKIE_PREFIX = "mz_rt_"  # mz_rt_<resource_id>
 
+# How long a /gate-recorded trust snapshot remains valid for re-checking
+# on /r/<slug> requests. After this, the user must call /gate again.
 TRUST_SNAPSHOT_TTL_SECONDS = 60
-POSTURE_TS_SKEW_SECONDS = 60
 
-# In-memory replay-protection cache for posture nonces. Phase 2 should
-# back this with Redis. Restarting the backend clears the cache.
-_NONCE_CACHE: dict[str, float] = {}
-_NONCE_CACHE_MAX = 4096
+# In-memory map of latest trust decision per (user_id, resource_id).
+# This is ephemeral by design: restarting the backend forces users to
+# re-run the trust check. Each /api/resource-access/gate call writes
+# here, and every /r/<slug> request re-reads it and re-compares
+# score vs threshold — so if the score drops or the threshold is
+# raised, access is denied on the NEXT request, not after the cookie
+# expires.
+_USER_TRUST_STATE: dict[tuple[str, str], dict] = {}
+
+# When the admin registers a Resource whose host is "localhost"/127.0.0.1,
+# that host means "the machine running Docker Desktop", not the backend
+# container. We rewrite it to `host.docker.internal` so the proxy can
+# reach the independently-running target service via the host gateway.
+# This works for any locally-running target; ModZero does not need to
+# own or co-locate the service.
+LOCALHOST_ALIASES = {"localhost", "127.0.0.1"}
 
 
 # ---------------------------------------------------------------------------
@@ -80,14 +103,13 @@ def _b64url_decode(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + pad)
 
 
-def _mint_ticket(user_id: str, score: int, resource_id: str, device_id: Optional[str]) -> str:
+def _mint_ticket(user_id: str, score: int, resource_id: str) -> str:
     payload = {
         "sub": user_id,
         "score": score,
         "exp": int(time.time()) + TICKET_TTL_SECONDS,
         "aud": "resource-access",
         "rid": resource_id,
-        "did": device_id or "",
     }
     body = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     sig = _b64url(hmac.new(_secret(), body.encode("ascii"), hashlib.sha256).digest())
@@ -124,167 +146,87 @@ def _slugify(name: str) -> str:
     return s or "resource"
 
 
-def _resource_slug(res: Resource) -> str:
-    return (res.slug or _slugify(res.name)).strip().lower()
-
-
-def _resource_target(res: Resource) -> tuple[str, str, int, Optional[str]]:
-    """Return (scheme, host, port, path_prefix) used by the connector hop."""
-    scheme = (res.target_scheme or "http").strip().lower() or "http"
-    host = (res.target_host or res.ip_address or "localhost").strip()
-    if res.target_port is not None:
-        port = int(res.target_port)
-    elif res.port is not None:
-        port = int(res.port)
-    else:
-        port = 443 if scheme == "https" else 80
-    prefix = res.path_prefix or None
-    if prefix:
-        prefix = "/" + prefix.strip("/")
-    return scheme, host, port, prefix
-
-
 def _public_resource_url(res: Resource) -> str:
-    scheme, host, port, _ = _resource_target(res)
-    default = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
-    hostport = host if default else f"{host}:{port}"
-    return f"{scheme}://{hostport}/"
+    host = (res.ip_address or "").strip() or "localhost"
+    port = int(res.port) if res.port is not None else 80
+    if host.startswith("http://") or host.startswith("https://"):
+        return host if host.endswith("/") else host + "/"
+    return f"http://{host}:{port}/"
 
 
-def _public_base_url(request: Request) -> str:
-    cfg = get_settings().public_base_url
-    if cfg:
-        return cfg.rstrip("/")
-    return str(request.base_url).rstrip("/")
+def _internal_target_url(res: Resource) -> str:
+    """Where the backend proxy actually connects over the docker network."""
+    host = (res.ip_address or "").strip() or "localhost"
+    port = int(res.port) if res.port is not None else 80
+    scheme = "http"
+    if host.startswith("http://") or host.startswith("https://"):
+        p = urlparse(host)
+        scheme = p.scheme or "http"
+        host = (p.hostname or "").strip() or "localhost"
+        if p.port:
+            port = p.port
+    if host.lower() in LOCALHOST_ALIASES:
+        # Non-invasive model: the target is an independent service
+        # running on the host machine. Route through the host gateway
+        # rather than the docker-compose service name, so ModZero's
+        # protection does not depend on co-location.
+        host = "host.docker.internal"
+    return f"{scheme}://{host}:{port}"
 
 
 def _resolve_resource(db: Session, key: str) -> tuple[Resource, RemoteNetwork, str]:
+    """Resolve a /r/{key} path segment to a Resource.
+
+    `key` may be the resource UUID or the slug of the resource name.
+    Returns (resource, network, slug).
+    Raises 404 if not found, 409 if multiple resources share the slug.
+    """
     rows = (
         db.query(Resource, RemoteNetwork)
         .join(RemoteNetwork, Resource.network_id == RemoteNetwork.network_id)
         .all()
     )
+    # 1. exact UUID match
     for res, net in rows:
         if str(res.resource_id) == key:
-            return res, net, _resource_slug(res)
-    matches = [(res, net) for res, net in rows if (res.slug or "") == key]
-    if len(matches) == 1:
-        res, net = matches[0]
-        return res, net, _resource_slug(res)
-    if len(matches) > 1:
-        raise HTTPException(status_code=409, detail=f"Multiple resources share slug '{key}'.")
+            return res, net, _slugify(res.name)
+    # 2. slug match
     matches = [(res, net) for res, net in rows if _slugify(res.name) == key]
     if len(matches) == 1:
         res, net = matches[0]
-        return res, net, _resource_slug(res)
+        return res, net, _slugify(res.name)
     if len(matches) > 1:
-        raise HTTPException(status_code=409, detail=f"Multiple resources share slug '{key}'.")
-    raise HTTPException(status_code=404, detail=f"Protected resource '{key}' not found")
-
-
-# ---------------------------------------------------------------------------
-# Posture signature verification
-# ---------------------------------------------------------------------------
-
-def _canonical_posture_bytes(p: "PosturePayload") -> bytes:
-    body = {
-        "device_id": str(p.device_id),
-        "nonce": p.nonce,
-        "ts": int(p.ts),
-        "signals": p.signals,
-    }
-    return json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-
-def _verify_posture_signature(p: "PosturePayload", device_secret: str) -> bool:
-    expected = hmac.new(
-        device_secret.encode("utf-8"),
-        _canonical_posture_bytes(p),
-        hashlib.sha256,
-    ).hexdigest()
-    return hmac.compare_digest(expected, (p.signature or "").lower())
-
-
-def _check_nonce_replay(nonce: str) -> bool:
-    if not nonce:
-        return False
-    now = time.time()
-    if nonce in _NONCE_CACHE:
-        return False
-    _NONCE_CACHE[nonce] = now
-    if len(_NONCE_CACHE) > _NONCE_CACHE_MAX:
-        cutoff = now - POSTURE_TS_SKEW_SECONDS * 4
-        for k in list(_NONCE_CACHE.keys()):
-            if _NONCE_CACHE[k] < cutoff:
-                _NONCE_CACHE.pop(k, None)
-    return True
-
-
-# ---------------------------------------------------------------------------
-# Audit log helper
-# ---------------------------------------------------------------------------
-
-def _audit(
-    db: Session,
-    *,
-    decision: AccessDecisionEnum,
-    user_id: Optional[str],
-    device_id: Optional[str],
-    resource_id: Optional[str],
-    reason: str,
-    path: Optional[str] = None,
-) -> None:
-    try:
-        row = AccessDecision(
-            user_id=user_id,
-            device_id=device_id,
-            resource_id=resource_id,
-            decision=decision,
-            reason=(reason or "")[:1000],
-            path=(path or "")[:512] or None,
+        raise HTTPException(
+            status_code=409,
+            detail=f"Multiple resources share slug '{key}'. Use the resource UUID instead.",
         )
-        db.add(row)
-        db.commit()
-    except Exception as e:
-        logger.exception("audit write failed: %s", e)
-        db.rollback()
+    raise HTTPException(status_code=404, detail=f"Protected resource '{key}' not found")
 
 
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
 
-class PosturePayload(BaseModel):
-    """Signed posture payload from the desktop client.
-
-    signature = HMAC_SHA256(
-        device_secret,
-        canonical_json({device_id, nonce, ts, signals})
-    )
-    where canonical_json uses sort_keys=True, separators=(',', ':').
-    """
-    device_id: str
-    nonce: str = Field(..., min_length=8, max_length=128)
-    ts: int = Field(..., ge=0)
-    signals: dict[str, Any]
-    signature: str = Field(..., min_length=32, max_length=256)
-
-
 class GateRequest(BaseModel):
-    resource_id: str
+    trust_score: int = Field(..., ge=0, le=100)
     access_threshold: int = Field(..., ge=0, le=100)
-    posture: PosturePayload
-
-    # Reject any request that still tries to send a client-supplied
-    # final score. The backend computes the score; clients cannot set it.
-    model_config = {"extra": "forbid"}
+    device_posture_score: Optional[int] = Field(None, ge=0, le=100)
+    context_analysis_score: Optional[int] = Field(None, ge=0, le=100)
+    trust_scoring_engine_score: Optional[int] = Field(None, ge=0, le=100)
+    resource_id: Optional[str] = Field(
+        None,
+        description="UUID of a Resource registered under /resources.",
+    )
 
 
 class GateResponse(BaseModel):
     allowed: bool
     reason: str
+    # Stable product-facing URL — does not change if target host/port change.
     access_url: Optional[str] = None
+    # One-shot URL used to set the signed session cookie.
     bootstrap_url: Optional[str] = None
+    # Backward-compat alias for older clients — equals bootstrap_url.
     portal_url: Optional[str] = None
     resource_id: Optional[str] = None
     resource_name: Optional[str] = None
@@ -292,7 +234,6 @@ class GateResponse(BaseModel):
     ticket_expires_at: Optional[int] = None
     score: int
     threshold: int
-    breakdown: Optional[dict] = None
 
 
 class RegisteredResource(BaseModel):
@@ -302,8 +243,8 @@ class RegisteredResource(BaseModel):
     network_name: str
     host: str
     port: int
-    url: str
-    access_path: str
+    url: str          # raw host:port — display only
+    access_path: str  # e.g. "/r/demo-intranet" — stable product-facing route
 
 
 # ---------------------------------------------------------------------------
@@ -311,16 +252,23 @@ class RegisteredResource(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _project_resource(res: Resource, network_name: str) -> RegisteredResource:
-    scheme, host, port, _ = _resource_target(res)
+    url = _public_resource_url(res)
+    host = (res.ip_address or "localhost").strip()
+    for prefix in ("http://", "https://"):
+        if host.startswith(prefix):
+            host = host[len(prefix):].rstrip("/")
+            break
+    port = int(res.port) if res.port is not None else 80
+    slug = _slugify(res.name)
     return RegisteredResource(
         resource_id=str(res.resource_id),
         name=res.name,
-        slug=_resource_slug(res),
+        slug=slug,
         network_name=network_name,
         host=host,
         port=port,
-        url=_public_resource_url(res),
-        access_path=f"/r/{_resource_slug(res)}",
+        url=url,
+        access_path=f"/r/{slug}",
     )
 
 
@@ -344,18 +292,16 @@ def gate(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> GateResponse:
-    """Server-side trust decision for a registered Resource."""
-    uid = str(user.user_id)
+    """Server-side trust decision for a registered Resource.
 
-    # Phase 2C — per-(user, resource) rate limit on the PDP.
-    from app.services.rate_limit import allow as _rl_allow
-    ok, retry = _rl_allow(f"gate:{uid}:{req.resource_id}", limit=30, window_seconds=60)
-    if not ok:
-        _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=None,
-               resource_id=str(req.resource_id), reason="rate limit exceeded (gate)",
-               path="/api/resource-access/gate")
-        raise HTTPException(status_code=429, detail="rate limit exceeded",
-                            headers={"Retry-After": str(retry)})
+    On allow, returns a stable /r/<slug> access_url plus a one-shot
+    bootstrap_url that plants the signed session cookie.
+    """
+    if not req.resource_id:
+        raise HTTPException(
+            status_code=400,
+            detail="resource_id is required: select a resource from the Resources page.",
+        )
 
     row = (
         db.query(Resource, RemoteNetwork)
@@ -364,235 +310,60 @@ def gate(
         .first()
     )
     if not row:
-        _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=None,
-               resource_id=None, reason=f"unknown resource_id={req.resource_id}")
         raise HTTPException(status_code=404, detail="Resource not found")
     res, _net = row
-    rid = str(res.resource_id)
-    slug = _resource_slug(res)
 
-    now = int(time.time())
-    if abs(now - int(req.posture.ts)) > POSTURE_TS_SKEW_SECONDS:
-        _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=None,
-               resource_id=rid, reason="posture timestamp skew exceeded")
-        raise HTTPException(status_code=403, detail="Posture timestamp skew exceeded")
-    if not _check_nonce_replay(req.posture.nonce):
-        _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=None,
-               resource_id=rid, reason="posture nonce replay")
-        raise HTTPException(status_code=403, detail="Posture nonce already used")
+    resource_name = res.name
+    resource_id = str(res.resource_id)
+    slug = _slugify(resource_name)
+    target_public = _public_resource_url(res)
 
-    dev = (
-        db.query(DeviceEnrollment)
-        .filter(DeviceEnrollment.device_id == req.posture.device_id)
-        .first()
-    )
-    if not dev or dev.revoked or str(dev.user_id) != uid:
-        _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=None,
-               resource_id=rid, reason="unknown or revoked device")
-        raise HTTPException(status_code=403, detail="Device not enrolled or revoked")
-    if not _verify_posture_signature(req.posture, dev.hmac_secret):
-        _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=str(dev.device_id),
-               resource_id=rid, reason="invalid posture signature")
-        raise HTTPException(status_code=403, detail="Invalid posture signature")
+    # Record the latest known trust snapshot for this (user, resource).
+    # The /r/<slug> route will re-read this on every request and refuse
+    # to proxy if score < threshold at that moment, even if the signed
+    # ticket cookie has not yet expired.
+    uid = str(user.user_id)
+    _USER_TRUST_STATE[(uid, resource_id)] = {
+        "score": int(req.trust_score),
+        "threshold": int(req.access_threshold),
+        "at": time.time(),
+    }
 
-    score, breakdown = compute_trust_score(req.posture.signals)
-
-    snap = TrustSnapshot(
-        user_id=uid,
-        device_id=str(dev.device_id),
-        resource_id=rid,
-        score=score,
-        threshold=int(req.access_threshold),
-        posture_json={"signals": req.posture.signals, "breakdown": breakdown},
-    )
-    db.add(snap)
-    dev.last_seen_at = datetime.now(timezone.utc)
-    db.commit()
-
-    if score < int(req.access_threshold):
-        _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=str(dev.device_id),
-               resource_id=rid,
-               reason=f"score {score} < threshold {req.access_threshold}")
+    if req.trust_score < req.access_threshold:
         return GateResponse(
             allowed=False,
             reason=(
-                f"Trust score {score} is below threshold "
-                f"{req.access_threshold} for resource '{res.name}'"
+                f"Trust score {req.trust_score} is below threshold "
+                f"{req.access_threshold} for resource '{resource_name}'"
             ),
-            resource_id=rid,
-            resource_name=res.name,
+            resource_id=resource_id,
+            resource_name=resource_name,
             resource_slug=slug,
-            score=score,
-            threshold=int(req.access_threshold),
-            breakdown=breakdown,
+            score=req.trust_score,
+            threshold=req.access_threshold,
         )
 
-    ticket = _mint_ticket(uid, score, rid, str(dev.device_id))
-    base = _public_base_url(request)
+    ticket = _mint_ticket(uid, req.trust_score, resource_id)
+    base = str(request.base_url).rstrip("/")
     access_url = f"{base}/r/{quote(slug)}"
     bootstrap_url = f"{access_url}?t={ticket}"
-    _audit(db, decision=AccessDecisionEnum.ALLOW, user_id=uid, device_id=str(dev.device_id),
-           resource_id=rid, reason=f"score {score} >= threshold {req.access_threshold}")
+
     return GateResponse(
         allowed=True,
         reason=(
-            f"Trust score {score} satisfies threshold {req.access_threshold} "
-            f"for resource '{res.name}'"
+            f"Trust score satisfies the configured access threshold "
+            f"for resource '{resource_name}' (registered at {target_public})"
         ),
         access_url=access_url,
         bootstrap_url=bootstrap_url,
-        portal_url=bootstrap_url,
-        resource_id=rid,
-        resource_name=res.name,
+        portal_url=bootstrap_url,  # legacy alias
+        resource_id=resource_id,
+        resource_name=resource_name,
         resource_slug=slug,
         ticket_expires_at=int(time.time()) + TICKET_TTL_SECONDS,
-        score=score,
-        threshold=int(req.access_threshold),
-        breakdown=breakdown,
+        score=req.trust_score,
+        threshold=req.access_threshold,
     )
-
-
-# ---------------------------------------------------------------------------
-# Backend -> Connector hop client
-# ---------------------------------------------------------------------------
-
-class ConnectorClient:
-    """Sends signed proxy hops to the connector.
-
-    Phase 1: HTTP over the docker network.
-    Phase 2: replace the HTTP call with a WSS-tunneled message frame
-    without touching call sites — this class is the only abstraction
-    that needs to change.
-    """
-
-    HOP_PATH = "/_modzero/forward"
-
-    def __init__(self) -> None:
-        cfg = get_settings()
-        self._base = cfg.connector_base_url.rstrip("/")
-        self._secret = cfg.connector_hop_secret.encode("utf-8")
-
-    def _sign(self, ts: str, nonce: str, method: str, target_url: str) -> str:
-        # Phase 2C: include per-request nonce so the connector's replay cache
-        # can reject duplicates without false-positives on legitimate retries
-        # within the same wall-clock second.
-        msg = f"{ts}|{nonce}|{method.upper()}|{target_url}".encode("utf-8")
-        return hmac.new(self._secret, msg, hashlib.sha256).hexdigest()
-
-    async def forward(
-        self,
-        *,
-        method: str,
-        target_url: str,
-        headers: dict[str, str],
-        body: bytes,
-        query_string: bytes,
-        user_id: str,
-        device_id: Optional[str],
-        resource_id: str,
-    ) -> httpx.Response:
-        ts = str(int(time.time()))
-        nonce = uuid.uuid4().hex
-        sig = self._sign(ts, nonce, method, target_url)
-        hop_url = f"{self._base}{self.HOP_PATH}"
-        if query_string:
-            hop_url = f"{hop_url}?{query_string.decode('latin-1')}"
-
-        drop = {"host", "content-length", "connection", "keep-alive",
-                "transfer-encoding", "upgrade", "proxy-authorization",
-                "proxy-authenticate", "te", "trailers"}
-        fwd_headers = {k: v for k, v in headers.items() if k.lower() not in drop}
-        fwd_headers["X-ModZero-Target"] = target_url
-        fwd_headers["X-ModZero-Timestamp"] = ts
-        fwd_headers["X-ModZero-Nonce"] = nonce
-        fwd_headers["X-ModZero-Signature"] = sig
-        fwd_headers["X-ModZero-User"] = user_id
-        if device_id:
-            fwd_headers["X-ModZero-Device"] = device_id
-        fwd_headers["X-ModZero-Resource"] = resource_id
-
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
-            return await client.request(
-                method=method,
-                url=hop_url,
-                headers=fwd_headers,
-                content=body,
-            )
-
-    def _build_request(
-        self,
-        client: httpx.AsyncClient,
-        *,
-        method: str,
-        target_url: str,
-        headers: dict[str, str],
-        body: bytes,
-        query_string: bytes,
-        user_id: str,
-        device_id: Optional[str],
-        resource_id: str,
-    ) -> httpx.Request:
-        ts = str(int(time.time()))
-        nonce = uuid.uuid4().hex
-        sig = self._sign(ts, nonce, method, target_url)
-        hop_url = f"{self._base}{self.HOP_PATH}"
-        if query_string:
-            hop_url = f"{hop_url}?{query_string.decode('latin-1')}"
-
-        drop = {"host", "content-length", "connection", "keep-alive",
-                "transfer-encoding", "upgrade", "proxy-authorization",
-                "proxy-authenticate", "te", "trailers"}
-        fwd_headers = {k: v for k, v in headers.items() if k.lower() not in drop}
-        fwd_headers["X-ModZero-Target"] = target_url
-        fwd_headers["X-ModZero-Timestamp"] = ts
-        fwd_headers["X-ModZero-Nonce"] = nonce
-        fwd_headers["X-ModZero-Signature"] = sig
-        fwd_headers["X-ModZero-User"] = user_id
-        if device_id:
-            fwd_headers["X-ModZero-Device"] = device_id
-        fwd_headers["X-ModZero-Resource"] = resource_id
-        return client.build_request(
-            method=method, url=hop_url, headers=fwd_headers, content=body,
-        )
-
-    def open_stream(self, **kwargs):
-        """Streaming hop. Returns an async context manager yielding a
-        streaming `httpx.Response` (use `aiter_raw()`); closes the client
-        on exit. Used by the /r/<slug> proxy to stream large bodies and
-        chunked responses (file downloads, JSON streams, HTML pages with
-        late-loaded assets) without buffering."""
-        client = httpx.AsyncClient(timeout=60.0, follow_redirects=False)
-        req = self._build_request(client, **kwargs)
-        return _StreamingHop(client, req)
-
-
-class _StreamingHop:
-    def __init__(self, client: httpx.AsyncClient, req: httpx.Request) -> None:
-        self._client = client
-        self._req = req
-        self._resp: Optional[httpx.Response] = None
-
-    async def __aenter__(self) -> httpx.Response:
-        self._resp = await self._client.send(self._req, stream=True)
-        return self._resp
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:
-        try:
-            if self._resp is not None:
-                await self._resp.aclose()
-        finally:
-            await self._client.aclose()
-
-
-_connector = ConnectorClient()
-# Phase 2B: indirect through the transport selector. Today this returns the
-# same direct-HTTP client; setting CONNECTOR_TRANSPORT=wss_tunnel logs a
-# warning and continues using direct HTTP (scaffold only).
-try:
-    from app.services.connector_transport import select_transport
-    _connector = select_transport(get_settings().connector_transport, _connector)
-except Exception as _e:  # pragma: no cover - defensive
-    logger.warning("connector_transport selector unavailable: %s", _e)
 
 
 # ---------------------------------------------------------------------------
@@ -614,166 +385,38 @@ _DENY_HTML = """<!doctype html>
 <div class="card">
   <h1>🛑 Access denied</h1>
   <p>{reason}</p>
-  <p>Open the ModZero desktop client and re-run the trust check for
+  <p>Return to ModZero and re-run the trust check for
      <code>{slug}</code>.</p>
 </div></body></html>"""
 
 
 def _deny(reason: str, slug: str, status: int = 403) -> HTMLResponse:
-    return HTMLResponse(_DENY_HTML.format(reason=reason, slug=slug), status_code=status)
-
-
-# ---------------------------------------------------------------------------
-# Phase 2A: response-header rewriting helpers
-# ---------------------------------------------------------------------------
-
-def _rewrite_location(value: str, *, slug: str, upstream_host: str,
-                      upstream_port: int, upstream_scheme: str) -> str:
-    """Rewrite an upstream Location header so the browser stays inside /r/<slug>.
-
-    Handles:
-      * absolute URLs that point at the upstream origin (http://intranet/foo
-        -> /r/<slug>/foo)
-      * absolute URLs that point at a *different* origin (left untouched —
-        the user's browser will go off to the public internet, which is
-        what the upstream service requested)
-      * absolute paths (/foo -> /r/<slug>/foo)
-      * relative paths (foo -> /r/<slug>/foo, relative to current request)
-    """
-    if not value:
-        return value
-    base = f"/r/{slug}"
-    # Absolute URL?
-    if value.startswith("http://") or value.startswith("https://"):
-        from urllib.parse import urlparse
-        u = urlparse(value)
-        same_origin = (
-            (u.hostname or "").lower() == upstream_host.lower()
-            and (u.port or (443 if u.scheme == "https" else 80)) == upstream_port
-        )
-        if not same_origin:
-            return value  # external redirect — leave as-is
-        new_path = u.path or "/"
-        if u.query:
-            new_path = f"{new_path}?{u.query}"
-        if u.fragment:
-            new_path = f"{new_path}#{u.fragment}"
-        if not new_path.startswith("/"):
-            new_path = "/" + new_path
-        return base + new_path
-    # Absolute path
-    if value.startswith("/"):
-        return base + value
-    # Relative — best-effort: prepend base/.
-    return f"{base}/{value}"
-
-
-def _rewrite_set_cookie(value: str, *, slug: str) -> str:
-    """Rewrite a single Set-Cookie header value.
-
-    * Drops Domain= (cookie binds to the controller host instead).
-    * Rewrites Path=... to be scoped under /r/<slug>.
-    * Drops Secure when the controller is HTTP (Phase 1 demo) — kept
-      otherwise. We do not introspect the request scheme here; the
-      controller-level cookie_secure setting governs Secure for our own
-      session cookie. Upstream's Secure flag is preserved as-is to be
-      conservative.
-    """
-    if not value:
-        return value
-    base = f"/r/{slug}"
-    parts = [p.strip() for p in value.split(";")]
-    out: list[str] = []
-    seen_path = False
-    for i, p in enumerate(parts):
-        if i == 0:
-            out.append(p)  # name=value
-            continue
-        lower = p.lower()
-        if lower.startswith("domain="):
-            continue  # strip
-        if lower.startswith("path="):
-            seen_path = True
-            old = p.split("=", 1)[1] if "=" in p else "/"
-            new = base + (old if old.startswith("/") else "/" + old)
-            out.append(f"Path={new}")
-            continue
-        out.append(p)
-    if not seen_path:
-        out.append(f"Path={base}/")
-    return "; ".join(out)
-
-
-# Hop-by-hop response headers we never relay back to the browser.
-_RESPONSE_DROP = {
-    "content-encoding", "transfer-encoding", "connection", "keep-alive",
-    "content-length", "upgrade", "proxy-authenticate", "proxy-authorization",
-    "te", "trailers",
-}
-
-
-def _build_response_headers(upstream_headers, *, slug: str,
-                            upstream_host: str, upstream_port: int,
-                            upstream_scheme: str) -> list[tuple[str, str]]:
-    """Translate upstream response headers for the client.
-
-    Returns a list of (name, value) tuples (preserving multiple Set-Cookie).
-    """
-    out: list[tuple[str, str]] = []
-    # httpx headers iterable preserves duplicates via .multi_items() / raw.
-    items = (
-        upstream_headers.multi_items()
-        if hasattr(upstream_headers, "multi_items")
-        else list(upstream_headers.items())
-    )
-    for name, value in items:
-        lname = name.lower()
-        if lname in _RESPONSE_DROP:
-            continue
-        if lname == "location":
-            value = _rewrite_location(
-                value, slug=slug,
-                upstream_host=upstream_host, upstream_port=upstream_port,
-                upstream_scheme=upstream_scheme,
-            )
-        elif lname == "set-cookie":
-            value = _rewrite_set_cookie(value, slug=slug)
-        out.append((name, value))
-    return out
-
-
-def _latest_snapshot(db: Session, user_id: str, resource_id: str) -> Optional[TrustSnapshot]:
-    return (
-        db.query(TrustSnapshot)
-        .filter(TrustSnapshot.user_id == user_id, TrustSnapshot.resource_id == resource_id)
-        .order_by(TrustSnapshot.computed_at.desc())
-        .first()
+    return HTMLResponse(
+        _DENY_HTML.format(reason=reason, slug=slug),
+        status_code=status,
     )
 
 
-def _fresh_trust_check(db: Session, user_id: str, resource_id: str) -> Optional[str]:
-    snap = _latest_snapshot(db, user_id, resource_id)
-    if not snap:
-        return ("No recent trust evaluation recorded for this resource. "
-                "Re-run the trust check in the ModZero desktop client.")
-    age = (datetime.now(timezone.utc) - snap.computed_at).total_seconds()
-    if age > TRUST_SNAPSHOT_TTL_SECONDS:
-        return "Trust evaluation is stale — re-run the trust check in ModZero."
-    if int(snap.score) < int(snap.threshold):
-        return f"Trust score {int(snap.score)} is below threshold {int(snap.threshold)} — access denied."
-    return None
+async def _proxy(res: Resource, path: str) -> Response:
+    target = _internal_target_url(res).rstrip("/")
+    upstream_url = f"{target}/{path}" if path else f"{target}/"
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+            upstream = await client.get(upstream_url)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Upstream resource unreachable: {e}") from e
+    drop = {"content-encoding", "transfer-encoding", "connection", "content-length"}
+    headers = {k: v for k, v in upstream.headers.items() if k.lower() not in drop}
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers=headers,
+        media_type=upstream.headers.get("content-type"),
+    )
 
 
-@public_router.api_route(
-    "/r/{key}",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-    include_in_schema=False,
-)
-@public_router.api_route(
-    "/r/{key}/{path:path}",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-    include_in_schema=False,
-)
+@public_router.get("/r/{key}", include_in_schema=False)
+@public_router.get("/r/{key}/{path:path}", include_in_schema=False)
 async def protected_resource(
     key: str,
     request: Request,
@@ -781,36 +424,51 @@ async def protected_resource(
     t: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    """Product-facing protected route for a registered resource.
+
+    - `?t=<ticket>` plants the session cookie, then 302s to the clean URL.
+    - Otherwise reads the cookie and reverse-proxies the internal target.
+    - Without a valid ticket OR cookie, returns a 403 deny page.
+
+    The internal target host/port is resolved from the current Resource
+    row on every call, so re-registering the resource at a different
+    target does not change this URL.
+    """
     res, _net, slug = _resolve_resource(db, key)
     rid = str(res.resource_id)
     cookie_name = f"{COOKIE_PREFIX}{rid}"
-    cfg = get_settings()
-    audit_path = f"/r/{slug}" + (f"/{path}" if path else "")
 
-    # Phase 2C — per-(client-ip, resource) rate limit on the PEP.
-    from app.services.rate_limit import allow as _rl_allow
-    client_ip = request.client.host if request.client else "unknown"
-    ok, retry = _rl_allow(f"r:{client_ip}:{rid}", limit=120, window_seconds=60)
-    if not ok:
-        _audit(db, decision=AccessDecisionEnum.DENY, user_id=None, device_id=None,
-               resource_id=rid, reason="rate limit exceeded (proxy)", path=audit_path)
-        raise HTTPException(status_code=429, detail="rate limit exceeded",
-                            headers={"Retry-After": str(retry)})
+    def _fresh_trust_check(user_id: str) -> Optional[str]:
+        """Return a deny reason string if the user's latest recorded
+        trust snapshot no longer satisfies the threshold; None on pass.
+        """
+        snap = _USER_TRUST_STATE.get((user_id, rid))
+        if not snap:
+            return (
+                "No recent trust evaluation recorded for this resource. "
+                "Re-run the trust check in ModZero."
+            )
+        age = time.time() - float(snap.get("at", 0))
+        if age > TRUST_SNAPSHOT_TTL_SECONDS:
+            return (
+                "Trust evaluation is stale — re-run the trust check in ModZero."
+            )
+        score = int(snap.get("score", 0))
+        threshold = int(snap.get("threshold", 100))
+        if score < threshold:
+            return (
+                f"Trust score {score} is below threshold {threshold} — access denied."
+            )
+        return None
 
-    # 1. Bootstrap: exchange one-shot ticket for HttpOnly cookie.
+    # 1. Bootstrap: exchange one-shot token in query for an HttpOnly cookie.
     if t:
         try:
             payload = _verify_ticket(t, rid)
         except HTTPException as e:
-            _audit(db, decision=AccessDecisionEnum.DENY, user_id=None, device_id=None,
-                   resource_id=rid, reason=f"bootstrap: {e.detail}", path=audit_path)
             return _deny(e.detail, slug)
-        uid = str(payload.get("sub", ""))
-        did = str(payload.get("did", "")) or None
-        deny_reason = _fresh_trust_check(db, uid, rid)
+        deny_reason = _fresh_trust_check(str(payload.get("sub", "")))
         if deny_reason:
-            _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=did,
-                   resource_id=rid, reason=f"bootstrap: {deny_reason}", path=audit_path)
             return _deny(deny_reason, slug)
         clean_path = f"/r/{quote(slug)}" + (f"/{path}" if path else "")
         resp = RedirectResponse(url=clean_path, status_code=302)
@@ -820,21 +478,17 @@ async def protected_resource(
             max_age=TICKET_TTL_SECONDS,
             path=f"/r/{slug}",
             httponly=True,
-            samesite=cfg.cookie_samesite,
-            secure=bool(cfg.cookie_secure),
+            samesite="lax",
+            secure=False,  # dev: http://localhost
         )
-        _audit(db, decision=AccessDecisionEnum.ALLOW, user_id=uid, device_id=did,
-               resource_id=rid, reason="bootstrap: cookie planted", path=audit_path)
         return resp
 
     # 2. Steady state: cookie required.
     cookie_val = request.cookies.get(cookie_name)
     if not cookie_val:
-        _audit(db, decision=AccessDecisionEnum.DENY, user_id=None, device_id=None,
-               resource_id=rid, reason="no session cookie", path=audit_path)
         return _deny(
             "No active trust session for this resource. "
-            "Open the ModZero desktop client to request access first.",
+            "Use ModZero to request access first.",
             slug,
         )
     try:
@@ -842,91 +496,14 @@ async def protected_resource(
     except HTTPException as e:
         resp = _deny(e.detail, slug)
         resp.delete_cookie(cookie_name, path=f"/r/{slug}")
-        _audit(db, decision=AccessDecisionEnum.DENY, user_id=None, device_id=None,
-               resource_id=rid, reason=f"cookie: {e.detail}", path=audit_path)
         return resp
 
-    uid = str(payload.get("sub", ""))
-    did = str(payload.get("did", "")) or None
-
-    # 3. Re-check trust on every request — cookie is NOT enough.
-    deny_reason = _fresh_trust_check(db, uid, rid)
+    # 3. Re-check trust on every request — a valid cookie is NOT enough.
+    deny_reason = _fresh_trust_check(str(payload.get("sub", "")))
     if deny_reason:
         resp = _deny(deny_reason, slug)
         resp.delete_cookie(cookie_name, path=f"/r/{slug}")
-        _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=did,
-               resource_id=rid, reason=deny_reason, path=audit_path)
         return resp
 
-    # 4. Build target URL and forward via the connector hop.
-    scheme, host, port, prefix = _resource_target(res)
-    default_port = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
-    hostport = host if default_port else f"{host}:{port}"
-    upstream_path = ((prefix or "") + ("/" + path if path else "/")).replace("//", "/")
-    if not upstream_path.startswith("/"):
-        upstream_path = "/" + upstream_path
-    target_url = f"{scheme}://{hostport}{upstream_path}"
-
-    # WebSocket upgrade is not yet supported through the connector hop —
-    # documented as Phase 2 future work. Reject cleanly.
-    if request.headers.get("upgrade", "").lower() == "websocket":
-        _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=did,
-               resource_id=rid, reason="websocket upgrade not supported (future work)",
-               path=audit_path)
-        raise HTTPException(
-            status_code=501,
-            detail="WebSocket upgrade through ModZero is not yet supported.",
-        )
-
-    body = await request.body()
-    try:
-        hop = _connector.open_stream(
-            method=request.method,
-            target_url=target_url,
-            headers=dict(request.headers),
-            body=body,
-            query_string=request.url.query.encode("latin-1") if request.url.query else b"",
-            user_id=uid,
-            device_id=did,
-            resource_id=rid,
-        )
-        upstream = await hop.__aenter__()
-    except httpx.HTTPError as e:
-        _audit(db, decision=AccessDecisionEnum.DENY, user_id=uid, device_id=did,
-               resource_id=rid, reason=f"connector unreachable: {e}", path=audit_path)
-        raise HTTPException(status_code=502, detail=f"Connector unreachable: {e}") from e
-
-    rewritten = _build_response_headers(
-        upstream.headers, slug=slug,
-        upstream_host=host, upstream_port=port, upstream_scheme=scheme,
-    )
-    status_code = upstream.status_code
-    media_type = upstream.headers.get("content-type")
-
-    async def body_iterator():
-        try:
-            async for chunk in upstream.aiter_raw():
-                yield chunk
-        finally:
-            await hop.__aexit__(None, None, None)
-
-    _audit(db, decision=AccessDecisionEnum.ALLOW, user_id=uid, device_id=did,
-           resource_id=rid, reason=f"proxied {request.method} -> {status_code}",
-           path=audit_path)
-
-    response = StreamingResponse(
-        body_iterator(),
-        status_code=status_code,
-        media_type=media_type,
-    )
-    # Replace the auto-set headers with our rewritten list (preserving
-    # duplicates such as multiple Set-Cookie). Clear first so we don't
-    # double-emit Content-Type.
-    response.raw_headers = [
-        (name.encode("latin-1"), value.encode("latin-1"))
-        for name, value in rewritten
-        if name.lower() != "content-type"
-    ]
-    if media_type:
-        response.raw_headers.append((b"content-type", media_type.encode("latin-1")))
-    return response
+    # 4. Proxy the real resource.
+    return await _proxy(res, path)

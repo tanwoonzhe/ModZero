@@ -2,7 +2,7 @@
 # Production overlay — use with:
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# Overrides development defaults for cloud / VPS deployment.
+# Run from the deploy/ directory or pass --env-file ../.env from repo root.
 
 services:
   backend:
@@ -15,7 +15,7 @@ services:
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
       CONNECTOR_BASE_URL: ${CONNECTOR_BASE_URL:-http://connector:8443}
       CONNECTOR_HOP_SECRET: ${CONNECTOR_HOP_SECRET}
-    volumes: []  # Remove dev hot-reload mounts
+    volumes: []
     restart: always
 
   connector:
@@ -28,15 +28,14 @@ services:
       args:
         VITE_API_BASE: ${VITE_API_BASE:-/api}
         VITE_SOCKET_URL: ${VITE_SOCKET_URL:-}
-    # TLS termination in prod. Mount certs read-only and use the
-    # TLS-enabled nginx config. Generate certs locally with
-    # scripts/gen-selfsigned-cert.sh for FYP demos.
+    # TLS termination. Generate certs with scripts/gen-selfsigned-cert.sh
+    # and place them in certs/ at the repo root.
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./certs:/etc/nginx/certs:ro
-      - ./frontend/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../certs:/etc/nginx/certs:ro
+      - ../frontend/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
     restart: always
 
   db:

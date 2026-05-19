@@ -9,7 +9,7 @@
     "dev": "concurrently -n electron,tsc \"wait-on http://localhost:5173 && electron .\" \"tsc -p tsconfig.main.json --watch\"",
     "dev:frontend": "cd ../frontend && npm run dev",
     "build:main": "tsc -p tsconfig.main.json",
-    "build": "cd ../frontend && npm run build && cd ../electron-client && npm run build:main",
+    "build": "cd ../frontend && npm run build && cd ../client-app && npm run build:main",
     "electron": "electron .",
     "start": "npm run build && electron .",
     "package": "npm run build && electron-builder",
