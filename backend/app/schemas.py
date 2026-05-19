@@ -394,3 +394,63 @@ class CustomPolicyOut(CustomPolicyBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+## Posture report schemas
+
+class PostureReportIn(BaseModel):
+    """Posture report submitted by the client app."""
+    # Device identification — provide device_id OR fingerprint/name for auto-register
+    device_id: Optional[str] = None
+    device_name: Optional[str] = None   # used when auto-registering a new device
+    os_version: Optional[str] = None
+    fingerprint: Optional[str] = None   # used for device lookup / auto-register
+
+    # The five posture factors
+    firewall_enabled: Optional[bool] = None
+    antivirus_enabled: Optional[bool] = None
+    disk_encryption_enabled: Optional[bool] = None
+    os_supported: Optional[bool] = None
+    # Pass the value from Graph deviceManagement lookup, or True/False manually
+    intune_compliant: Optional[bool] = None
+
+
+class PostureFactorDetail(BaseModel):
+    factor: str
+    value: Optional[bool]
+    passed: bool
+    points: float
+
+
+class PostureReportOut(BaseModel):
+    """Response after submitting a posture report — includes computed trust score."""
+    report_id: UUID
+    device_id: UUID
+    reported_at: datetime
+    firewall_enabled: Optional[bool]
+    antivirus_enabled: Optional[bool]
+    disk_encryption_enabled: Optional[bool]
+    os_supported: Optional[bool]
+    intune_compliant: Optional[bool]
+    posture_score: float
+    context_score: float
+    total_score: float
+    breakdown: List[PostureFactorDetail]
+    calculated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+## Trust score schemas
+
+class DeviceTrustScoreOut(BaseModel):
+    score_id: UUID
+    device_id: UUID
+    report_id: Optional[UUID]
+    posture_score: float
+    context_score: float
+    total_score: float
+    breakdown: Optional[List[PostureFactorDetail]]
+    calculated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

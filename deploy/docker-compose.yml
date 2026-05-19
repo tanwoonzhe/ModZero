@@ -29,11 +29,10 @@ services:
       - path: ../.env
         required: true
     environment:
-      # These have safe defaults and/or need compose-level interpolation.
-      # environment: overrides env_file, so only list vars with reliable defaults here.
-      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
-      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
-      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      # Only vars with safe compile-time defaults belong here.
+      # Everything else (DATABASE_URL, SECRET_KEY, MS_*, AZURE_*, etc.)
+      # comes from env_file above — do NOT add ${VAR} without a :- default
+      # or it will resolve to empty string and silently override env_file.
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}

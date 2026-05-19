@@ -128,6 +128,18 @@ class Device(Base):
     )
     attempts = relationship("AccessAttempt", back_populates="device")
     sessions = relationship("Session", back_populates="device")
+    posture_reports = relationship(
+        "PostureReport",
+        back_populates="device",
+        cascade="all, delete-orphan",
+        order_by="PostureReport.reported_at.desc()",
+    )
+    device_trust_scores = relationship(
+        "DeviceTrustScore",
+        back_populates="device",
+        cascade="all, delete-orphan",
+        order_by="DeviceTrustScore.calculated_at.desc()",
+    )
 
     def __repr__(self) -> str:
         return f"<Device {self.device_name}>"
@@ -1217,3 +1229,76 @@ class ConnectorAccessLog(Base):
 
     def __repr__(self) -> str:
         return f"<ConnectorAccessLog {self.log_id} decision={self.decision}>"
+
+
+# ── Device Posture & Trust Score (foundation) ────────────────────────────────
+
+class PostureReport(Base):
+    """Raw posture report submitted by the client app for a device."""
+    __tablename__ = "posture_reports"
+
+    report_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    device_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("devices.device_id"), nullable=False
+    )
+    reported_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+    # The five posture factors for this phase
+    firewall_enabled: bool = Column(Boolean, nullable=True)
+    antivirus_enabled: bool = Column(Boolean, nullable=True)
+    disk_encryption_enabled: bool = Column(Boolean, nullable=True)
+    os_supported: bool = Column(Boolean, nullable=True)
+    # Accepted from Graph /deviceManagement lookup or passed as manual placeholder
+    intune_compliant: bool = Column(Boolean, nullable=True)
+
+    # Client IP for context scoring later
+    ip_address: str = Column(String(64), nullable=True)
+
+    device = relationship("Device", back_populates="posture_reports")
+    trust_score = relationship(
+        "DeviceTrustScore", uselist=False, back_populates="report"
+    )
+
+    def __repr__(self) -> str:
+        return f"<PostureReport {self.report_id} device={self.device_id}>"
+
+
+class DeviceTrustScore(Base):
+    """Per-device trust score calculated from a PostureReport.
+
+    Kept separate from the legacy TrustScore (which is tied to AccessAttempt)
+    so the posture foundation can evolve independently.
+
+    Formula:  total = posture_score * 0.80 + context_score * 0.20
+    """
+    __tablename__ = "device_trust_scores"
+
+    score_id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    device_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("devices.device_id"), nullable=False
+    )
+    report_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("posture_reports.report_id"), nullable=True
+    )
+
+    # Component scores (0–100 each)
+    posture_score: float = Column(Float, nullable=False)
+    context_score: float = Column(Float, nullable=False, default=100.0)
+
+    # Weighted total: posture*0.8 + context*0.2
+    total_score: float = Column(Float, nullable=False)
+
+    # Factor-level breakdown stored as JSON for audit / UI display
+    breakdown: dict = Column(JSON, nullable=True)
+
+    calculated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+    device = relationship("Device", back_populates="device_trust_scores")
+    report = relationship("PostureReport", back_populates="trust_score")
+
+    def __repr__(self) -> str:
+        return f"<DeviceTrustScore {self.score_id} total={self.total_score}>"
