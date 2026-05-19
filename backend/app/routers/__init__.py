@@ -6,7 +6,7 @@ All other router modules remain available in this package.
 
 from fastapi import APIRouter
 
-from . import auth, users
+from . import auth, users, graph
 
 api_router = APIRouter()
 
@@ -19,3 +19,4 @@ def api_root() -> dict:
 
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
+api_router.include_router(graph.router, tags=["graph"])

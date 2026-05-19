@@ -50,10 +50,18 @@ class Settings(BaseSettings):
     # falls back to direct_http if not implemented at runtime).
     connector_transport: str = Field("direct_http", env="CONNECTOR_TRANSPORT")
 
-    # Azure (placeholders)
+    # Azure legacy (used by azure_service.py / graph_client.py)
     azure_tenant_id: Optional[str] = Field(None, env="AZURE_TENANT_ID")
     azure_client_id: Optional[str] = Field(None, env="AZURE_CLIENT_ID")
     azure_client_secret: Optional[str] = Field(None, env="AZURE_CLIENT_SECRET")
+
+    # Microsoft Graph — customer-hosted direct integration
+    ms_tenant_id: Optional[str] = Field(None, env="MS_TENANT_ID")
+    ms_client_id: Optional[str] = Field(None, env="MS_CLIENT_ID")
+    ms_client_secret: Optional[str] = Field(None, env="MS_CLIENT_SECRET")
+    ms_graph_scopes: str = Field(
+        "https://graph.microsoft.com/.default", env="MS_GRAPH_SCOPES"
+    )
 
     class Config:
         env_file = ".env"
