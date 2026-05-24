@@ -607,7 +607,7 @@ const ConnectorsPage: React.FC = () => {
                 <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
                   <div className="flex justify-between items-start mb-2">
                     <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                      {deployTab === "docker" ? "Docker Run Command" : "curl | bash Command"}
+                      {deployTab === "docker" ? "Docker Install Steps" : "Linux Install Steps"}
                     </span>
                     <button
                       onClick={() => copyToClipboard(deployTab === "docker" ? createdToken.docker_command : createdToken.curl_command)}
@@ -615,6 +615,9 @@ const ConnectorsPage: React.FC = () => {
                     >
                       <FaCopy /> Copy
                     </button>
+                  </div>
+                  <div className="mb-2 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded px-2 py-1.5">
+                    ⚠️ Run this on the <strong>resource server</strong> (e.g. AlphaTechs server) — not on this ModZero controller.
                   </div>
                   <pre className="text-xs font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all bg-gray-100 dark:bg-gray-950 rounded p-3 overflow-x-auto">
                     {deployTab === "docker" ? createdToken.docker_command : createdToken.curl_command}

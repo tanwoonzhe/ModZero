@@ -4,6 +4,23 @@ Customer-side ModZero connector. Enrolls with the controller, sends heartbeats,
 and (optionally) serves a local HTTP proxy that validates every request via
 the controller's `introspect` endpoint before forwarding to a protected resource.
 
+---
+
+## Official Connector Installation
+
+> Run the connector on the **resource server** (e.g. the machine that can reach your internal resource), not on the ModZero controller.
+
+1. **Create a token** — Dashboard → Connectors → Deploy Connector → Generate Token
+2. **Copy the Docker or Linux command** shown in the modal
+3. **Run it on the resource server** — the command installs the connector and starts the proxy on port 18080
+4. **Confirm the connector is online** — Dashboard → Connectors should show status `online`
+5. **Register the resource target** — Dashboard → Resources → edit the resource → set `connector_id` to the newly enrolled connector and set `internal_address` to the target URL the connector can reach (e.g. `http://alphatechs.top`)
+6. **Request access from Electron** — open the Electron client, go to Resources, click Request Access; the access URL will proxy through the connector to the internal target
+
+> **DEMO_CONNECTOR_PROXY_BASE_URL**: After installing connector_runtime with the default proxy port 18080, set `DEMO_CONNECTOR_PROXY_BASE_URL=http://<resource-server-ip>:18080` in the ModZero controller's `.env` and recreate the backend (`docker compose up -d --force-recreate backend`). This tells the backend to generate access URLs pointing at the connector's proxy port.
+
+
+
 This is the **demo model** (introspect-per-request, `/access/{id}/proxy/{path}`).
 It does not include WireGuard, Headscale, DNS routing, or production hardening.
 

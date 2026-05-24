@@ -164,29 +164,76 @@ def _hash_token(token: str) -> str:
 
 
 def _generate_deploy_commands(token: str, network: str, controller_url: str) -> dict:
-    """Generate docker run and curl|bash deployment commands."""
+    """Generate connector_runtime deployment commands for Docker and Linux."""
     rand = secrets.token_hex(4)
+    name = f"modzero-connector-{rand}"
+
     docker_cmd = (
+        f'# ⚠️  Run on the RESOURCE SERVER (e.g. AlphaTechs server).\n'
+        f'#    Do NOT run on the ModZero controller server.\n\n'
+        f'# 1. Get the ModZero source (skip if already cloned)\n'
+        f'git clone https://github.com/<your-org>/ModZero /opt/modzero\n\n'
+        f'# 2. Build the connector image\n'
+        f'docker build -t modzero-connector-runtime /opt/modzero/connector_runtime\n\n'
+        f'# 3. Enroll using the one-time token (saves credentials to a named volume)\n'
+        f'docker run --rm \\\n'
+        f'  -v modzero-state:/var/lib/modzero \\\n'
+        f'  -e MODZERO_BACKEND_URL="{controller_url}" \\\n'
+        f'  modzero-connector-runtime \\\n'
+        f'  enroll --token "{token}" \\\n'
+        f'         --name "$(hostname)" \\\n'
+        f'         --network "{network}"\n\n'
+        f'# 4. Run the connector with HTTP proxy on port 18080\n'
         f'docker run -d \\\n'
-        f'  --env MODZERO_CONTROLLER_URL="{controller_url}" \\\n'
-        f'  --env MODZERO_ENROLL_TOKEN="{token}" \\\n'
-        f'  --env MODZERO_NETWORK="{network}" \\\n'
-        f'  --env MODZERO_LABEL_HOSTNAME="$(hostname)" \\\n'
-        f'  --env MODZERO_LABEL_DEPLOYED_BY="docker" \\\n'
-        f'  --name "modzero-connector-{rand}" \\\n'
-        f'  --restart=unless-stopped \\\n'
-        f'  --pull=always \\\n'
-        f'  modzero/connector:latest'
+        f'  --name "{name}" \\\n'
+        f'  -v modzero-state:/var/lib/modzero \\\n'
+        f'  -e MODZERO_BACKEND_URL="{controller_url}" \\\n'
+        f'  -e MODZERO_PROXY_HOST="0.0.0.0" \\\n'
+        f'  -e MODZERO_PROXY_PORT="18080" \\\n'
+        f'  -p 18080:18080 \\\n'
+        f'  --restart unless-stopped \\\n'
+        f'  modzero-connector-runtime run --proxy'
     )
-    curl_cmd = (
-        f'curl "{controller_url}/public/connector/setup.sh" | sudo \\\n'
-        f'  MODZERO_CONTROLLER_URL="{controller_url}" \\\n'
-        f'  MODZERO_ENROLL_TOKEN="{token}" \\\n'
-        f'  MODZERO_NETWORK="{network}" \\\n'
-        f'  MODZERO_LABEL_DEPLOYED_BY="linux" \\\n'
-        f'  bash'
+
+    linux_cmd = (
+        f'# ⚠️  Run on the RESOURCE SERVER (e.g. AlphaTechs server).\n'
+        f'#    Do NOT run on the ModZero controller server.\n\n'
+        f'# 1. Install prerequisites\n'
+        f'sudo apt-get update && sudo apt-get install -y python3 python3-pip git\n\n'
+        f'# 2. Clone ModZero and install connector_runtime dependencies\n'
+        f'git clone https://github.com/<your-org>/ModZero /opt/modzero\n'
+        f'pip3 install -r /opt/modzero/connector_runtime/requirements.txt\n\n'
+        f'# 3. Enroll using the one-time token\n'
+        f'cd /opt/modzero/connector_runtime\n'
+        f'MODZERO_BACKEND_URL="{controller_url}" \\\n'
+        f'python3 -m connector_runtime enroll \\\n'
+        f'  --token "{token}" \\\n'
+        f'  --name "$(hostname)" \\\n'
+        f'  --network "{network}"\n\n'
+        f'# 4. Run the connector with HTTP proxy on port 18080\n'
+        f'MODZERO_BACKEND_URL="{controller_url}" \\\n'
+        f'MODZERO_PROXY_HOST="0.0.0.0" \\\n'
+        f'MODZERO_PROXY_PORT="18080" \\\n'
+        f'python3 -m connector_runtime run --proxy\n\n'
+        f'# Optional: run as a systemd daemon\n'
+        f'# sudo tee /etc/systemd/system/modzero-connector.service > /dev/null << \'UNIT\'\n'
+        f'# [Unit]\n'
+        f'# Description=ModZero Connector Runtime\n'
+        f'# After=network.target\n'
+        f'# [Service]\n'
+        f'# Environment=MODZERO_BACKEND_URL={controller_url}\n'
+        f'# Environment=MODZERO_PROXY_HOST=0.0.0.0\n'
+        f'# Environment=MODZERO_PROXY_PORT=18080\n'
+        f'# WorkingDirectory=/opt/modzero/connector_runtime\n'
+        f'# ExecStart=python3 -m connector_runtime run --proxy\n'
+        f'# Restart=on-failure\n'
+        f'# [Install]\n'
+        f'# WantedBy=multi-user.target\n'
+        f'# UNIT\n'
+        f'# sudo systemctl daemon-reload && sudo systemctl enable --now modzero-connector'
     )
-    return {"docker_command": docker_cmd, "curl_command": curl_cmd}
+
+    return {"docker_command": docker_cmd, "curl_command": linux_cmd}
 
 
 def _verify_connector_auth(request: Request, db: Session) -> Connector:
