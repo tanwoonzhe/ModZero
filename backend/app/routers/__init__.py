@@ -37,5 +37,5 @@ api_router.include_router(tunnels_routes.router, prefix="/tunnels", tags=["tunne
 api_router.include_router(tunnels_user_enrollment.router, prefix="/tunnels", tags=["tunnels"])
 api_router.include_router(resource_access.router)
 api_router.include_router(templates.router,        prefix="/templates",       tags=["templates"])
-api_router.include_router(identity_checks.router,  prefix="/identity-checks", tags=["identity-checks"])
-api_router.include_router(device_checks.router,    prefix="/device-checks",   tags=["device-checks"])
+api_router.include_router(identity_checks.router,  tags=["identity-checks"])
+api_router.include_router(device_checks.router,    tags=["device-checks"])
