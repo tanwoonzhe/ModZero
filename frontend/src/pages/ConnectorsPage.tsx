@@ -144,6 +144,7 @@ const ConnectorsPage: React.FC = () => {
       setConnectors(cRes.data);
     } catch {
       setConnectors([]);
+      toast.error("Failed to load connectors");
     }
 
     try {
@@ -151,6 +152,7 @@ const ConnectorsPage: React.FC = () => {
       setTokens(tRes.data);
     } catch {
       setTokens([]);
+      toast.error("Failed to load enroll tokens");
     }
 
     try {
@@ -158,6 +160,7 @@ const ConnectorsPage: React.FC = () => {
       setResources(rRes.data);
     } catch {
       setResources([]);
+      toast.error("Failed to load connector resources");
     }
 
     setLoading(false);

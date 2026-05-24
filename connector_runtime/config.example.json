@@ -1,0 +1,9 @@
+{
+  "backend_url": "http://localhost:8000",
+  "connector_name": "modzero-connector",
+  "network": "default",
+  "proxy_host": "",
+  "proxy_port": 18080,
+  "state_file": "./connector_state.json",
+  "heartbeat_interval": 10
+}

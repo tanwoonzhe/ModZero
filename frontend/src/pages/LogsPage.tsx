@@ -73,6 +73,7 @@ const riskColors = {
 const LogsPage: React.FC = () => {
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [decisionFilter, setDecisionFilter] = useState<string>("all");
@@ -139,37 +140,11 @@ const LogsPage: React.FC = () => {
         risk_level: calculateRiskLevel(item.total_score),
       }));
       setAttempts(transformedAttempts);
+      setFetchError(null);
     } catch (error) {
-      console.error(error);
-      // Mock data for demo
-      const mockAttempts: Attempt[] = Array.from({ length: 50 }, (_, i) => {
-        const decisions: Array<"allow" | "deny" | "mfa_required" | "block" | "review"> = ["allow", "allow", "allow", "deny", "mfa_required", "review"];
-        const risks: Array<"low" | "medium" | "high" | "critical"> = ["low", "low", "low", "medium", "high", "critical"];
-        const locations = ["New York, US", "London, UK", "Tokyo, JP", "Sydney, AU", "Berlin, DE", "Unknown"];
-        const resources = ["SharePoint", "Exchange Online", "Azure Portal", "Teams", "OneDrive", "Power BI"];
-        const userNames = ["John Smith", "Jane Doe", "Bob Wilson", "Alice Johnson", "Mike Brown", "Sarah Davis"];
-        
-        const decision = decisions[Math.floor(Math.random() * decisions.length)];
-        const risk = decision === "allow" ? risks[Math.floor(Math.random() * 3)] : risks[Math.floor(Math.random() * 3) + 1];
-        
-        return {
-          attempt_id: `att-${i + 1}`,
-          user_id: `user-${(i % 6) + 1}`,
-          user_name: userNames[i % 6],
-          user_email: `${userNames[i % 6].toLowerCase().replace(" ", ".")}@contoso.com`,
-          device_id: i % 3 === 0 ? undefined : `device-${(i % 10) + 1}`,
-          device_name: i % 3 === 0 ? undefined : `DESKTOP-${String.fromCharCode(65 + (i % 10))}${i}`,
-          timestamp: new Date(Date.now() - i * 600000 - Math.random() * 300000).toISOString(),
-          decision,
-          total_score: Math.floor(Math.random() * 100),
-          ip_address: `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`,
-          location: locations[Math.floor(Math.random() * locations.length)],
-          resource: resources[Math.floor(Math.random() * resources.length)],
-          risk_level: risk,
-          reason: decision === "deny" ? "Policy violation detected" : decision === "mfa_required" ? "Unrecognized device" : undefined,
-        };
-      });
-      setAttempts(mockAttempts);
+      const msg = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Failed to load access logs";
+      setFetchError(msg);
+      setAttempts([]);
     } finally {
       setLoading(false);
     }
@@ -395,6 +370,11 @@ const LogsPage: React.FC = () => {
       </div>
 
       {/* Logs Table */}
+      {fetchError && (
+        <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl text-red-700 dark:text-red-400 text-sm">
+          Failed to load access logs: {fetchError}
+        </div>
+      )}
       {loading ? (
         <div className="flex items-center justify-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>

@@ -277,7 +277,7 @@ const DashboardPage: React.FC = () => {
             </div>
           </div>
           <p className="text-xs text-gray-400 mt-2">
-            Last synced: {new Date(data.last_synced).toLocaleTimeString()}
+            Last synced: {data.last_synced ? new Date(data.last_synced).toLocaleTimeString() : "Unknown"}
           </p>
         </div>
       </div>
@@ -693,7 +693,7 @@ const DashboardPage: React.FC = () => {
         </div>
         <div className="mt-6 pt-4 border-t border-gray-100 dark:border-gray-700 flex justify-between text-xs text-gray-400">
           <p>© 2026 ModZero. All rights reserved.</p>
-          <p>Last synced: {new Date(data.last_synced).toLocaleString()}</p>
+          <p>Last synced: {data.last_synced ? new Date(data.last_synced).toLocaleString() : "Unknown"}</p>
         </div>
       </footer>
     </div>

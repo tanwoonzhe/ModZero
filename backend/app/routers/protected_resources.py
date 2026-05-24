@@ -10,7 +10,8 @@ Routes
 """
 from __future__ import annotations
 
-from typing import Any, List
+from datetime import datetime, timezone
+from typing import Any, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -19,9 +20,50 @@ from sqlalchemy.orm import Session
 
 from .. import schemas
 from ..deps import get_db, get_current_user, get_current_admin
-from ..models import AccessRequestLog, ProtectedResource, User
+from ..models import AccessRequestLog, Connector, ConnectorResource, ProtectedResource, User
 
 router = APIRouter(prefix="/resources", tags=["resources"])
+
+
+def _connector_status(db: Session, connector_resource_id: Optional[UUID]) -> Optional[str]:
+    """Compute live connector status from heartbeat age.
+
+    Returns one of: "online", "degraded", "offline", or None if no connector linked.
+    """
+    if not connector_resource_id:
+        return None
+    cr = db.query(ConnectorResource).filter(
+        ConnectorResource.resource_id == connector_resource_id
+    ).first()
+    if not cr:
+        return "offline"
+    # No explicit connector — check network-wide for any online connector
+    connector_id = cr.connector_id
+    if connector_id is None:
+        c = (
+            db.query(Connector)
+            .filter(Connector.network == cr.network)
+            .order_by(Connector.last_heartbeat.desc())
+            .first()
+        )
+    else:
+        c = db.query(Connector).filter(Connector.connector_id == connector_id).first()
+
+    if not c or not c.last_heartbeat:
+        return "offline"
+
+    age = (datetime.now(timezone.utc) - c.last_heartbeat).total_seconds()
+    if age > 60:
+        return "offline"
+    if age > 30:
+        return "degraded"
+    return "online"
+
+
+def _enrich(resource: ProtectedResource, db: Session) -> schemas.ProtectedResourceOut:
+    out = schemas.ProtectedResourceOut.model_validate(resource)
+    out.connector_status = _connector_status(db, resource.connector_resource_id)
+    return out
 
 
 @router.get("", response_model=List[schemas.ProtectedResourceOut])
@@ -29,7 +71,8 @@ def list_resources(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> Any:
-    return db.query(ProtectedResource).order_by(ProtectedResource.created_at.desc()).all()
+    resources = db.query(ProtectedResource).order_by(ProtectedResource.created_at.desc()).all()
+    return [_enrich(r, db) for r in resources]
 
 
 @router.post("", response_model=schemas.ProtectedResourceOut, status_code=status.HTTP_201_CREATED)
@@ -45,11 +88,18 @@ def create_resource(
         if existing:
             raise HTTPException(status_code=409, detail="public_name already in use")
 
+    if payload.connector_resource_id:
+        cr = db.query(ConnectorResource).filter(
+            ConnectorResource.resource_id == payload.connector_resource_id
+        ).first()
+        if not cr:
+            raise HTTPException(status_code=404, detail="connector_resource not found")
+
     resource = ProtectedResource(**payload.model_dump())
     db.add(resource)
     db.commit()
     db.refresh(resource)
-    return resource
+    return _enrich(resource, db)
 
 
 @router.get("/{resource_id}", response_model=schemas.ProtectedResourceOut)
@@ -61,7 +111,7 @@ def get_resource(
     resource = db.query(ProtectedResource).filter(ProtectedResource.id == resource_id).first()
     if not resource:
         raise HTTPException(status_code=404, detail="Resource not found")
-    return resource
+    return _enrich(resource, db)
 
 
 @router.put("/{resource_id}", response_model=schemas.ProtectedResourceOut)
@@ -84,11 +134,18 @@ def update_resource(
         if clash:
             raise HTTPException(status_code=409, detail="public_name already in use")
 
+    if "connector_resource_id" in updates and updates["connector_resource_id"]:
+        cr = db.query(ConnectorResource).filter(
+            ConnectorResource.resource_id == updates["connector_resource_id"]
+        ).first()
+        if not cr:
+            raise HTTPException(status_code=404, detail="connector_resource not found")
+
     for key, value in updates.items():
         setattr(resource, key, value)
     db.commit()
     db.refresh(resource)
-    return resource
+    return _enrich(resource, db)
 
 
 @router.delete("/{resource_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)

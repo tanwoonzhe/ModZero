@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>ModZero — Connected</title>
+  <title>ModZero — Dashboard</title>
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; connect-src *;" />
   <style>
     :root {
@@ -23,8 +23,8 @@
       font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
       background: var(--bg); color: var(--text);
     }
-    .container { max-width: 880px; margin: 0 auto; padding: 32px 24px; }
-    .topbar { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+    .container { max-width: 980px; margin: 0 auto; padding: 28px 24px; }
+    .topbar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
     .logo {
       width: 40px; height: 40px; border-radius: 10px;
       background: var(--accent); color: #fff; font-weight: 700; font-size: 20px;
@@ -45,6 +45,10 @@
     .status-pill.warn .dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
     .status-pill.err .dot { background: var(--err); box-shadow: 0 0 8px var(--err); }
 
+    .tabs { display: flex; gap: 4px; margin-bottom: 18px; background: #0b1220; padding: 4px; border-radius: 10px; }
+    .tab { flex: 1; text-align: center; padding: 8px 12px; font-size: 13px; cursor: pointer; border-radius: 7px; color: var(--muted); font-weight: 600; }
+    .tab.active { background: var(--card); color: var(--text); }
+
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 18px; }
     .tile {
       background: var(--card); border: 1px solid var(--border);
@@ -62,22 +66,88 @@
     .row { display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
     button {
       padding: 10px 14px; font-size: 13px; font-weight: 600;
-      border: 0; border-radius: 8px; cursor: pointer;
+      border: 0; border-radius: 8px; cursor: pointer; transition: background .15s, opacity .15s;
     }
     button.primary { background: var(--accent); color: #fff; }
-    button.primary:hover { background: var(--accent-h); }
+    button.primary:hover:not(:disabled) { background: var(--accent-h); }
     button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
-    button.ghost:hover { color: var(--text); }
+    button.ghost:hover:not(:disabled) { color: var(--text); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
 
-    .panel { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
-    .panel h2 { margin: 0 0 10px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
-    .kv { display: grid; grid-template-columns: 150px 1fr; gap: 8px 16px; font-size: 13px; }
+    .panel { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+    .panel h2 { margin: 0 0 12px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+    .kv { display: grid; grid-template-columns: 180px 1fr; gap: 8px 16px; font-size: 13px; }
     .kv dt { color: var(--muted); }
     .kv dd { margin: 0; word-break: break-all; }
     .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
     .badge.ok { background: rgba(16,185,129,.15); color: #6ee7b7; }
     .badge.warn { background: rgba(245,158,11,.15); color: #fcd34d; }
     .badge.err { background: rgba(239,68,68,.15); color: #fca5a5; }
+    .badge.neutral { background: rgba(148,163,184,.15); color: var(--muted); }
+    .btn-sm { padding: 4px 10px; font-size: 11px; font-weight: 600; background: var(--accent);
+              color: #fff; border: 0; border-radius: 6px; cursor: pointer; margin-left: 6px;
+              transition: background .15s; vertical-align: middle; }
+    .btn-sm:hover { background: var(--accent-h); }
+
+    .res-list { display: flex; flex-direction: column; gap: 10px; }
+    .res-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px; background: #0b1220; border: 1px solid var(--border); border-radius: 10px;
+    }
+    .res-row .name { font-weight: 600; font-size: 14px; }
+    .res-row .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .res-row .grow { flex: 1; }
+    .res-row .decision { font-size: 12px; padding: 4px 10px; border-radius: 6px; }
+
+    .factor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+    .factor { padding: 10px 12px; background: #0b1220; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+    .factor .f-name { color: var(--muted); margin-bottom: 4px; }
+    .factor .f-val { font-weight: 600; }
+    .factor.pass .f-val { color: #6ee7b7; }
+    .factor.fail .f-val { color: #fca5a5; }
+    .factor.unknown .f-val { color: var(--muted); }
+
+    input[type="text"] {
+      width: 100%; padding: 9px 12px; font-size: 13px;
+      background: #0b1220; color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px; outline: none;
+    }
+    input[type="text"]:focus { border-color: var(--accent); }
+
+    .toast {
+      position: fixed; bottom: 20px; right: 20px; padding: 10px 14px;
+      border-radius: 8px; font-size: 13px; display: none; max-width: 360px;
+    }
+    .toast.show { display: block; }
+    .toast.ok { background: rgba(16,185,129,.18); border: 1px solid rgba(16,185,129,.4); color: #6ee7b7; }
+    .toast.err { background: rgba(239,68,68,.18); border: 1px solid rgba(239,68,68,.4); color: #fca5a5; }
+    .toast.info { background: rgba(99,102,241,.18); border: 1px solid rgba(99,102,241,.4); color: #c7d2fe; }
+    .spinner {
+      display: inline-block; width: 12px; height: 12px;
+      border: 2px solid rgba(255,255,255,.3); border-top-color: #fff;
+      border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(2, 6, 23, .7);
+      display: none; align-items: center; justify-content: center; z-index: 100;
+    }
+    .modal-backdrop.show { display: flex; }
+    .modal {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 20px; width: min(640px, 92vw); max-height: 88vh; overflow: auto;
+    }
+    .modal h3 { margin: 0 0 12px; font-size: 16px; }
+    .modal p { margin: 0 0 12px; font-size: 13px; color: var(--text); }
+    .modal ol { margin: 0 0 12px 18px; padding: 0; font-size: 13px; color: var(--text); }
+    .modal ol li { margin-bottom: 6px; }
+    .modal pre {
+      background: #0b1220; border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; font-size: 12px; color: var(--text);
+      white-space: pre-wrap; word-break: break-all; margin: 0 0 10px;
+    }
+    .modal .row { justify-content: flex-end; }
   </style>
 </head>
 <body>
@@ -91,47 +161,167 @@
       <div id="statusPill" class="status-pill"><span class="dot"></span> <span id="statusText">Connected</span></div>
     </div>
 
-    <div class="grid">
-      <div class="tile">
-        <div class="label">Device</div>
-        <div class="value small" id="deviceName">—</div>
-      </div>
-      <div class="tile">
-        <div class="label">Server URL</div>
-        <div class="value small" id="serverUrl">—</div>
-      </div>
-      <div class="tile">
-        <div class="label">Trust Score</div>
-        <div class="score"><span class="big" id="trustScore">—</span><span class="max">/ 100</span></div>
-        <div class="bar"><div id="trustBar" style="width:0%"></div></div>
-      </div>
-      <div class="tile">
-        <div class="label">Last Heartbeat</div>
-        <div class="value small" id="lastHeartbeat">just now</div>
-      </div>
+    <div class="tabs" role="tablist">
+      <div class="tab active" data-tab="overview" role="tab">Overview</div>
+      <div class="tab" data-tab="device" role="tab">Device Check</div>
+      <div class="tab" data-tab="resources" role="tab">Resources</div>
+      <div class="tab" data-tab="settings" role="tab">Settings</div>
     </div>
 
-    <div class="panel" style="margin-bottom:14px">
-      <h2>Device Posture</h2>
-      <dl class="kv" id="postureList">
-        <dt>Status</dt><dd><span class="badge ok" id="postureStatus">Healthy</span></dd>
-        <dt>Identity</dt><dd id="identity">—</dd>
-        <dt>Hostname</dt><dd id="hostname">—</dd>
-        <dt>Platform</dt><dd id="platform">—</dd>
-        <dt>Client Version</dt><dd id="clientVersion">—</dd>
-        <dt>Connected Since</dt><dd id="connectedSince">—</dd>
-      </dl>
-    </div>
+    <!-- ── Overview ── -->
+    <section data-pane="overview">
+      <div class="grid">
+        <div class="tile">
+          <div class="label">Device</div>
+          <div class="value small" id="deviceName">—</div>
+        </div>
+        <div class="tile">
+          <div class="label">Server URL</div>
+          <div class="value small" id="serverUrl">—</div>
+        </div>
+        <div class="tile">
+          <div class="label">Trust Score</div>
+          <div class="score"><span class="big" id="trustScore">—</span><span class="max">/ 100</span></div>
+          <div class="bar"><div id="trustBar" style="width:0%"></div></div>
+        </div>
+        <div class="tile">
+          <div class="label">Last Heartbeat</div>
+          <div class="value small" id="lastHeartbeat">just now</div>
+        </div>
+      </div>
 
-    <div class="row">
-      <button class="primary" id="openDashboard">Open Full Dashboard</button>
-      <button class="ghost" id="refresh">Refresh</button>
-      <button class="ghost" id="disconnect">Disconnect</button>
+      <div class="panel">
+        <h2>Identity & Host</h2>
+        <dl class="kv">
+          <dt>Status</dt><dd><span class="badge ok" id="postureStatus">Healthy</span></dd>
+          <dt>Identity</dt><dd id="identity">—</dd>
+          <dt>Hostname</dt><dd id="hostname">—</dd>
+          <dt>Platform</dt><dd id="platform">—</dd>
+          <dt>Client Version</dt><dd id="clientVersion">—</dd>
+          <dt>Connected Since</dt><dd id="connectedSince">—</dd>
+        </dl>
+      </div>
+
+      <div class="panel" id="tunnelPanel">
+        <h2>Tunnel Client</h2>
+        <dl class="kv">
+          <dt>Status</dt><dd><span class="badge neutral" id="tunnelBadge">Unknown</span></dd>
+          <dt>Node</dt><dd id="tunnelNode">—</dd>
+          <dt>WireGuard IP</dt><dd id="tunnelIp">—</dd>
+          <dt>Login Server</dt><dd id="tunnelLogin">—</dd>
+        </dl>
+        <div class="row" id="tunnelActions" style="display:none">
+          <button class="primary" id="btnTunnelInstructions">Get Tunnel Join Instructions</button>
+        </div>
+        <p style="margin:10px 0 0;color:var(--muted);font-size:12px">
+          Read-only check. ModZero never installs, starts, stops, or configures the tunnel client.
+        </p>
+      </div>
+
+      <div class="row">
+        <button class="ghost" id="refresh">Refresh</button>
+        <button class="ghost" id="disconnect">Disconnect</button>
+      </div>
+    </section>
+
+    <!-- ── Device Check ── -->
+    <section data-pane="device" style="display:none">
+      <div class="panel">
+        <h2>Device Posture Check</h2>
+        <p style="margin:0 0 14px;color:var(--muted);font-size:13px">
+          Collect posture signals from this device and submit them to the ModZero server. The server computes
+          the trust score from the signals — the client does not score itself.
+        </p>
+        <div class="row">
+          <button class="primary" id="btnRunCheck">Run Device Check</button>
+          <button class="ghost" id="btnPreviewPosture">Preview Signals Only</button>
+        </div>
+      </div>
+
+      <div class="panel" id="postureResultPanel" style="display:none">
+        <h2>Latest Score</h2>
+        <div class="grid">
+          <div class="tile">
+            <div class="label">Total Score</div>
+            <div class="score"><span class="big" id="resTotal">—</span><span class="max">/ 100</span></div>
+            <div class="bar"><div id="resTotalBar" style="width:0%"></div></div>
+          </div>
+          <div class="tile">
+            <div class="label">Posture Score</div>
+            <div class="value" id="resPosture">—</div>
+          </div>
+          <div class="tile">
+            <div class="label">Context Score</div>
+            <div class="value" id="resContext">—</div>
+          </div>
+          <div class="tile">
+            <div class="label">Risk Level</div>
+            <div class="value" id="resRisk">—</div>
+          </div>
+        </div>
+        <h2 style="margin-top:14px">Factor Breakdown</h2>
+        <div class="factor-grid" id="factorGrid"></div>
+      </div>
+    </section>
+
+    <!-- ── Resources ── -->
+    <section data-pane="resources" style="display:none">
+      <div class="panel">
+        <h2>Available Resources</h2>
+        <div class="row" style="margin-bottom:10px">
+          <button class="ghost" id="btnReloadRes">Reload</button>
+        </div>
+        <div class="res-list" id="resList">
+          <div style="color:var(--muted);font-size:13px">Loading…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Settings ── -->
+    <section data-pane="settings" style="display:none">
+      <div class="panel">
+        <h2>Backend Server</h2>
+        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px">Server URL</label>
+        <input id="settingsUrl" type="text" placeholder="http://localhost:8000" />
+        <div class="row">
+          <button class="primary" id="btnSaveUrl">Save</button>
+          <button class="ghost" id="btnSignOut">Sign out</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Device Identity</h2>
+        <dl class="kv">
+          <dt>Hostname</dt><dd id="setHostname">—</dd>
+          <dt>Fingerprint</dt><dd id="setFingerprint">—</dd>
+        </dl>
+      </div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <div id="tunnelModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="tunnelModalTitle">
+    <div class="modal">
+      <h3 id="tunnelModalTitle">Tunnel Join Instructions</h3>
+      <p id="tunnelModalMessage" style="color:var(--muted)">Loading…</p>
+      <ol id="tunnelModalSteps"></ol>
+      <div id="tunnelModalCmdWrap" style="display:none">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:6px">Command</div>
+        <pre id="tunnelModalCmd"></pre>
+        <div class="row" style="justify-content:flex-start;margin-bottom:10px">
+          <button class="ghost" id="btnTunnelCopy">Copy command</button>
+        </div>
+      </div>
+      <div class="row">
+        <button class="ghost" id="btnTunnelClose">Close</button>
+      </div>
     </div>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
+    const M = window.modzero;
 
     function fmtRelative(ts) {
       if (!ts) return "never";
@@ -142,30 +332,55 @@
       if (s < 86400) return Math.floor(s / 3600) + "h ago";
       return Math.floor(s / 86400) + "d ago";
     }
-
     function setStatus(kind, label) {
       const pill = $("statusPill");
       pill.className = "status-pill" + (kind === "ok" ? "" : " " + kind);
       $("statusText").textContent = label;
     }
+    function toast(kind, msg, ms) {
+      const el = $("toast");
+      el.className = "toast show " + kind;
+      el.textContent = msg;
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => { el.className = "toast"; }, ms || 4000);
+    }
+    function riskLevel(score) {
+      if (score == null) return ["—", "neutral"];
+      if (score >= 85) return ["Low", "ok"];
+      if (score >= 60) return ["Medium", "warn"];
+      return ["High", "err"];
+    }
 
+    // ── Tabs ──
+    document.querySelectorAll(".tab").forEach((t) => {
+      t.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
+        t.classList.add("active");
+        const target = t.dataset.tab;
+        document.querySelectorAll("section[data-pane]").forEach((s) => {
+          s.style.display = s.dataset.pane === target ? "" : "none";
+        });
+        if (target === "resources") loadResources();
+        if (target === "settings") loadSettings();
+      });
+    });
+
+    // ── Overview tick ──
     async function tick() {
-      const snap = await window.modzero.getSnapshot();
+      const snap = await M.getSnapshot();
       $("deviceName").textContent = snap.deviceName || "—";
       $("hostname").textContent = snap.hostname || "—";
       $("platform").textContent = snap.platform || "—";
       $("identity").textContent = snap.identity || "—";
       $("clientVersion").textContent = snap.appVersion || "—";
       $("serverUrl").textContent = snap.url || "—";
-      $("serverHint").textContent = snap.url ? snap.url : "Connected";
+      $("serverHint").textContent = snap.url || "Connected";
       $("connectedSince").textContent = snap.connectedSince
         ? new Date(snap.connectedSince).toLocaleString()
         : "—";
-
       const score = snap.trustScore;
       $("trustScore").textContent = score == null ? "—" : Math.round(score);
       $("trustBar").style.width = score == null ? "0%" : Math.max(0, Math.min(100, score)) + "%";
-
       $("lastHeartbeat").textContent = fmtRelative(snap.lastHeartbeat);
       if (!snap.healthy) {
         setStatus("err", "Disconnected");
@@ -182,11 +397,298 @@
       }
     }
 
-    $("openDashboard").addEventListener("click", () => window.modzero.openFullDashboard());
-    $("refresh").addEventListener("click", () => window.modzero.heartbeatNow().then(tick));
-    $("disconnect").addEventListener("click", async () => {
-      await window.modzero.disconnect();
+    $("refresh").addEventListener("click", () => M.heartbeatNow().then(tick));
+    $("disconnect").addEventListener("click", () => M.disconnect());
+
+    // ── Device check ──
+    function renderFactors(breakdown) {
+      const grid = $("factorGrid");
+      grid.innerHTML = "";
+      (breakdown || []).forEach((b) => {
+        const cls = b.value == null ? "unknown" : b.passed ? "pass" : "fail";
+        const label = b.value == null ? "unknown" : b.passed ? "pass" : "fail";
+        const el = document.createElement("div");
+        el.className = "factor " + cls;
+        el.innerHTML = `<div class="f-name">${b.factor}</div><div class="f-val">${label} (+${b.points})</div>`;
+        grid.appendChild(el);
+      });
+    }
+
+    function showScore(r) {
+      $("postureResultPanel").style.display = "";
+      $("resTotal").textContent = Math.round(r.total_score);
+      $("resTotalBar").style.width = Math.max(0, Math.min(100, r.total_score)) + "%";
+      $("resPosture").textContent = Math.round(r.posture_score);
+      $("resContext").textContent = Math.round(r.context_score);
+      const [risk] = riskLevel(r.total_score);
+      $("resRisk").textContent = risk;
+      renderFactors(r.breakdown);
+    }
+
+    $("btnRunCheck").addEventListener("click", async () => {
+      const btn = $("btnRunCheck");
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>Collecting…';
+      try {
+        const { result } = await M.runDeviceCheck();
+        if (!result.ok) {
+          toast("err", "Device check failed: " + (result.error || "unknown"));
+          return;
+        }
+        showScore(result.data);
+        toast("ok", `Score: ${Math.round(result.data.total_score)} / 100`);
+        tick();
+      } catch (e) {
+        toast("err", String(e?.message || e));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Run Device Check";
+      }
     });
+
+    $("btnPreviewPosture").addEventListener("click", async () => {
+      const sig = await M.collectPosture();
+      toast("info", JSON.stringify(sig, null, 2), 8000);
+    });
+
+    // ── Resources ──
+    async function loadResources() {
+      $("resList").innerHTML = '<div style="color:var(--muted);font-size:13px">Loading…</div>';
+      const r = await M.listResources();
+      if (!r.ok) {
+        $("resList").innerHTML =
+          `<div style="color:var(--err);font-size:13px">Failed to load resources: ${r.error || "unknown"}</div>`;
+        return;
+      }
+      const items = Array.isArray(r.data) ? r.data : [];
+      if (items.length === 0) {
+        $("resList").innerHTML = '<div style="color:var(--muted);font-size:13px">No resources configured yet.</div>';
+        return;
+      }
+      $("resList").innerHTML = "";
+      items.forEach((res) => renderResource(res));
+    }
+
+    function renderResource(res) {
+      const row = document.createElement("div");
+      row.className = "res-row";
+      const addrLine = [res.public_name, res.internal_address].filter(Boolean);
+
+      // Connector status badge
+      let connBadge = "";
+      if (res.connector_resource_id) {
+        const cs = res.connector_status;
+        if (cs === "online") {
+          connBadge = `<span class="badge ok" title="Connector online">&#9679; Connector online</span>`;
+        } else if (cs === "degraded") {
+          connBadge = `<span class="badge warn" title="Connector degraded">&#9679; Connector degraded</span>`;
+        } else {
+          connBadge = `<span class="badge err" title="Connector offline">&#9679; Connector offline</span>`;
+        }
+      }
+
+      row.innerHTML = `
+        <div class="grow">
+          <div class="name">${escapeHtml(res.name)}</div>
+          <div class="meta">
+            <span class="badge neutral">${escapeHtml(res.resource_type || "web")}</span>
+            &nbsp; Min score: <b>${res.minimum_trust_score ?? 0}</b>
+            ${res.require_intune_compliant ? " &middot; Intune required" : ""}
+            ${res.enabled ? "" : " &middot; <span class='badge err'>disabled</span>"}
+            ${connBadge ? " &middot; " + connBadge : ""}
+          </div>
+          ${addrLine.length ? `<div class="meta" style="font-family:monospace;font-size:11px;color:var(--muted)">${addrLine.map(v => escapeHtml(v)).join(" → ")}</div>` : ""}
+          <div class="meta" id="dec-${res.id}"></div>
+        </div>
+        <button class="primary" data-rid="${res.id}">Request Access</button>
+      `;
+      row.querySelector("button").addEventListener("click", (e) => requestAccess(res.id, e.currentTarget));
+      $("resList").appendChild(row);
+    }
+
+    async function requestAccess(resourceId, btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>Requesting&hellip;';
+      try {
+        const r = await M.requestAccess(resourceId);
+        const target = $("dec-" + resourceId);
+        if (!r.ok) {
+          target.innerHTML = `<span class="badge err">error</span> ${escapeHtml(r.error || "request failed")}`;
+          toast("err", r.error || "Access request failed");
+          return;
+        }
+        const d = r.data;
+        const score = d.trust_score == null ? "&mdash;" : Math.round(d.trust_score);
+        if (d.decision === "allow") {
+          const exp = d.expires_at ? new Date(d.expires_at).toLocaleTimeString() : "&mdash;";
+          const url = d.access_url || "";
+          const openBtn = url
+            ? `<button class="btn-sm" onclick="openAccessUrl(${JSON.stringify(url)})">Open Access Session</button>`
+            : "";
+          target.innerHTML =
+            `<span class="badge ok">ALLOW</span> ` +
+            `${escapeHtml(d.reason || "")} (score ${score} / required ${d.required_score ?? 0})<br>` +
+            `<span class="badge neutral">Session expires ${exp}</span>` +
+            openBtn;
+          toast("ok", `ALLOW: ${d.reason}`);
+        } else {
+          target.innerHTML =
+            `<span class="badge err">DENY</span> ` +
+            `${escapeHtml(d.reason || "")} (score ${score} / required ${d.required_score ?? 0})`;
+          toast("err", `DENY: ${d.reason}`);
+        }
+      } catch (e) {
+        toast("err", String(e?.message || e));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Request Access";
+      }
+    }
+
+    async function openAccessUrl(url) {
+      try {
+        await M.openAccessUrl(url);
+      } catch (e) {
+        toast("err", String(e?.message || e));
+      }
+    }
+
+    $("btnReloadRes").addEventListener("click", loadResources);
+
+    // ── Settings ──
+    async function loadSettings() {
+      const snap = await M.getSnapshot();
+      $("settingsUrl").value = snap.url || "";
+      $("setHostname").textContent = snap.hostname || "—";
+      try {
+        $("setFingerprint").textContent = await M.getFingerprint();
+      } catch {
+        $("setFingerprint").textContent = "(unavailable)";
+      }
+    }
+
+    $("btnSaveUrl").addEventListener("click", async () => {
+      const v = $("settingsUrl").value.trim();
+      const r = await M.setBackendUrl(v);
+      if (r.ok) {
+        if (r.reauth) {
+          toast("ok", "URL changed — signing you out to reconnect.");
+        } else {
+          toast("ok", "Saved.");
+          tick();
+        }
+      } else {
+        toast("err", r.error || "Could not save");
+      }
+    });
+    $("btnSignOut").addEventListener("click", () => M.disconnect());
+
+    function escapeHtml(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      })[c]);
+    }
+
+    // ── Tunnel Client card ──
+    const TUNNEL_BADGES = {
+      not_installed:        { cls: "neutral", label: "Not installed" },
+      installed_not_joined: { cls: "warn",    label: "Installed, not joined" },
+      joined:               { cls: "ok",      label: "Joined" },
+      unknown:              { cls: "neutral", label: "Unknown" },
+    };
+
+    async function refreshTunnel() {
+      try {
+        const r = await M.tunnelDetect();
+        const status = (r && r.status) || "unknown";
+        const meta = TUNNEL_BADGES[status] || TUNNEL_BADGES.unknown;
+        const badge = $("tunnelBadge");
+        badge.className = "badge " + meta.cls;
+        badge.textContent = meta.label;
+        $("tunnelNode").textContent = (r && r.node_name) ? r.node_name : "—";
+        $("tunnelIp").textContent = (r && r.wireguard_ip) ? r.wireguard_ip : "—";
+        $("tunnelLogin").textContent = (r && r.login_server) ? r.login_server : "—";
+        $("tunnelActions").style.display = status === "joined" ? "none" : "";
+      } catch (e) {
+        const badge = $("tunnelBadge");
+        badge.className = "badge neutral";
+        badge.textContent = "Unknown";
+        $("tunnelActions").style.display = "";
+      }
+    }
+
+    function openTunnelModal() {
+      $("tunnelModalMessage").textContent = "Loading…";
+      $("tunnelModalSteps").textContent = "";
+      $("tunnelModalCmd").textContent = "";
+      $("tunnelModalCmdWrap").style.display = "none";
+      $("tunnelModal").classList.add("show");
+    }
+    function closeTunnelModal() {
+      $("tunnelModal").classList.remove("show");
+    }
+    function renderTunnelEnrollment(data) {
+      const msg = (data && typeof data.safe_message === "string") ? data.safe_message : "";
+      $("tunnelModalMessage").textContent = msg || "(no message)";
+
+      const ol = $("tunnelModalSteps");
+      ol.textContent = "";
+      const steps = (data && Array.isArray(data.instructions)) ? data.instructions : [];
+      steps.forEach((step) => {
+        const li = document.createElement("li");
+        li.textContent = String(step ?? "");
+        ol.appendChild(li);
+      });
+
+      const cmd = (data && typeof data.manual_command === "string") ? data.manual_command : "";
+      if (cmd) {
+        $("tunnelModalCmd").textContent = cmd;
+        $("tunnelModalCmdWrap").style.display = "";
+      } else {
+        $("tunnelModalCmdWrap").style.display = "none";
+      }
+    }
+
+    $("btnTunnelInstructions").addEventListener("click", async () => {
+      const btn = $("btnTunnelInstructions");
+      btn.disabled = true;
+      openTunnelModal();
+      try {
+        const r = await M.tunnelEnrollment();
+        if (!r || !r.ok) {
+          $("tunnelModalMessage").textContent =
+            "Failed to fetch enrollment instructions: " + ((r && r.error) || "unknown");
+          $("tunnelModalSteps").textContent = "";
+          $("tunnelModalCmdWrap").style.display = "none";
+        } else {
+          renderTunnelEnrollment(r.data || {});
+        }
+      } catch (e) {
+        $("tunnelModalMessage").textContent =
+          "Failed to fetch enrollment instructions: " + String(e && e.message ? e.message : e);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    $("btnTunnelCopy").addEventListener("click", async () => {
+      const cmd = $("tunnelModalCmd").textContent || "";
+      if (!cmd) return;
+      try {
+        await navigator.clipboard.writeText(cmd);
+        toast("ok", "Command copied to clipboard");
+      } catch (e) {
+        toast("err", "Copy failed: " + String(e && e.message ? e.message : e));
+      }
+    });
+
+    $("btnTunnelClose").addEventListener("click", closeTunnelModal);
+    $("tunnelModal").addEventListener("click", (e) => {
+      if (e.target === $("tunnelModal")) closeTunnelModal();
+    });
+
+    refreshTunnel();
+    setInterval(refreshTunnel, 30_000);
 
     tick();
     setInterval(tick, 5000);

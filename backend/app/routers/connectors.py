@@ -17,18 +17,23 @@ import hashlib
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from ..deps import get_db, get_current_admin
+from .. import schemas
 from ..models import (
+    AccessSession,
     EnrollToken, EnrollTokenStatusEnum,
     Connector, ConnectorOnlineStatusEnum,
     ConnectorResource, ResourceProtocolEnum,
     PolicyBinding, ConnectorAccessLog,
+    ProtectedResource,
+    TunnelNode,
     User,
 )
 from ..security import decode_access_token
@@ -557,3 +562,165 @@ def introspect_token(body: IntrospectRequest):
         sub=payload.get("sub"),
         exp=payload.get("exp"),
     )
+
+
+# ── Access session introspect ─────────────────────────────────────────────────
+
+@router.post("/connectors/access/introspect", response_model=schemas.AccessIntrospectResponse,
+             tags=["connectors"])
+def introspect_access_session(
+    body: schemas.AccessIntrospectRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Any:
+    """Validate an access session token.
+
+    The connector authenticates via X-Connector-Id + X-Connector-Secret headers.
+    Returns active=True with resource target info if the session is valid,
+    or active=False with a reason code if it is not.
+    """
+    connector = _verify_connector_auth(request, db)
+
+    token_hash = hashlib.sha256(body.access_token.encode()).hexdigest()
+    session = db.query(AccessSession).filter(AccessSession.id == body.session_id).first()
+
+    if not session:
+        return schemas.AccessIntrospectResponse(active=False, reason="session_not_found")
+
+    if session.session_token_hash != token_hash:
+        return schemas.AccessIntrospectResponse(active=False, reason="token_mismatch")
+
+    if session.status == "revoked":
+        return schemas.AccessIntrospectResponse(active=False, reason="session_revoked")
+
+    now = datetime.now(timezone.utc)
+    if session.expires_at < now:
+        session.status = "expired"
+        db.commit()
+        return schemas.AccessIntrospectResponse(active=False, reason="session_expired")
+
+    if session.status != "active":
+        return schemas.AccessIntrospectResponse(active=False, reason="session_not_active")
+
+    # Connector binding check: if session was bound to a specific connector,
+    # only that connector may introspect it.
+    if session.connector_id and session.connector_id != connector.connector_id:
+        return schemas.AccessIntrospectResponse(active=False, reason="connector_mismatch")
+
+    # Resource must still be enabled
+    resource = (
+        db.query(ProtectedResource).filter(ProtectedResource.id == session.resource_id).first()
+        if session.resource_id else None
+    )
+    if not resource or not resource.enabled:
+        return schemas.AccessIntrospectResponse(active=False, reason="resource_unavailable")
+
+    # Update last_used_at
+    session.last_used_at = now
+    db.commit()
+
+    # Return target info from linked ConnectorResource
+    cr = (
+        db.query(ConnectorResource).filter(
+            ConnectorResource.resource_id == resource.connector_resource_id
+        ).first()
+        if resource.connector_resource_id else None
+    )
+
+    return schemas.AccessIntrospectResponse(
+        active=True,
+        resource_name=resource.name,
+        target_host=cr.target_host if cr else None,
+        target_port=int(cr.target_port) if cr else None,
+        protocol=cr.protocol.value if cr and hasattr(cr.protocol, "value") else (cr.protocol if cr else None),
+        path_prefix=cr.path_prefix if cr else None,
+        expires_at=session.expires_at,
+        user_id=session.user_id,
+    )
+
+
+# ─── Tunnel (WireGuard) endpoints — Phase 3 scaffold ────────────────────────
+# Connector-facing register / heartbeat for metadata only. When
+# HEADSCALE_ENABLED=false (default), both return 202 {"status": "disabled"}
+# without writing to TunnelNode. They do NOT influence the access decision or
+# the HTTP proxy in either flag state.
+
+@router.post("/connectors/{connector_id}/tunnel/register", tags=["connectors"])
+def connector_tunnel_register(
+    connector_id: str,
+    body: schemas.TunnelRegisterIn,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    connector = _verify_connector_auth(request, db)
+    if str(connector.connector_id) != connector_id:
+        raise HTTPException(status_code=403, detail="Connector ID mismatch")
+
+    settings = get_settings()
+    if not settings.headscale_enabled:
+        return JSONResponse(
+            status_code=202,
+            content={"status": "disabled"},
+        )
+
+    node = db.query(TunnelNode).filter(
+        TunnelNode.connector_id == connector.connector_id,
+        TunnelNode.node_name == body.node_name,
+    ).first()
+    if node is None:
+        node = TunnelNode(
+            connector_id=connector.connector_id,
+            node_name=body.node_name,
+            node_key=body.node_key,
+            wireguard_ip=body.wireguard_ip,
+            status="pending",
+        )
+        db.add(node)
+    else:
+        if body.node_key is not None:
+            node.node_key = body.node_key
+        if body.wireguard_ip is not None:
+            node.wireguard_ip = body.wireguard_ip
+    db.commit()
+    db.refresh(node)
+
+    return {
+        "node_id": str(node.id),
+        "wireguard_ip": node.wireguard_ip,
+        "headscale_user": settings.headscale_user,
+        "status": node.status,
+    }
+
+
+@router.post("/connectors/{connector_id}/tunnel/heartbeat", tags=["connectors"])
+def connector_tunnel_heartbeat(
+    connector_id: str,
+    body: schemas.TunnelHeartbeatIn,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    connector = _verify_connector_auth(request, db)
+    if str(connector.connector_id) != connector_id:
+        raise HTTPException(status_code=403, detail="Connector ID mismatch")
+
+    settings = get_settings()
+    if not settings.headscale_enabled:
+        return JSONResponse(
+            status_code=202,
+            content={"status": "disabled"},
+        )
+
+    node = db.query(TunnelNode).filter(
+        TunnelNode.connector_id == connector.connector_id,
+        TunnelNode.node_name == body.node_name,
+    ).first()
+    if node is None:
+        raise HTTPException(status_code=404, detail="Tunnel node not registered")
+
+    node.status = body.status
+    node.last_seen_at = datetime.now(timezone.utc)
+    if body.wireguard_ip is not None:
+        node.wireguard_ip = body.wireguard_ip
+    db.commit()
+
+    return {"ok": True, "status": node.status}

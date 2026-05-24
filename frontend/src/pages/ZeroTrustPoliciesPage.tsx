@@ -13,6 +13,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   FaShieldAlt,
+  FaShieldAlt as FaShieldAltB,
   FaCog,
   FaHistory,
   FaLock,
@@ -26,6 +27,8 @@ import {
   FaExternalLinkAlt,
   FaSpinner,
   FaInfoCircle,
+  FaLaptop,
+  FaNetworkWired,
 } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import {
@@ -129,8 +132,6 @@ const ZeroTrustPoliciesPage: React.FC = () => {
       const response = await api.get('/azure/subscribed-skus');
       const skus = response.data.skus || [];
       
-      console.log('Raw SKUs from Azure:', skus);
-      
       // Comprehensive SKU to license mapping
       // Reference: https://learn.microsoft.com/en-us/entra/identity/users/licensing-service-plan-reference
       const skuMapping: Record<string, LicenseKey[]> = {
@@ -208,31 +209,27 @@ const ZeroTrustPoliciesPage: React.FC = () => {
       // Check each SKU
       skus.forEach((sku: any) => {
         const skuPart = (sku.skuPartNumber || '').toUpperCase();
-        console.log(`Checking SKU: ${skuPart}`);
-        
+
         // Direct SKU match
         Object.entries(skuMapping).forEach(([pattern, licenses]) => {
           if (skuPart === pattern.toUpperCase() || skuPart.includes(pattern.toUpperCase())) {
-            console.log(`  Matched SKU pattern: ${pattern} -> ${licenses.join(', ')}`);
             licenses.forEach(lic => { detected[lic] = true; });
           }
         });
-        
+
         // Check service plans within the SKU
         const servicePlans = sku.servicePlans || [];
         servicePlans.forEach((plan: any) => {
           const planName = (plan.servicePlanName || '').toUpperCase();
           Object.entries(servicePlanMapping).forEach(([pattern, licenses]) => {
             if (planName === pattern.toUpperCase() || planName.includes(pattern.toUpperCase())) {
-              console.log(`  Matched service plan: ${planName} -> ${licenses.join(', ')}`);
               licenses.forEach(lic => { detected[lic] = true; });
             }
           });
         });
       });
-      
+
       const detectedCount = Object.values(detected).filter(Boolean).length;
-      console.log(`Detected ${detectedCount} licenses:`, detected);
       
       if (detectedCount === 0 && skus.length > 0) {
         // Show warning with raw SKU names for debugging
@@ -242,7 +239,6 @@ const ZeroTrustPoliciesPage: React.FC = () => {
       
       setDetectedLicenses(detected);
     } catch (error: any) {
-      console.error('Failed to detect licenses:', error);
       setLicenseError(error.response?.data?.detail || 'Unable to detect licenses from Azure. Configure them manually.');
     } finally {
       setLoadingLicenses(false);
@@ -549,8 +545,6 @@ export default ZeroTrustPoliciesPage;
 /* ------------------------------------------------------------------ */
 /*  FYP Module Weights + Access Threshold                             */
 /* ------------------------------------------------------------------ */
-
-import { FaCog, FaLaptop, FaNetworkWired, FaShieldAlt as FaShieldAltB } from 'react-icons/fa';
 
 const FypModuleWeightsCard: React.FC = () => {
   const moduleWeights = useZeroTrustStore(s => s.moduleWeights);

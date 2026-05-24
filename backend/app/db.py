@@ -38,3 +38,30 @@ def init_db() -> None:
     from . import models  # noqa: F401  # ensure models are imported and registered
 
     Base.metadata.create_all(bind=engine)
+
+    # Idempotent schema migrations for columns added after initial create_all.
+    # Each statement uses IF NOT EXISTS / ON CONFLICT DO NOTHING so they are
+    # safe to run on every startup.
+    _run_migrations()
+
+
+def _run_migrations() -> None:
+    """Apply incremental DDL changes that create_all cannot handle."""
+    from sqlalchemy import text
+
+    migrations = [
+        # connector_resource_id added to protected_resources
+        """
+        ALTER TABLE protected_resources
+          ADD COLUMN IF NOT EXISTS connector_resource_id uuid
+          REFERENCES connector_resources(resource_id) ON DELETE SET NULL
+        """,
+    ]
+    with engine.connect() as conn:
+        for stmt in migrations:
+            try:
+                conn.execute(text(stmt))
+            except Exception:
+                conn.rollback()
+                raise
+        conn.commit()

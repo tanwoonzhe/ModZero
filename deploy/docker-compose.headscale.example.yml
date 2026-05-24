@@ -1,0 +1,38 @@
+# Optional Headscale service for the ModZero foundation milestone.
+#
+# This file is NOT included by the main docker-compose.yml. Run it as a side
+# stack only when you want to bring up a local Headscale instance to test the
+# Phase 3 scaffold (admin Tunnels page + connector tunnel/register|heartbeat).
+#
+# Usage:
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.headscale.example.yml up -d headscale
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.headscale.example.yml exec headscale \
+#       headscale apikeys create
+#
+# The backend does NOT call this service this milestone — HEADSCALE_URL and
+# HEADSCALE_API_KEY are stored/configurable only. See deploy/HEADSCALE.md.
+
+services:
+  headscale:
+    image: headscale/headscale:0.23.0
+    container_name: modzero-headscale
+    restart: unless-stopped
+    command: ["headscale", "serve"]
+    ports:
+      - "8080:8080"     # HTTP control / admin
+      - "9090:9090"     # metrics
+    environment:
+      - TZ=UTC
+    volumes:
+      - headscale_data:/var/lib/headscale
+      - headscale_config:/etc/headscale
+    networks:
+      - modzero-headscale-net
+
+volumes:
+  headscale_data:
+  headscale_config:
+
+networks:
+  modzero-headscale-net:
+    driver: bridge

@@ -31,6 +31,9 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
+import { collectPosture, getOrCreateFingerprint } from "./posture";
+import { detectTunnel } from "./tunnel-detect";
+
 const isDev = !app.isPackaged;
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -435,6 +438,130 @@ ipcMain.on("window-maximize", () => {
   else mainWindow?.maximize();
 });
 ipcMain.on("window-close", () => mainWindow?.close());
+
+// ── Backend API helpers ─────────────────────────────────────────────────
+function forceReauth(reason: string): void {
+  const cfg = readConfig();
+  delete cfg.accessToken;
+  delete cfg.identity;
+  delete cfg.lastUser;
+  delete cfg.enrolledAt;
+  writeConfig(cfg);
+  session.healthy = false;
+  session.trustScore = null;
+  stopHeartbeat();
+  if (mainWindow) showOnboarding();
+  updateTrayMenu();
+  console.warn("Forced re-auth:", reason);
+}
+
+function authedRequest(
+  method: string,
+  apiPath: string,
+  body?: unknown,
+): Promise<{ ok: boolean; status: number; data: unknown; error?: string }> {
+  const cfg = readConfig();
+  if (!cfg.url || !cfg.accessToken) {
+    return Promise.resolve({ ok: false, status: 0, data: null, error: "Not connected" });
+  }
+  const url = cfg.url + apiPath;
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${cfg.accessToken}`,
+  };
+  let raw: string | undefined;
+  if (body !== undefined) {
+    raw = JSON.stringify(body);
+    headers["Content-Type"] = "application/json";
+  }
+  return httpJson(url, { method, headers, body: raw, timeoutMs: 8000 })
+    .then((r) => {
+      let parsed: unknown = null;
+      try { parsed = r.body ? JSON.parse(r.body) : null; } catch { parsed = r.body; }
+      const ok = r.status >= 200 && r.status < 300;
+      if (r.status === 401 || r.status === 403) {
+        // Token rejected — wipe and force re-auth so the user is not stuck.
+        forceReauth(`HTTP ${r.status} from ${apiPath}`);
+      }
+      return {
+        ok,
+        status: r.status,
+        data: parsed,
+        error: ok ? undefined : (typeof parsed === "object" && parsed && "detail" in parsed
+          ? String((parsed as { detail: unknown }).detail)
+          : `HTTP ${r.status}`),
+      };
+    })
+    .catch((e) => ({ ok: false, status: 0, data: null, error: String(e?.message || e) }));
+}
+
+// ── Posture / resources / access IPC ────────────────────────────────────
+ipcMain.handle("modzero:collect-posture", () => collectPosture());
+
+ipcMain.handle("modzero:run-device-check", async () => {
+  const signals = collectPosture();
+  const result = await authedRequest("POST", "/api/posture/report", signals);
+  return { signals, result };
+});
+
+ipcMain.handle("modzero:trust-latest", () => authedRequest("GET", "/api/trust/latest"));
+
+ipcMain.handle("modzero:list-resources", () => authedRequest("GET", "/api/resources"));
+
+ipcMain.handle("modzero:request-access", async (_evt, args: { resource_id: string }) => {
+  if (!args || !args.resource_id) {
+    return { ok: false, status: 0, data: null, error: "resource_id required" };
+  }
+  return authedRequest("POST", "/api/access/request", { resource_id: args.resource_id });
+});
+
+ipcMain.handle("modzero:open-access-url", async (_evt, url: string) => {
+  if (url && (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("modzero://"))) {
+    await shell.openExternal(url);
+  }
+});
+
+// ── Settings (backend URL) ──────────────────────────────────────────────
+ipcMain.handle("modzero:set-backend-url", (_evt, url: string) => {
+  const v = (url || "").trim().replace(/\/+$/, "");
+  if (!v) return { ok: false, error: "URL required" };
+  const cfg = readConfig();
+  const urlChanged = cfg.url !== v;
+  cfg.url = v;
+  if (urlChanged) {
+    // Token issued by the old server is useless on the new one — force re-login.
+    delete cfg.accessToken;
+    delete cfg.identity;
+    delete cfg.lastUser;
+    delete cfg.enrolledAt;
+    writeConfig(cfg);
+    session.healthy = false;
+    session.trustScore = null;
+    stopHeartbeat();
+    showOnboarding();
+    updateTrayMenu();
+    return { ok: true, url: v, reauth: true };
+  }
+  writeConfig(cfg);
+  return { ok: true, url: v };
+});
+
+ipcMain.handle("modzero:get-fingerprint", () => getOrCreateFingerprint());
+
+// ── Tunnel readiness + enrollment ───────────────────────────────────────
+ipcMain.handle("modzero:tunnel-detect", () => detectTunnel());
+
+ipcMain.handle(
+  "modzero:tunnel-enrollment",
+  async (
+    _evt,
+    args: { device_id?: string; node_name_hint?: string } | undefined,
+  ) => {
+    const body = args
+      ? { device_id: args.device_id, node_name_hint: args.node_name_hint }
+      : {};
+    return authedRequest("POST", "/api/tunnels/user-enrollment", body);
+  },
+);
 
 // ── App lifecycle ───────────────────────────────────────────────────────
 app.whenReady().then(() => {

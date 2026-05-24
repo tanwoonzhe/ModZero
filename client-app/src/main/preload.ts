@@ -16,6 +16,28 @@ contextBridge.exposeInMainWorld("modzero", {
   heartbeatNow: (): Promise<unknown> => ipcRenderer.invoke("modzero:heartbeat-now"),
   openFullDashboard: (): Promise<void> => ipcRenderer.invoke("modzero:open-full"),
   disconnect: (): Promise<void> => ipcRenderer.invoke("modzero:disconnect"),
+
+  // Posture / device check
+  collectPosture: (): Promise<unknown> => ipcRenderer.invoke("modzero:collect-posture"),
+  runDeviceCheck: (): Promise<unknown> => ipcRenderer.invoke("modzero:run-device-check"),
+  trustLatest: (): Promise<unknown> => ipcRenderer.invoke("modzero:trust-latest"),
+  getFingerprint: (): Promise<string> => ipcRenderer.invoke("modzero:get-fingerprint"),
+
+  // Resources / access
+  listResources: (): Promise<unknown> => ipcRenderer.invoke("modzero:list-resources"),
+  requestAccess: (resourceId: string): Promise<unknown> =>
+    ipcRenderer.invoke("modzero:request-access", { resource_id: resourceId }),
+  openAccessUrl: (url: string): Promise<void> =>
+    ipcRenderer.invoke("modzero:open-access-url", url),
+
+  // Settings
+  setBackendUrl: (url: string): Promise<unknown> =>
+    ipcRenderer.invoke("modzero:set-backend-url", url),
+
+  // Tunnel readiness + enrollment
+  tunnelDetect: (): Promise<unknown> => ipcRenderer.invoke("modzero:tunnel-detect"),
+  tunnelEnrollment: (args?: { device_id?: string; node_name_hint?: string }): Promise<unknown> =>
+    ipcRenderer.invoke("modzero:tunnel-enrollment", args || {}),
 });
 
 contextBridge.exposeInMainWorld("electronAPI", {

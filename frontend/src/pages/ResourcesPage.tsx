@@ -1,181 +1,125 @@
 import React, { useEffect, useState } from "react";
 import {
-  FaNetworkWired,
-  FaServer,
-  FaCloud,
-  FaDatabase,
-  FaDesktop,
-  FaGlobe,
-  FaPlus,
-  FaSearch,
-  FaChevronDown,
-  FaChevronRight,
-  FaCircle,
-  FaSyncAlt,
-  FaTrash,
-  FaTimes,
-  FaPlug,
+  FaGlobe, FaPlus, FaSearch, FaSyncAlt, FaTrash, FaTimes, FaPencilAlt,
+  FaCheck, FaLock, FaCircle, FaPlug,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 import api from "../api";
 
-interface Resource {
+interface ProtectedResource {
+  id: string;
+  name: string;
+  description: string | null;
+  resource_type: string;
+  internal_address: string | null;
+  public_name: string | null;
+  required_group: string | null;
+  minimum_trust_score: number;
+  require_intune_compliant: boolean;
+  enabled: boolean;
+  connector_resource_id: string | null;
+  connector_status: "online" | "degraded" | "offline" | null;
+  preferred_access_mode?: "auto" | "http_proxy" | "wireguard_tunnel" | null;
+  require_tunnel?: boolean | null;
+  allow_http_fallback?: boolean | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const ACCESS_MODE_META: Record<string, { label: string; cls: string }> = {
+  auto:             { label: "Auto",     cls: "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300" },
+  http_proxy:       { label: "HTTP",     cls: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300" },
+  wireguard_tunnel: { label: "Tunnel",   cls: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300" },
+};
+
+interface ConnectorResource {
   resource_id: string;
   name: string;
-  type: string;
-  connector_status: string;
-  ip_address?: string;
-  port?: number;
-  last_seen?: string;
-  // Phase 1/2 zero-trust proxy fields (returned by /api/resources/)
-  slug?: string | null;
-  target_host?: string | null;
-  target_port?: number | null;
-  target_scheme?: string | null;
-  path_prefix?: string | null;
+  network: string;
+  protocol: string;
+  target_host: string;
+  target_port: number;
+  connector_id: string | null;
 }
 
-interface Network {
-  network_id: string;
-  name: string;
-  cidr_range: string;
-  connector_health: "green" | "amber" | "red";
-  location?: string;
-  resources: Resource[];
-  last_check?: string;
-  connector_name?: string;
-  connector_count?: number;
+const TYPES = ["web", "ssh", "rdp", "database", "api"];
+
+function ConnectorStatusBadge({ status }: { status: string | null }) {
+  if (!status) return <span className="text-gray-400 text-xs">—</span>;
+  const map: Record<string, { cls: string; dot: string; label: string }> = {
+    online:   { cls: "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400",   dot: "text-green-500",  label: "Online"   },
+    degraded: { cls: "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400", dot: "text-yellow-500", label: "Degraded" },
+    offline:  { cls: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400",           dot: "text-red-500",    label: "Offline"  },
+  };
+  const m = map[status] ?? map.offline;
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${m.cls}`}>
+      <FaCircle size={6} className={m.dot} /> {m.label}
+    </span>
+  );
 }
-
-const healthColors = {
-  green: { bg: "bg-green-100 dark:bg-green-900/30", text: "text-green-700 dark:text-green-400", dot: "bg-green-500" },
-  amber: { bg: "bg-amber-100 dark:bg-amber-900/30", text: "text-amber-700 dark:text-amber-400", dot: "bg-amber-500" },
-  red: { bg: "bg-red-100 dark:bg-red-900/30", text: "text-red-700 dark:text-red-400", dot: "bg-red-500" },
-};
-
-const resourceIcons: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
-  server: FaServer,
-  cloud: FaCloud,
-  database: FaDatabase,
-  desktop: FaDesktop,
-  default: FaGlobe,
-};
 
 const ResourcesPage: React.FC = () => {
-  const [networks, setNetworks] = useState<Network[]>([]);
+  const [resources, setResources] = useState<ProtectedResource[]>([]);
+  const [connectorResources, setConnectorResources] = useState<ConnectorResource[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [expandedNetworks, setExpandedNetworks] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
-  const [showAddNetworkModal, setShowAddNetworkModal] = useState(false);
-  const [showAddResourceModal, setShowAddResourceModal] = useState(false);
-  const [selectedNetworkForResource, setSelectedNetworkForResource] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [editing, setEditing] = useState<ProtectedResource | null>(null);
 
-  const fetchNetworks = async () => {
-    setLoadError(null);
+  const fetchAll = async () => {
     try {
-      const res = await api.get<Network[]>("/resources");
-      setNetworks(res.data);
-      // Auto-expand all networks after fetch
-      setExpandedNetworks(new Set(res.data.map((n) => n.network_id)));
+      const [resRes, crRes] = await Promise.all([
+        api.get<ProtectedResource[]>("/resources"),
+        api.get<ConnectorResource[]>("/admin/connectors/resources").catch(() => ({ data: [] })),
+      ]);
+      setResources(resRes.data);
+      setConnectorResources(crRes.data);
     } catch (err: any) {
-      console.error(err);
-      setLoadError(err.response?.data?.detail || "Failed to load networks from API");
+      toast.error(err.response?.data?.detail || "Failed to load resources");
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchNetworks();
-  }, []);
+  useEffect(() => { fetchAll(); }, []);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    setLoading(true);
-    await fetchNetworks();
+    await fetchAll();
     setRefreshing(false);
-    toast.success("Resources refreshed");
+    toast.success("Refreshed");
   };
 
-  const handleDeleteNetwork = async (networkId: string, name: string) => {
-    if (!confirm(`Delete network "${name}" and all its resources? This cannot be undone.`)) return;
-    try {
-      await api.delete(`/resources/networks/${networkId}`);
-      toast.success("Network deleted");
-      await fetchNetworks();
-    } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Failed to delete network");
-    }
-  };
-
-  const handleDeleteResource = async (networkId: string, resourceId: string, name: string) => {
+  const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete resource "${name}"?`)) return;
     try {
-      await api.delete(`/resources/networks/${networkId}/resources/${resourceId}`);
+      await api.delete(`/resources/${id}`);
       toast.success("Resource deleted");
-      await fetchNetworks();
+      await fetchAll();
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Failed to delete resource");
+      toast.error(err.response?.data?.detail || "Failed to delete");
     }
   };
 
-  const toggleNetwork = (networkId: string) => {
-    setExpandedNetworks((prev) => {
-      const next = new Set(prev);
-      if (next.has(networkId)) {
-        next.delete(networkId);
-      } else {
-        next.add(networkId);
-      }
-      return next;
-    });
-  };
-
-  const getResourceIcon = (type: string) => {
-    return resourceIcons[type] || resourceIcons.default;
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "online":
-        return "text-green-500";
-      case "degraded":
-        return "text-amber-500";
-      case "offline":
-        return "text-red-500";
-      default:
-        return "text-gray-500";
-    }
-  };
-
-  const filteredNetworks = networks.filter((net) => {
-    const matchesNetwork = net.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      net.cidr_range.includes(searchTerm);
-    const matchesResource = net.resources.some(
-      (r) => r.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-    return matchesNetwork || matchesResource;
-  });
-
-  // Stats
-  const totalResources = networks.reduce((acc, n) => acc + n.resources.length, 0);
-  const onlineResources = networks.reduce(
-    (acc, n) => acc + n.resources.filter((r) => r.connector_status === "online").length,
-    0
+  const filtered = resources.filter(
+    (r) =>
+      r.name.toLowerCase().includes(search.toLowerCase()) ||
+      (r.public_name || "").toLowerCase().includes(search.toLowerCase()) ||
+      (r.internal_address || "").toLowerCase().includes(search.toLowerCase()),
   );
-  const healthyNetworks = networks.filter((n) => n.connector_health === "green").length;
+
+  const enabledCount = resources.filter((r) => r.enabled).length;
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Resources</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Protected Resources</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Manage networks and protected resources
-            {loadError && <span className="ml-2 text-amber-600">• {loadError}</span>}
+            {resources.length} resources &bull; {enabledCount} enabled
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -185,63 +129,14 @@ const ResourcesPage: React.FC = () => {
             className="flex items-center gap-2 px-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
             <FaSyncAlt size={14} className={refreshing ? "animate-spin" : ""} />
-            <span>Refresh</span>
+            Refresh
           </button>
-          <button 
-            onClick={() => setShowAddNetworkModal(true)}
+          <button
+            onClick={() => setShowCreate(true)}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
           >
-            <FaPlus size={14} />
-            <span>Add Network</span>
+            <FaPlus size={14} /> Add Resource
           </button>
-        </div>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
-              <FaNetworkWired className="text-indigo-600 dark:text-indigo-400" size={24} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{networks.length}</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Networks</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-              <FaServer className="text-blue-600 dark:text-blue-400" size={24} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{totalResources}</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Total Resources</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-green-100 dark:bg-green-900/30 rounded-lg">
-              <FaCircle className="text-green-600 dark:text-green-400" size={24} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{onlineResources}</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Online Resources</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg">
-              <FaGlobe className="text-emerald-600 dark:text-emerald-400" size={24} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{healthyNetworks}</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Healthy Networks</p>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -251,464 +146,428 @@ const ResourcesPage: React.FC = () => {
           <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
           <input
             type="text"
-            placeholder="Search networks or resources..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search by name, public name, or address…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500"
           />
         </div>
       </div>
 
-      {/* Networks List */}
+      {/* Table */}
       {loading ? (
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600" />
         </div>
-      ) : (
-        <div className="space-y-4">
-          {filteredNetworks.map((network) => {
-            const healthStyle = healthColors[network.connector_health];
-            const isExpanded = expandedNetworks.has(network.network_id);
-            
-            return (
-              <div
-                key={network.network_id}
-                className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden"
-              >
-                {/* Network Header */}
-                <div
-                  className="p-5 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-750"
-                  onClick={() => toggleNetwork(network.network_id)}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="p-3 bg-gray-100 dark:bg-gray-700 rounded-lg">
-                        <FaNetworkWired className="text-gray-600 dark:text-gray-400" size={20} />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-3">
-                          <h3 className="font-semibold text-gray-900 dark:text-white">{network.name}</h3>
-                          <span className={`px-2 py-1 text-xs font-medium rounded-full flex items-center gap-1 ${healthStyle.bg} ${healthStyle.text}`}>
-                            <span className={`w-2 h-2 rounded-full ${healthStyle.dot}`}></span>
-                            {network.connector_health === "green" ? "Healthy" : network.connector_health === "amber" ? "Degraded" : "Offline"}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-4 mt-1 text-sm text-gray-500 dark:text-gray-400">
-                          <span>CIDR: {network.cidr_range}</span>
-                          {network.location && <span>• {network.location}</span>}
-                          <span>• {network.resources.length} resources</span>
-                          {network.connector_name && (
-                            <span className="flex items-center gap-1">
-                              • <FaPlug className="text-xs" /> {network.connector_name}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDeleteNetwork(network.network_id, network.name); }}
-                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg"
-                        title="Delete network"
-                      >
-                        <FaTrash size={14} />
-                      </button>
-                      {isExpanded ? (
-                        <FaChevronDown className="text-gray-400" size={14} />
-                      ) : (
-                        <FaChevronRight className="text-gray-400" size={14} />
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Resources List */}
-                {isExpanded && network.resources.length > 0 && (
-                  <div className="border-t border-gray-100 dark:border-gray-700">
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead className="bg-gray-50 dark:bg-gray-900/50">
-                          <tr>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Protected route</th>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Target</th>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                            <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                          {network.resources.map((resource) => {
-                            const Icon = getResourceIcon(resource.type);
-                            return (
-                              <tr key={resource.resource_id} className="hover:bg-gray-50 dark:hover:bg-gray-750">
-                                <td className="px-5 py-4 whitespace-nowrap">
-                                  <div className="flex items-center gap-3">
-                                    <Icon className="text-gray-400" size={16} />
-                                    <span className="text-sm font-medium text-gray-900 dark:text-white">{resource.name}</span>
-                                  </div>
-                                </td>
-                                <td className="px-5 py-4 whitespace-nowrap">
-                                  <span className="text-sm text-gray-500 dark:text-gray-400 capitalize">{resource.type}</span>
-                                </td>
-                                <td className="px-5 py-4 whitespace-nowrap">
-                                  {resource.slug ? (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded font-mono text-xs bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
-                                      /r/{resource.slug}{resource.path_prefix && resource.path_prefix !== "/" ? resource.path_prefix : ""}
-                                    </span>
-                                  ) : (
-                                    <span className="text-sm text-gray-400">—</span>
-                                  )}
-                                </td>
-                                <td className="px-5 py-4 whitespace-nowrap">
-                                  <span className="text-sm font-mono text-gray-600 dark:text-gray-400">
-                                    {resource.target_host
-                                      ? `${resource.target_scheme || "http"}://${resource.target_host}${
-                                          resource.target_port && resource.target_port !== 80 && resource.target_port !== 443
-                                            ? ":" + resource.target_port
-                                            : ""
-                                        }`
-                                      : resource.ip_address
-                                      ? `${resource.ip_address}${resource.port ? ":" + resource.port : ""}`
-                                      : "-"}
-                                  </span>
-                                </td>
-                                <td className="px-5 py-4 whitespace-nowrap">
-                                  <div className="flex items-center gap-2">
-                                    <FaCircle className={getStatusColor(resource.connector_status)} size={8} />
-                                    <span className="text-sm capitalize text-gray-700 dark:text-gray-300">
-                                      {resource.connector_status}
-                                    </span>
-                                  </div>
-                                </td>
-                                <td className="px-5 py-4 whitespace-nowrap">
-                                  <button
-                                    onClick={() => handleDeleteResource(network.network_id, resource.resource_id, resource.name)}
-                                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
-                                    title="Delete resource"
-                                  >
-                                    <FaTrash size={12} />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {/* Empty Resources */}
-                {isExpanded && network.resources.length === 0 && (
-                  <div className="border-t border-gray-100 dark:border-gray-700 p-8 text-center">
-                    <FaServer className="mx-auto text-gray-300 dark:text-gray-600 mb-3" size={32} />
-                    <p className="text-sm text-gray-500 dark:text-gray-400">No resources in this network</p>
-                    <button 
-                      onClick={() => {
-                        setSelectedNetworkForResource(network.network_id);
-                        setShowAddResourceModal(true);
-                      }}
-                      className="mt-3 text-sm text-indigo-600 hover:text-indigo-700 font-medium"
-                    >
-                      + Add Resource
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Empty State */}
-      {!loading && filteredNetworks.length === 0 && (
+      ) : filtered.length === 0 ? (
         <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-          <FaNetworkWired className="mx-auto text-gray-300 dark:text-gray-600 mb-4" size={48} />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No networks found</h3>
-          <p className="text-gray-500 dark:text-gray-400 mb-4">Add your first network to start protecting resources</p>
-          <button 
-            onClick={() => setShowAddNetworkModal(true)}
+          <FaGlobe className="mx-auto text-gray-300 dark:text-gray-600 mb-4" size={48} />
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No resources found</h3>
+          <p className="text-gray-500 dark:text-gray-400 mb-4">Add a protected resource to start enforcing access policies</p>
+          <button
+            onClick={() => setShowCreate(true)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
           >
-            <FaPlus size={14} /> Add Network
+            <FaPlus size={14} /> Add Resource
           </button>
+        </div>
+      ) : (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 dark:bg-gray-900/50">
+                <tr className="text-left text-xs uppercase text-gray-500 dark:text-gray-400">
+                  <th className="px-5 py-3">Name</th>
+                  <th className="px-5 py-3">Type</th>
+                  <th className="px-5 py-3">Public name / Address</th>
+                  <th className="px-5 py-3">Min score</th>
+                  <th className="px-5 py-3">Intune</th>
+                  <th className="px-5 py-3">Connector</th>
+                  <th className="px-5 py-3">Status</th>
+                  <th className="px-5 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                {filtered.map((r) => (
+                  <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-gray-750">
+                    <td className="px-5 py-4">
+                      <div className="font-medium text-gray-900 dark:text-white">{r.name}</div>
+                      {r.description && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]" title={r.description}>
+                          {r.description}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1.5 mt-1">
+                        {(() => {
+                          const mode = r.preferred_access_mode || "auto";
+                          const meta = ACCESS_MODE_META[mode] || ACCESS_MODE_META.auto;
+                          return (
+                            <span
+                              className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded font-medium ${meta.cls}`}
+                              title={`Preferred access mode: ${mode}`}
+                            >
+                              {meta.label}
+                            </span>
+                          );
+                        })()}
+                        {r.require_tunnel && (
+                          <FaLock
+                            className="text-emerald-500"
+                            size={10}
+                            title="Tunnel required for this resource"
+                          />
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium capitalize">
+                        {r.resource_type}
+                      </span>
+                    </td>
+                    <td className="px-5 py-4">
+                      {r.public_name && <div className="text-gray-900 dark:text-white">{r.public_name}</div>}
+                      {r.internal_address && <div className="font-mono text-xs text-gray-500 dark:text-gray-400">{r.internal_address}</div>}
+                      {!r.public_name && !r.internal_address && <span className="text-gray-400">—</span>}
+                    </td>
+                    <td className="px-5 py-4">
+                      <span className="font-semibold text-gray-900 dark:text-white">{r.minimum_trust_score}</span>
+                    </td>
+                    <td className="px-5 py-4">
+                      {r.require_intune_compliant ? (
+                        <FaLock className="text-amber-500" size={14} title="Intune compliance required" />
+                      ) : (
+                        <span className="text-gray-400 text-xs">No</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      {r.connector_resource_id ? (
+                        <div className="flex items-center gap-1.5">
+                          <FaPlug size={11} className="text-indigo-400" />
+                          <span className="text-xs text-gray-600 dark:text-gray-300 font-mono">
+                            {connectorResources.find(c => c.resource_id === r.connector_resource_id)?.name || r.connector_resource_id.slice(0, 8) + "…"}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400 text-xs">None</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      {r.enabled ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">
+                          <FaCheck size={8} /> Enabled
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 font-medium">
+                          <FaTimes size={8} /> Disabled
+                        </span>
+                      )}
+                      {r.connector_resource_id && (
+                        <div className="mt-1">
+                          <ConnectorStatusBadge status={r.connector_status} />
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setEditing(r)}
+                          className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded"
+                          title="Edit"
+                        >
+                          <FaPencilAlt size={12} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(r.id, r.name)}
+                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                          title="Delete"
+                        >
+                          <FaTrash size={12} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      {/* Add Network Modal */}
-      {showAddNetworkModal && (
-        <AddNetworkModal
-          onClose={() => setShowAddNetworkModal(false)}
-          onSaved={async () => {
-            setShowAddNetworkModal(false);
-            await fetchNetworks();
-            toast.success("Network added successfully");
-          }}
+      {showCreate && (
+        <ResourceFormModal
+          connectorResources={connectorResources}
+          onClose={() => setShowCreate(false)}
+          onSaved={async () => { setShowCreate(false); await fetchAll(); toast.success("Resource created"); }}
         />
       )}
-
-      {/* Add Resource Modal */}
-      {showAddResourceModal && selectedNetworkForResource && (
-        <AddResourceModal
-          onClose={() => {
-            setShowAddResourceModal(false);
-            setSelectedNetworkForResource(null);
-          }}
-          onSaved={async () => {
-            setShowAddResourceModal(false);
-            setSelectedNetworkForResource(null);
-            await fetchNetworks();
-          }}
-          networkId={selectedNetworkForResource}
+      {editing && (
+        <ResourceFormModal
+          initial={editing}
+          connectorResources={connectorResources}
+          onClose={() => setEditing(null)}
+          onSaved={async () => { setEditing(null); await fetchAll(); toast.success("Resource updated"); }}
         />
       )}
     </div>
   );
 };
 
-// Add Network Modal Component
-const AddNetworkModal: React.FC<{
+const BLANK = {
+  name: "", description: "", resource_type: "web",
+  internal_address: "", public_name: "",
+  required_group: "", minimum_trust_score: 0,
+  require_intune_compliant: false, enabled: true,
+  connector_resource_id: "",
+  preferred_access_mode: "auto" as "auto" | "http_proxy" | "wireguard_tunnel",
+  require_tunnel: false,
+  allow_http_fallback: true,
+};
+
+const ResourceFormModal: React.FC<{
+  initial?: ProtectedResource;
+  connectorResources: ConnectorResource[];
   onClose: () => void;
   onSaved: () => Promise<void>;
-}> = ({ onClose, onSaved }) => {
-  const [name, setName] = useState("");
-  const [cidrRange, setCidrRange] = useState("");
-  const [location, setLocation] = useState("");
+}> = ({ initial, connectorResources, onClose, onSaved }) => {
+  const [form, setForm] = useState({
+    ...BLANK,
+    ...initial,
+    connector_resource_id: initial?.connector_resource_id || "",
+    preferred_access_mode: (initial?.preferred_access_mode as any) || "auto",
+    require_tunnel: initial?.require_tunnel ?? false,
+    allow_http_fallback: initial?.allow_http_fallback ?? true,
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isEdit = !!initial;
+
+  const set = (field: string, value: unknown) => setForm((f) => ({ ...f, [field]: value }));
+
+  // Client-side guard: HTTP Proxy only + Require tunnel is contradictory.
+  const tunnelGuardError =
+    form.preferred_access_mode === "http_proxy" && form.require_tunnel
+      ? "HTTP Proxy only cannot require a tunnel"
+      : null;
+  const fallbackDisabled = form.preferred_access_mode === "http_proxy";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (tunnelGuardError) {
+      setError(tunnelGuardError);
+      return;
+    }
     setSaving(true);
     setError(null);
+    const payload = {
+      name: form.name,
+      description: form.description || null,
+      resource_type: form.resource_type,
+      internal_address: form.internal_address || null,
+      public_name: form.public_name || null,
+      required_group: form.required_group || null,
+      minimum_trust_score: Number(form.minimum_trust_score),
+      require_intune_compliant: form.require_intune_compliant,
+      enabled: form.enabled,
+      connector_resource_id: form.connector_resource_id || null,
+      preferred_access_mode: form.preferred_access_mode,
+      require_tunnel: !!form.require_tunnel,
+      allow_http_fallback: !!form.allow_http_fallback,
+    };
     try {
-      await api.post('/resources/networks', {
-        name,
-        cidr_range: cidrRange,
-        location: location || undefined,
-      });
+      if (isEdit) {
+        await api.put(`/resources/${initial!.id}`, payload);
+      } else {
+        await api.post("/resources", payload);
+      }
       await onSaved();
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to create network");
+      setError(err.response?.data?.detail || "Failed to save");
       setSaving(false);
     }
   };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full">
-        <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Add Network</h2>
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center sticky top-0 bg-white dark:bg-gray-800">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+            {isEdit ? "Edit Resource" : "Add Resource"}
+          </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
             <FaTimes size={20} />
           </button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Network Name *</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name *</label>
             <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
+              required value={form.name} onChange={(e) => set("name", e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
-              placeholder="e.g., Corporate Network"
+              placeholder="e.g., AlphaTechs Intranet"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">CIDR Range *</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
             <input
-              type="text"
-              value={cidrRange}
-              onChange={(e) => setCidrRange(e.target.value)}
-              required
-              pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$"
+              value={form.description} onChange={(e) => set("description", e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
-              placeholder="e.g., 10.0.0.0/16"
             />
-            <p className="text-xs text-gray-500 mt-1">Format: IP/prefix (e.g., 10.0.0.0/16)</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
+              <select
+                value={form.resource_type} onChange={(e) => set("resource_type", e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+              >
+                {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Min Trust Score</label>
+              <input
+                type="number" min={0} max={100} value={form.minimum_trust_score}
+                onChange={(e) => set("minimum_trust_score", e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Location</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Public Name</label>
             <input
-              type="text"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
+              value={form.public_name} onChange={(e) => set("public_name", e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
-              placeholder="e.g., East US"
+              placeholder="e.g., intranet.alphatechs.top"
             />
           </div>
-          <div className="flex justify-end gap-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Internal Address</label>
+            <input
+              value={form.internal_address} onChange={(e) => set("internal_address", e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+              placeholder="e.g., http://alphatechs.top"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <FaPlug className="inline mr-1 text-indigo-400" size={11} />
+              Connector Resource
+            </label>
+            <select
+              value={form.connector_resource_id}
+              onChange={(e) => set("connector_resource_id", e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">None (no connector required)</option>
+              {connectorResources.map((cr) => (
+                <option key={cr.resource_id} value={cr.resource_id}>
+                  {cr.name} — {cr.target_host}:{cr.target_port} ({cr.network})
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400 mt-1">
+              When set, access is denied if the connector is offline or degraded.
+            </p>
+          </div>
+          <div className="flex items-center gap-6">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox" checked={form.enabled} onChange={(e) => set("enabled", e.target.checked)}
+                className="w-4 h-4 text-indigo-600 rounded"
+              />
+              <span className="text-sm text-gray-700 dark:text-gray-300">Enabled</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox" checked={form.require_intune_compliant}
+                onChange={(e) => set("require_intune_compliant", e.target.checked)}
+                className="w-4 h-4 text-indigo-600 rounded"
+              />
+              <span className="text-sm text-gray-700 dark:text-gray-300">Require Intune</span>
+            </label>
+          </div>
+          {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+          <fieldset className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3">
+            <legend className="px-2 text-sm font-semibold text-gray-700 dark:text-gray-200">
+              Tunnel Policy
+            </legend>
+            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-1">
+              Controls how ModZero routes user traffic to this resource.
+            </p>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Preferred access mode
+              </label>
+              <select
+                value={form.preferred_access_mode}
+                onChange={(e) => set("preferred_access_mode", e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="auto">Auto (recommended)</option>
+                <option value="http_proxy">HTTP Proxy only</option>
+                <option value="wireguard_tunnel">WireGuard Tunnel only</option>
+              </select>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Auto uses the tunnel when available and falls back to HTTP. Pick HTTP Proxy only or WireGuard Tunnel only to force one path.
+              </p>
+            </div>
+
+            <div>
+              <label className="flex items-start gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={!!form.require_tunnel}
+                  onChange={(e) => set("require_tunnel", e.target.checked)}
+                  className="mt-0.5 w-4 h-4 text-indigo-600 rounded"
+                />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  Require tunnel
+                </span>
+              </label>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
+                If checked, deny access when the tunnel is not ready (unless HTTP fallback is also allowed).
+              </p>
+              {tunnelGuardError && (
+                <p className="text-xs text-red-600 dark:text-red-400 mt-1 ml-6">
+                  {tunnelGuardError}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="flex items-start gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={fallbackDisabled ? false : !!form.allow_http_fallback}
+                  disabled={fallbackDisabled}
+                  onChange={(e) => set("allow_http_fallback", e.target.checked)}
+                  className="mt-0.5 w-4 h-4 text-indigo-600 rounded disabled:opacity-50"
+                />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  Allow HTTP fallback
+                </span>
+                {fallbackDisabled && (
+                  <span className="text-xs italic text-gray-500 dark:text-gray-400">
+                    (not applicable when HTTP Proxy only)
+                  </span>
+                )}
+              </label>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
+                When the tunnel is unavailable, allow the request to fall back to the HTTP proxy path.
+              </p>
+            </div>
+          </fieldset>
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <button type="button" onClick={onClose}
               className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
             >
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={saving}
+            <button type="submit" disabled={saving || !!tunnelGuardError}
               className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
             >
-              {saving ? "Saving..." : "Add Network"}
-            </button>
-          </div>
-          {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
-        </form>
-      </div>
-    </div>
-  );
-};
-
-// Add Resource Modal Component - supports adding multiple resources
-const AddResourceModal: React.FC<{
-  onClose: () => void;
-  onSaved: () => Promise<void>;
-  networkId: string;
-}> = ({ onClose, onSaved, networkId }) => {
-  const [resources, setResources] = useState<Array<{
-    name: string;
-    type: string;
-    ipAddress: string;
-    port: string;
-  }>>([{ name: "", type: "server", ipAddress: "", port: "" }]);
-  const [saving, setSaving] = useState(false);
-
-  const addResourceRow = () => {
-    setResources(prev => [...prev, { name: "", type: "server", ipAddress: "", port: "" }]);
-  };
-
-  const removeResourceRow = (index: number) => {
-    if (resources.length > 1) {
-      setResources(prev => prev.filter((_, i) => i !== index));
-    }
-  };
-
-  const updateResource = (index: number, field: string, value: string) => {
-    setResources(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r));
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    const valid = resources.filter(r => r.name.trim());
-    try {
-      for (const resource of valid) {
-        await api.post(`/resources/networks/${networkId}/resources`, {
-          name: resource.name,
-          type: resource.type,
-          ip_address: resource.ipAddress || undefined,
-          port: resource.port ? parseInt(resource.port) : undefined,
-        });
-      }
-      toast.success(`Added ${valid.length} resource(s)`);
-      await onSaved();
-    } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Failed to save resources");
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
-        <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Add Resources</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-            <FaTimes size={20} />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto max-h-[calc(90vh-150px)]">
-          <div className="space-y-4">
-            {resources.map((resource, index) => (
-              <div key={index} className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
-                <div className="flex justify-between items-center mb-3">
-                  <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Resource {index + 1}</span>
-                  {resources.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeResourceRow(index)}
-                      className="text-red-500 hover:text-red-600 text-sm"
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name *</label>
-                    <input
-                      type="text"
-                      value={resource.name}
-                      onChange={(e) => updateResource(index, 'name', e.target.value)}
-                      required
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 text-sm"
-                      placeholder="e.g., Web Server 01"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
-                    <select
-                      value={resource.type}
-                      onChange={(e) => updateResource(index, 'type', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 text-sm"
-                    >
-                      <option value="server">Server</option>
-                      <option value="database">Database</option>
-                      <option value="cloud">Cloud Service</option>
-                      <option value="desktop">Desktop/Workstation</option>
-                      <option value="default">Other</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">IP Address</label>
-                    <input
-                      type="text"
-                      value={resource.ipAddress}
-                      onChange={(e) => updateResource(index, 'ipAddress', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 text-sm"
-                      placeholder="e.g., 10.0.1.50"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Port</label>
-                    <input
-                      type="number"
-                      value={resource.port}
-                      onChange={(e) => updateResource(index, 'port', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 text-sm"
-                      placeholder="e.g., 443"
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-          
-          <button
-            type="button"
-            onClick={addResourceRow}
-            className="mt-4 w-full py-2 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg text-gray-500 hover:border-indigo-500 hover:text-indigo-500 transition-colors flex items-center justify-center gap-2"
-          >
-            <FaPlus size={12} /> Add Another Resource
-          </button>
-          
-          <div className="flex justify-end gap-3 pt-6 mt-6 border-t border-gray-200 dark:border-gray-700">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving || resources.every(r => !r.name.trim())}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {saving ? "Saving..." : `Add ${resources.filter(r => r.name.trim()).length} Resource(s)`}
+              {saving ? "Saving…" : isEdit ? "Update" : "Create"}
             </button>
           </div>
         </form>

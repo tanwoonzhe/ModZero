@@ -50,6 +50,20 @@ class Settings(BaseSettings):
     # falls back to direct_http if not implemented at runtime).
     connector_transport: str = Field("direct_http", env="CONNECTOR_TRANSPORT")
 
+    # Phase 3 scaffold: Headscale / WireGuard foundation. When disabled
+    # (default), tunnel endpoints accept no writes and the HTTP proxy is the
+    # only data path. No real Headscale API is called this milestone — these
+    # values are stored/configurable only.
+    headscale_enabled: bool = Field(False, env="HEADSCALE_ENABLED")
+    headscale_url: Optional[str] = Field(None, env="HEADSCALE_URL")
+    headscale_api_key: Optional[str] = Field(None, env="HEADSCALE_API_KEY")
+    headscale_user: str = Field("modzero", env="HEADSCALE_USER")
+    headscale_poll_interval: int = Field(30, env="HEADSCALE_POLL_INTERVAL")
+    # When true AND HEADSCALE_API_KEY is set, /bootstrap will TRY to create a
+    # Headscale preauth key. Any non-2xx OR unrecognized shape falls back to
+    # manual mode. Default false → admins start in manual mode.
+    headscale_bootstrap_try_api: bool = Field(False, env="HEADSCALE_BOOTSTRAP_TRY_API")
+
     # Azure legacy (used by azure_service.py / graph_client.py)
     azure_tenant_id: Optional[str] = Field(None, env="AZURE_TENANT_ID")
     azure_client_id: Optional[str] = Field(None, env="AZURE_CLIENT_ID")

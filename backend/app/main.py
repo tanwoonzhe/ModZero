@@ -84,7 +84,11 @@ async def get_openapi_json(credentials: HTTPBasicCredentials = Depends(verify_do
 
 @app.get("/health")
 def health() -> JSONResponse:
-    """Health check — reports app name and live DB connectivity."""
+    """Health check — reports app name and live DB connectivity.
+
+    Returns HTTP 200 when database is reachable, HTTP 503 when degraded.
+    Reverse proxies and load balancers should use this to gate traffic.
+    """
     db_status = "unreachable"
     try:
         with SessionLocal() as session:
@@ -92,13 +96,14 @@ def health() -> JSONResponse:
         db_status = "connected"
     except Exception:
         pass
+    is_healthy = db_status == "connected"
     return JSONResponse(
         {
-            "status": "ok" if db_status == "connected" else "degraded",
+            "status": "ok" if is_healthy else "degraded",
             "app": settings.project_name,
             "database": db_status,
         },
-        status_code=200,
+        status_code=200 if is_healthy else 503,
     )
 
 

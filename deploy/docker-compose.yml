@@ -40,6 +40,9 @@ services:
       CONNECTOR_BASE_URL: ${CONNECTOR_BASE_URL:-http://connector:8443}
       CONNECTOR_HOP_SECRET: ${CONNECTOR_HOP_SECRET:-dev-connector-hop-secret-change-me}
       CONNECTOR_TRANSPORT: ${CONNECTOR_TRANSPORT:-direct_http}
+      # Demo proxy: add DEMO_CONNECTOR_PROXY_BASE_URL=http://localhost:18080 to project root
+      # .env to enable proxy access URLs. Loaded into the container via env_file: ../.env above.
+      # Leave unset to fall back to modzero://access/{session_id}.
     depends_on:
       db:
         condition: service_healthy

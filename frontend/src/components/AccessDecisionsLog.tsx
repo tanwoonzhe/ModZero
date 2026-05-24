@@ -1,113 +1,92 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  FaCheck,
-  FaTimes,
-  FaExclamationTriangle,
-  FaShieldAlt,
-  FaSyncAlt,
-  FaSearch,
-} from "react-icons/fa";
+import { FaCheck, FaTimes, FaSyncAlt, FaSearch, FaInfoCircle, FaUndo } from "react-icons/fa";
 import api from "../api";
 
-interface AccessDecisionRow {
-  decision_id: string;
-  user_id: string | null;
-  user_name: string | null;
+interface AccessLogRow {
+  id: string;
+  user_id: string;
+  username: string | null;
   device_id: string | null;
   resource_id: string | null;
   resource_name: string | null;
-  resource_slug: string | null;
   decision: string;
-  category: string;
   reason: string | null;
-  score: number | null;
-  threshold: number | null;
-  path: string | null;
-  ts: string;
+  trust_score: number | null;
+  timestamp: string;
+  access_mode?: string | null;
+  tunnel_ready?: boolean | null;
+  tunnel_reason?: string | null;
+  fallback_used?: boolean | null;
+  require_tunnel_at_decision?: boolean | null;
 }
 
-const CAT_META: Record<string, { label: string; bg: string; text: string; Icon: any }> = {
+const DECISION_META: Record<string, { label: string; bg: string; text: string; Icon: any }> = {
   allow: { label: "Allow", bg: "bg-green-100 dark:bg-green-900/30", text: "text-green-700 dark:text-green-400", Icon: FaCheck },
-  deny: { label: "Deny", bg: "bg-red-100 dark:bg-red-900/30", text: "text-red-700 dark:text-red-400", Icon: FaTimes },
-  rate_limit: { label: "Rate-limited", bg: "bg-amber-100 dark:bg-amber-900/30", text: "text-amber-700 dark:text-amber-400", Icon: FaExclamationTriangle },
-  proxy_failure: { label: "Proxy error", bg: "bg-orange-100 dark:bg-orange-900/30", text: "text-orange-700 dark:text-orange-400", Icon: FaExclamationTriangle },
-  bootstrap_deny: { label: "Bootstrap deny", bg: "bg-purple-100 dark:bg-purple-900/30", text: "text-purple-700 dark:text-purple-400", Icon: FaShieldAlt },
+  deny:  { label: "Deny",  bg: "bg-red-100 dark:bg-red-900/30",   text: "text-red-700 dark:text-red-400",   Icon: FaTimes },
 };
 
-const fmtTs = (iso: string): string => new Date(iso).toLocaleString();
+const ACCESS_MODE_META: Record<string, { label: string; cls: string }> = {
+  http_proxy:       { label: "HTTP",   cls: "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200" },
+  wireguard_tunnel: { label: "Tunnel", cls: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300" },
+  both:             { label: "Both",   cls: "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300" },
+  denied:           { label: "Denied", cls: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" },
+};
+
+const fmtTs = (iso: string) => new Date(iso).toLocaleString();
 
 const AccessDecisionsLog: React.FC = () => {
-  const [rows, setRows] = useState<AccessDecisionRow[]>([]);
+  const [rows, setRows] = useState<AccessLogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-
-  const [category, setCategory] = useState<string>("");
-  const [resourceId, setResourceId] = useState<string>("");
-  const [userId, setUserId] = useState<string>("");
-  const [q, setQ] = useState<string>("");
+  const [decisionFilter, setDecisionFilter] = useState("");
+  const [search, setSearch] = useState("");
 
   const load = async () => {
     setLoading(true);
+    setErr(null);
     try {
-      const params: any = { limit: 200 };
-      if (category) params.category = category;
-      if (resourceId) params.resource_id = resourceId;
-      if (userId) params.user_id = userId;
-      if (q) params.q = q;
-      const res = await api.get<AccessDecisionRow[]>("/audit/access-decisions", { params });
+      const res = await api.get<AccessLogRow[]>("/access/logs", { params: { limit: 200 } });
       setRows(res.data);
-      setErr(null);
     } catch (e: any) {
-      setErr(e?.response?.data?.detail || e?.message || "failed");
+      setErr(e?.response?.data?.detail || e?.message || "Failed to load access logs");
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    load();
-    // Re-load when filters change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, resourceId, userId]);
+  useEffect(() => { load(); }, []);
 
-  const resourceChoices = useMemo(() => {
-    const byId: Record<string, string> = {};
-    rows.forEach((r) => {
-      if (r.resource_id && r.resource_name && !byId[r.resource_id]) {
-        byId[r.resource_id] = r.resource_name;
-      }
+  const filtered = useMemo(() => {
+    return rows.filter((r) => {
+      const matchesDecision = !decisionFilter || r.decision === decisionFilter;
+      const q = search.toLowerCase();
+      const matchesSearch = !q ||
+        (r.username || "").toLowerCase().includes(q) ||
+        (r.resource_name || "").toLowerCase().includes(q) ||
+        (r.reason || "").toLowerCase().includes(q);
+      return matchesDecision && matchesSearch;
     });
-    return Object.entries(byId);
-  }, [rows]);
-
-  const userChoices = useMemo(() => {
-    const byId: Record<string, string> = {};
-    rows.forEach((r) => {
-      if (r.user_id && r.user_name && !byId[r.user_id]) byId[r.user_id] = r.user_name;
-    });
-    return Object.entries(byId);
-  }, [rows]);
+  }, [rows, decisionFilter, search]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
-    rows.forEach((r) => { c[r.category] = (c[r.category] || 0) + 1; });
+    rows.forEach((r) => { c[r.decision] = (c[r.decision] || 0) + 1; });
     return c;
   }, [rows]);
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {(["allow", "deny", "rate_limit", "proxy_failure", "bootstrap_deny"] as const).map((k) => {
-          const meta = CAT_META[k];
-          const active = category === k;
+      {/* Summary chips */}
+      <div className="flex flex-wrap gap-3">
+        {(["allow", "deny"] as const).map((k) => {
+          const meta = DECISION_META[k];
+          const active = decisionFilter === k;
           return (
             <button
               key={k}
-              onClick={() => setCategory(active ? "" : k)}
-              className={`rounded-xl border px-3 py-2 text-left transition ${
-                active
-                  ? "border-indigo-400 dark:border-indigo-500 ring-2 ring-indigo-200 dark:ring-indigo-900"
-                  : "border-gray-200 dark:border-gray-700"
+              onClick={() => setDecisionFilter(active ? "" : k)}
+              className={`rounded-xl border px-4 py-2 text-left transition min-w-[100px] ${
+                active ? "border-indigo-400 dark:border-indigo-500 ring-2 ring-indigo-200 dark:ring-indigo-900" : "border-gray-200 dark:border-gray-700"
               } bg-white dark:bg-gray-800`}
             >
               <div className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full ${meta.bg} ${meta.text}`}>
@@ -119,49 +98,29 @@ const AccessDecisionsLog: React.FC = () => {
         })}
       </div>
 
+      {/* Filters */}
       <div className="flex flex-wrap gap-2 items-center">
         <div className="relative">
           <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={12} />
           <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") load(); }}
-            placeholder="search reason or path"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search user, resource, reason…"
             className="pl-8 pr-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
           />
         </div>
-        <select
-          value={resourceId}
-          onChange={(e) => setResourceId(e.target.value)}
-          className="px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-        >
-          <option value="">All resources</option>
-          {resourceChoices.map(([id, name]) => (
-            <option key={id} value={id}>{name}</option>
-          ))}
-        </select>
-        <select
-          value={userId}
-          onChange={(e) => setUserId(e.target.value)}
-          className="px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-        >
-          <option value="">All users</option>
-          {userChoices.map(([id, name]) => (
-            <option key={id} value={id}>{name}</option>
-          ))}
-        </select>
         <button
           onClick={load}
           className="px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 inline-flex items-center gap-2"
         >
           <FaSyncAlt size={12} className={loading ? "animate-spin" : ""} /> Refresh
         </button>
-        {(category || resourceId || userId || q) && (
+        {(decisionFilter || search) && (
           <button
-            onClick={() => { setCategory(""); setResourceId(""); setUserId(""); setQ(""); }}
+            onClick={() => { setDecisionFilter(""); setSearch(""); }}
             className="text-xs px-2 py-1 rounded text-gray-500 hover:text-gray-700"
           >
-            clear filters
+            clear
           </button>
         )}
       </div>
@@ -181,55 +140,86 @@ const AccessDecisionsLog: React.FC = () => {
                 <th className="px-4 py-3">Decision</th>
                 <th className="px-4 py-3">User</th>
                 <th className="px-4 py-3">Resource</th>
-                <th className="px-4 py-3">Path</th>
-                <th className="px-4 py-3">Score / threshold</th>
+                <th className="px-4 py-3">Score / Required</th>
                 <th className="px-4 py-3">Reason</th>
+                <th className="px-4 py-3">Mode</th>
+                <th className="px-4 py-3">Tunnel</th>
+                <th className="px-4 py-3">Why</th>
+                <th className="px-4 py-3">Fallback</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
-                const meta = CAT_META[r.category] || CAT_META.deny;
+              {filtered.map((r) => {
+                const meta = DECISION_META[r.decision] || DECISION_META.deny;
                 return (
-                  <tr key={r.decision_id} className="border-t border-gray-100 dark:border-gray-700">
-                    <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">{fmtTs(r.ts)}</td>
+                  <tr key={r.id} className="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
+                    <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
+                      {fmtTs(r.timestamp)}
+                    </td>
                     <td className="px-4 py-2">
-                      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${meta.bg} ${meta.text}`}>
+                      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${meta.bg} ${meta.text}`}>
                         <meta.Icon size={10} /> {meta.label}
                       </span>
                     </td>
-                    <td className="px-4 py-2 text-gray-900 dark:text-white">{r.user_name || <span className="text-gray-400">—</span>}</td>
+                    <td className="px-4 py-2 text-gray-900 dark:text-white">
+                      {r.username || <span className="text-gray-400 font-mono text-xs">{String(r.user_id).slice(0, 8)}…</span>}
+                    </td>
+                    <td className="px-4 py-2 text-gray-900 dark:text-white">
+                      {r.resource_name || <span className="text-gray-400">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-xs font-mono">
+                      {r.trust_score != null ? (
+                        <span className={r.trust_score >= 60 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+                          {r.trust_score}
+                        </span>
+                      ) : <span className="text-gray-400">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-700 dark:text-gray-300 max-w-xs truncate" title={r.reason || ""}>
+                      {r.reason || "—"}
+                    </td>
                     <td className="px-4 py-2">
-                      {r.resource_name ? (
-                        <div>
-                          <div className="text-gray-900 dark:text-white">{r.resource_name}</div>
-                          {r.resource_slug && (
-                            <div className="text-xs text-gray-500 font-mono">/r/{r.resource_slug}</div>
-                          )}
-                        </div>
+                      {r.access_mode ? (() => {
+                        const meta = ACCESS_MODE_META[r.access_mode];
+                        if (!meta) return <span className="text-gray-400">—</span>;
+                        return (
+                          <span className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium ${meta.cls}`}>
+                            {meta.label}
+                          </span>
+                        );
+                      })() : <span className="text-gray-400">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-center">
+                      {r.tunnel_ready === true ? (
+                        <FaCheck className="inline text-green-600 dark:text-green-400" size={12} />
                       ) : (
                         <span className="text-gray-400">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-2 font-mono text-xs text-gray-600 dark:text-gray-300">{r.path || "—"}</td>
-                    <td className="px-4 py-2 text-xs">
-                      {r.score != null
-                        ? (
-                          <span className={r.score >= (r.threshold ?? 60) ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
-                            {r.score}/{r.threshold ?? "—"}
-                          </span>
-                        )
-                        : <span className="text-gray-400">—</span>}
+                    <td className="px-4 py-2 text-center">
+                      {r.tunnel_reason ? (
+                        <FaInfoCircle
+                          className="inline text-blue-500"
+                          size={12}
+                          title={r.tunnel_reason}
+                        />
+                      ) : null}
                     </td>
-                    <td className="px-4 py-2 text-xs text-gray-700 dark:text-gray-300 max-w-[28rem] truncate" title={r.reason || ""}>
-                      {r.reason || "—"}
+                    <td className="px-4 py-2 text-center">
+                      {r.fallback_used === true ? (
+                        <FaUndo
+                          className="inline text-amber-500"
+                          size={11}
+                          title="HTTP proxy fallback was used"
+                        />
+                      ) : null}
                     </td>
                   </tr>
                 );
               })}
-              {rows.length === 0 && !loading && (
+              {filtered.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500">
-                    No access decisions match the current filters.
+                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-gray-500">
+                    No access logs match the current filters.
                   </td>
                 </tr>
               )}

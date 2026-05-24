@@ -1,3 +1,6 @@
+# Connector simulator state
+tools/connector_state.json
+
 # Dependencies
 node_modules/
 **/node_modules/

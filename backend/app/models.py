@@ -10,7 +10,7 @@ tables (e.g. device_software) can be added following the same pattern.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 from sqlalchemy import (
@@ -1322,6 +1322,15 @@ class ProtectedResource(Base):
     minimum_trust_score: float = Column(Float, nullable=False, default=0.0)
     require_intune_compliant: bool = Column(Boolean, nullable=False, default=False)
     enabled: bool = Column(Boolean, nullable=False, default=True)
+    # Optional link to a ConnectorResource — when set, access requires the connector to be online
+    connector_resource_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("connector_resources.resource_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    preferred_access_mode: str = Column(String(32), nullable=False, default="auto", server_default="auto")
+    require_tunnel: bool = Column(Boolean, nullable=False, default=False)
+    allow_http_fallback: bool = Column(Boolean, nullable=False, default=True)
     created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -1379,6 +1388,278 @@ class AccessRequestLog(Base):
     timestamp: datetime = Column(
         DateTime(timezone=True), default=datetime.utcnow, nullable=False, index=True
     )
+    access_mode: str = Column(String(32), nullable=True)
+    tunnel_ready: bool = Column(Boolean, nullable=True)
+    tunnel_reason: str = Column(String(255), nullable=True)
+    fallback_used: bool = Column(Boolean, nullable=True)
+    require_tunnel_at_decision: bool = Column(Boolean, nullable=True)
 
     def __repr__(self) -> str:
         return f"<AccessRequestLog {self.id} {self.decision} res={self.resource_id}>"
+
+
+class AccessSession(Base):
+    """Short-lived access grant created when an access request is allowed.
+
+    The raw session token is shown once at creation and stored only as a
+    SHA-256 hash.  Connectors call /connectors/access/introspect to validate
+    a token before proxying traffic.
+    """
+    __tablename__ = "access_sessions"
+
+    id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True
+    )
+    device_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("devices.device_id"), nullable=True
+    )
+    resource_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("protected_resources.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # No FK — connector may be deleted independently
+    connector_id: uuid.UUID = Column(UUID(as_uuid=True), nullable=True)
+    access_log_id: uuid.UUID = Column(
+        UUID(as_uuid=True), ForeignKey("access_request_logs.id", ondelete="SET NULL"), nullable=True
+    )
+    session_token_hash: str = Column(String(128), nullable=False, unique=True)
+    # status: active | expired | revoked  (plain string, avoids PgEnum migration)
+    status: str = Column(String(16), nullable=False, default="active")
+    created_at: datetime = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    expires_at: datetime = Column(DateTime(timezone=True), nullable=False)
+    revoked_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    last_used_at: datetime = Column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<AccessSession {self.id} status={self.status}>"
+
+
+# ─── Phase 3 scaffold: Headscale / WireGuard foundation ──────────────────────
+# Metadata-only tables. Populated by the connector's optional WG mode and the
+# admin "Tunnels" page; not yet consulted by the access-decision or proxy flow.
+
+class TunnelNode(Base):
+    """One row per WireGuard node a connector advertises (metadata only)."""
+    __tablename__ = "tunnel_nodes"
+
+    id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    connector_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("connectors.connector_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    node_name: str = Column(String(256), nullable=False)
+    node_key: str = Column(String(512), nullable=True)
+    wireguard_ip: str = Column(String(64), nullable=True)
+    headscale_node_id: str = Column(String(128), nullable=True)
+    # status: pending | online | degraded | offline (validated in router)
+    status: str = Column(String(32), nullable=False, default="pending")
+    last_seen_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    created_at: datetime = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("connector_id", "node_name", name="uq_tunnel_nodes_connector_node"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<TunnelNode {self.node_name} status={self.status}>"
+
+
+class TunnelRoute(Base):
+    """Optional WireGuard subnet/host route attached to a connector."""
+    __tablename__ = "tunnel_routes"
+
+    id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    connector_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("connectors.connector_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    resource_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("protected_resources.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    subnet_or_host: str = Column(String(256), nullable=False)
+    # route_type: host | subnet (validated in router)
+    route_type: str = Column(String(16), nullable=False, default="host")
+    enabled: bool = Column(Boolean, nullable=False, default=False)
+    # route lifecycle fields (added by g7h8i9j0k1l2 migration)
+    route_status: str = Column(String(32), nullable=False, default="pending")
+    advertise_command: str = Column(Text, nullable=True)
+    headscale_route_id: str = Column(String(128), nullable=True)
+    last_synced_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    updated_at: datetime = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+    created_at: datetime = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<TunnelRoute {self.subnet_or_host} enabled={self.enabled}>"
+
+
+class TunnelBootstrapLog(Base):
+    """Audit row for an admin-issued bootstrap. Never stores the raw key."""
+
+    __tablename__ = "tunnel_bootstrap_logs"
+
+    id: uuid.UUID = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    connector_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("connectors.connector_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    requested_by_user_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    node_name: str = Column(String(256), nullable=False)
+    # sha256 hex of the raw preauth key when one is created. Null in manual
+    # mode and not_configured mode. The raw key is NEVER stored.
+    auth_key_hash: str = Column(String(128), nullable=True)
+    # manual | headscale_api | not_configured
+    auth_key_mode: str = Column(String(32), nullable=False)
+    # ok | not_configured
+    status: str = Column(String(32), nullable=False)
+    created_at: datetime = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    expires_at: datetime = Column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<TunnelBootstrapLog connector={self.connector_id} mode={self.auth_key_mode}>"
+
+
+class TunnelRouteActionLog(Base):
+    """Audit log for per-route admin actions (sync, advertise, approve)."""
+
+    __tablename__ = "tunnel_route_action_logs"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    route_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tunnel_routes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # action: sync / advertise_package / approve_attempt /
+    #         approve_success / approve_failed / manual_required
+    action: str = Column(String(32), nullable=False)
+    requested_by_user_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    result: str = Column(Text, nullable=True)
+    safe_message: str = Column(Text, nullable=True)
+    created_at: datetime = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<TunnelRouteActionLog route={self.route_id} action={self.action}>"
+
+
+class TunnelUserEnrollmentLog(Base):
+    """Audit row for end-user tunnel enrollment requests. Never stores any key."""
+    __tablename__ = "tunnel_user_enrollment_logs"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    device_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("devices.device_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    node_name: str = Column(String(255), nullable=True)
+    # disabled | not_configured | manual_required
+    status: str = Column(String(32), nullable=False)
+    created_at: datetime = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<TunnelUserEnrollmentLog user={self.user_id} status={self.status}>"
+
+
+class TunnelAccessAuditLog(Base):
+    """Audit log for tunnel-aware access decisions and related events."""
+    __tablename__ = "tunnel_access_audit_logs"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    action: str = Column(String(64), nullable=False, index=True)
+    user_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    device_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("devices.device_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    resource_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("protected_resources.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    connector_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("connectors.connector_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    access_log_id: uuid.UUID = Column(
+        UUID(as_uuid=True),
+        ForeignKey("access_request_logs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    safe_message: str = Column(Text, nullable=True)
+    created_at: datetime = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<TunnelAccessAuditLog action={self.action} resource={self.resource_id}>"

@@ -1,0 +1,1 @@
+[{"id": "fixture-match-1", "name": "verify-node-22bfc162", "nodeKey": "fixture-match-key", "ipAddresses": ["100.64.0.123"], "online": true, "lastSeen": "2026-05-20T12:00:00Z"}, {"id": "fixture-unmatched-2", "name": "fixture-unmatched-3c6e5a", "nodeKey": "fixture-unmatched-key", "ipAddresses": ["100.64.0.200"], "online": false, "lastSeen": "2026-05-20T12:00:00Z"}]

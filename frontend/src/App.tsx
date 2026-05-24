@@ -10,12 +10,14 @@ import UserDetailPage from "./pages/UserDetailPage";
 import DevicesPage from "./pages/DevicesPage";
 import PoliciesPage from "./pages/PoliciesPage";
 import ResourcesPage from "./pages/ResourcesPage";
+import SessionsPage from "./pages/SessionsPage";
 import TemplatesPage from "./pages/TemplatesPage";
 import SettingsPage from "./pages/SettingsPage";
 import UserProfilePage from "./pages/UserProfilePage";
 import NotFoundPage from "./pages/NotFoundPage";
 import ZeroTrustPoliciesPage from "./pages/ZeroTrustPoliciesPage";
 import ConnectorsPage from "./pages/ConnectorsPage";
+import TunnelsPage from "./pages/TunnelsPage";
 import IdentityPageV2 from "./pages/IdentityPageV2";
 import DevicesPageV2 from "./pages/DevicesPageV2";
 import { useZeroTrustStore } from "./store/zeroTrustStore";
@@ -41,7 +43,7 @@ function App() {
           name: u.username,
           role: u.role === 'admin' ? 'Admin' : u.role === 'operator' ? 'Operator' : 'Viewer',
         });
-      }).catch(() => { /* ignore - will use default */ });
+      }).catch(() => { /* user profile fetch failed — auth token still valid, layout uses defaults */ });
     }
   }, [loadFromAPI, setCurrentUser, isLogin]);
 
@@ -91,6 +93,8 @@ function App() {
             <Route path="/zero-trust-policies" element={<ZeroTrustPoliciesPage />} />
             <Route path="/resources" element={<ResourcesPage />} />
             <Route path="/connectors" element={<ConnectorsPage />} />
+            <Route path="/tunnels" element={<TunnelsPage />} />
+            <Route path="/sessions" element={<SessionsPage />} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/profile" element={<UserProfilePage />} />
