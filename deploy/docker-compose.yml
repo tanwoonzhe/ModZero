@@ -55,6 +55,9 @@ services:
       - ../backend/setup.sh:/app/setup.sh:ro
 
   # ── React Frontend (Dashboard) ──────────────────────────────────
+  # NOTE: Build args (VITE_API_BASE etc.) are resolved from deploy/.env, NOT ../.env.
+  # Run deploy/setup.sh first (creates deploy/.env → ../.env symlink) or use:
+  #   docker compose --env-file ../.env build frontend
   frontend:
     build:
       context: ../frontend
@@ -83,7 +86,11 @@ services:
       - private-net
 
   # ── ModZero Connector ──────────────────────────────────────────
-  # Set MODZERO_ENROLL_TOKEN in .env before starting.
+  # Set MODZERO_ENROLL_TOKEN in .env before starting the connector.
+  # Start order: 1) docker compose up -d db backend frontend intranet
+  #              2) create an enroll token in the admin UI
+  #              3) add MODZERO_ENROLL_TOKEN=<token> to .env
+  #              4) docker compose up -d connector
   connector:
     build: ../connector
     environment:
@@ -102,7 +109,7 @@ services:
       - "8443:8443"
     volumes:
       - connector_data:/etc/modzero-connector
-    restart: unless-stopped
+    restart: on-failure
     networks:
       - default
       - private-net

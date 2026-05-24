@@ -108,8 +108,18 @@ def get_or_create_cache(
                     "is_cached": True,
                     "error": str(e)
                 }
-            
-            raise HTTPException(status_code=500, detail=f"Failed to fetch data: {str(e)}")
+
+            # No cache and fetch failed (e.g. Azure not configured) — return 200 with null
+            # data so the frontend can render its "not available" fallback without a 500.
+            logger.warning(f"No cache for {data_type} and fetch failed ({e}) — returning unavailable")
+            return {
+                "data": None,
+                "last_synced": None,
+                "expires_at": None,
+                "is_cached": False,
+                "unavailable": True,
+                "error": str(e),
+            }
     
     except HTTPException:
         raise

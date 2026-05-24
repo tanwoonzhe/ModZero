@@ -36,6 +36,19 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 
 ---
 
+## Step 1.5 — Run the Deploy Setup Script (Required Before Build)
+
+```bash
+cd /path/to/ModZero/deploy
+bash setup.sh
+```
+
+This creates a `deploy/.env → ../.env` symlink. Docker Compose resolves `${VITE_API_BASE}` and other build-time args from a `.env` in **the same directory as the compose file** (`deploy/`), not from the repo root. Without this symlink, `VITE_API_BASE` silently falls back to `localhost:8000` even if set correctly in your root `.env`.
+
+> **If you skip this step**, the frontend Docker image will be built with `VITE_API_BASE=http://localhost:8000/api` baked in — all API calls from the browser will fail after cloud deployment.
+
+---
+
 ## Step 2 — Create .env from Cloud Template
 
 ```bash
@@ -84,6 +97,10 @@ password through the admin UI instead.
 
 ## Step 4 — Docker Compose Up
 
+> **Warning — Stale DB Volume:** If you previously ran `docker compose up` with a different `POSTGRES_PASSWORD`, the `modzero_db_data` volume still holds the old password. PostgreSQL does **not** re-initialize an existing data directory — it ignores the new password env var and the backend will fail with `password authentication failed`.
+>
+> Fix: `docker compose down -v` to wipe the volume (destroys all data), then start fresh.
+
 ### Local dev (default):
 
 ```bash
@@ -102,12 +119,29 @@ Check that all services started:
 
 ```bash
 docker compose ps
-# Expected: db (healthy), backend (running), frontend (running), connector (running)
+# Expected: db (healthy), backend (running), frontend (running), connector (running or restarting)
 ```
+
+> **Connector crash-loop is expected at this point.** The connector exits immediately if `MODZERO_ENROLL_TOKEN` is not set (`restart: on-failure` means it retries a few times then stops). This is intentional — complete Steps 5–6 first, get an enroll token from the admin UI, add it to `.env`, then `docker compose up -d connector`.
 
 ---
 
-## Step 5 — Database Migration
+## Step 4.5 — API Reference Quick-Start
+
+The backend exposes Swagger UI at `/docs` (accessible without auth for browsing):
+
+```
+http://<your-host>:8000/docs
+```
+
+Key endpoints:
+| Action | Method + Path |
+|---|---|
+| Login | `POST /api/auth/login` (form: `username`, `password`) |
+| Get current user | `GET /api/auth/me` |
+| List resources | `GET /api/resources` |
+| Request access | `POST /api/access/request` |
+| List connectors | `GET /api/connectors` |
 
 ```bash
 docker compose exec backend alembic upgrade head
