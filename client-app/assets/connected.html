@@ -523,7 +523,7 @@
           const exp = d.expires_at ? new Date(d.expires_at).toLocaleTimeString() : "&mdash;";
           const url = d.access_url || "";
           const openBtn = url
-            ? `<button class="btn-sm" onclick="openAccessUrl(${JSON.stringify(url)})">Open Access Session</button>`
+            ? `<button class="btn-sm" onclick='openAccessUrl(${JSON.stringify(url)})'>Open Access Session</button>`
             : "";
           target.innerHTML =
             `<span class="badge ok">ALLOW</span> ` +
