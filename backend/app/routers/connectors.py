@@ -558,10 +558,25 @@ def list_connector_resources(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
 ):
-    """List all connector resources."""
+    """List all connector resources, deduplicating by (name, network, target_host, target_port).
+
+    When the seed script has been run more than once, identical rows can
+    accumulate.  Keep the most-recently-created entry for each unique
+    (name, network, target_host, target_port) tuple so the UI never shows
+    confusing duplicate rows, while preserving genuinely distinct mappings.
+    """
     resources = db.query(ConnectorResource).order_by(
         ConnectorResource.created_at.desc()
     ).all()
+
+    seen: set = set()
+    deduped: list = []
+    for r in resources:
+        key = (r.name, r.network, r.target_host, int(r.target_port))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(r)
 
     return [
         ResourceOut(
@@ -576,7 +591,7 @@ def list_connector_resources(
             is_active=r.is_active,
             created_at=r.created_at,
         )
-        for r in resources
+        for r in deduped
     ]
 
 

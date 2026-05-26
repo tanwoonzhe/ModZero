@@ -53,7 +53,12 @@ const ClientAppDownloadCard: React.FC = () => {
       setInfo(res.data);
       setErr(null);
     } catch (e: any) {
-      setErr(e?.response?.data?.detail || e?.message || "failed");
+      const status = e?.response?.status;
+      if (status === 404) {
+        setErr("unavailable");
+      } else {
+        setErr(e?.response?.data?.detail || e?.message || "failed");
+      }
     } finally {
       setLoading(false);
     }
@@ -97,8 +102,14 @@ const ClientAppDownloadCard: React.FC = () => {
       </p>
 
       {err && (
-        <div className="rounded bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm px-3 py-2 mb-3">
-          Could not load client info: {err}
+        <div className={`rounded text-sm px-3 py-2 mb-3 ${
+          err === "unavailable"
+            ? "bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400"
+            : "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300"
+        }`}>
+          {err === "unavailable"
+            ? "Desktop client package information is unavailable on this deployment."
+            : `Could not load client info: ${err}`}
         </div>
       )}
 
