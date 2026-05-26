@@ -73,11 +73,15 @@ const ZeroTrustPoliciesPage: React.FC = () => {
     setTenantLicenses,
   } = useZeroTrustStore();
   
-  const [activeTab, setActiveTab] = useState<'weights' | 'licenses' | 'audit'>('weights');
+  const [activeTab, setActiveTab] = useState<'resource-policies' | 'device-profiles' | 'context-rules' | 'weights'>('resource-policies');
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedPillars, setExpandedPillars] = useState<Set<Pillar>>(new Set([Pillar.Identity]));
-  
-  // License detection state
+
+  // Resources state for Resource Policies tab
+  const [resources, setResources] = useState<any[]>([]);
+  const [resourcesLoading, setResourcesLoading] = useState(false);
+
+  // License detection state (kept but not shown in tab)
   const [detectedLicenses, setDetectedLicenses] = useState<Record<string, boolean> | null>(null);
   const [loadingLicenses, setLoadingLicenses] = useState(false);
   const [licenseError, setLicenseError] = useState<string | null>(null);
@@ -118,6 +122,14 @@ const ZeroTrustPoliciesPage: React.FC = () => {
     [auditEvents]
   );
   
+  // Fetch resources for Resource Policies tab
+  useEffect(() => {
+    if (activeTab === 'resource-policies' && resources.length === 0) {
+      setResourcesLoading(true);
+      api.get('/resources').then(r => setResources(r.data)).catch(() => {}).finally(() => setResourcesLoading(false));
+    }
+  }, [activeTab]);
+
   // Fetch detected licenses from Azure on tab switch
   useEffect(() => {
     if (activeTab === 'licenses' && detectedLicenses === null && !loadingLicenses) {
@@ -281,10 +293,10 @@ const ZeroTrustPoliciesPage: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
             <FaShieldAlt className="text-indigo-600" />
-            Zero Trust Policies
+            Trust Policies
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Configure scoring weights and manage licenses • {isAdmin ? 'Admin Mode' : 'View Only'}
+            Resource access policies, device profiles, context rules, and trust score weights • {isAdmin ? 'Admin Mode' : 'View Only'}
           </p>
         </div>
         
@@ -342,6 +354,39 @@ const ZeroTrustPoliciesPage: React.FC = () => {
       {/* Tab Navigation */}
       <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg w-fit">
         <button
+          onClick={() => setActiveTab('resource-policies')}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === 'resource-policies'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          <FaNetworkWired className="inline mr-2" size={14} />
+          Resource Policies
+        </button>
+        <button
+          onClick={() => setActiveTab('device-profiles')}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === 'device-profiles'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          <FaLaptop className="inline mr-2" size={14} />
+          Device Profiles
+        </button>
+        <button
+          onClick={() => setActiveTab('context-rules')}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === 'context-rules'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          <FaShieldAltB className="inline mr-2" size={14} />
+          Context Rules
+        </button>
+        <button
           onClick={() => setActiveTab('weights')}
           className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
             activeTab === 'weights'
@@ -350,190 +395,188 @@ const ZeroTrustPoliciesPage: React.FC = () => {
           }`}
         >
           <FaCog className="inline mr-2" size={14} />
-          Weights
-        </button>
-        <button
-          onClick={() => setActiveTab('licenses')}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-            activeTab === 'licenses'
-              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-          }`}
-        >
-          <FaLock className="inline mr-2" size={14} />
-          Licenses
-        </button>
-        <button
-          onClick={() => setActiveTab('audit')}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-            activeTab === 'audit'
-              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-          }`}
-        >
-          <FaHistory className="inline mr-2" size={14} />
-          Audit Log ({weightAuditEvents.length})
+          Trust Score Weights
         </button>
       </div>
       
-      {/* Weights Tab */}
-      {activeTab === 'weights' && (
-        <div className="space-y-6">
-          {/* FYP Module Weights + Access Threshold Card */}
-          <FypModuleWeightsCard />
-        </div>
-      )}
-      
-      {/* Licenses Tab */}
-      {activeTab === 'licenses' && (
+      {/* Resource Policies Tab */}
+      {activeTab === 'resource-policies' && (
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">License Configuration</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  Configure which Microsoft licenses are available in your tenant
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={detectLicenses}
-                  disabled={loadingLicenses}
-                  className="flex items-center gap-2 px-4 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
-                >
-                  {loadingLicenses ? (
-                    <FaSpinner className="animate-spin" size={14} />
-                  ) : (
-                    <FaSearch size={14} />
-                  )}
-                  Detect from Azure
-                </button>
-                {detectedLicenses && (
-                  <button
-                    onClick={applyDetectedLicenses}
-                    disabled={!isAdmin}
-                    className="flex items-center gap-2 px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-                  >
-                    <FaCheck size={14} />
-                    Apply Detected
-                  </button>
-                )}
-              </div>
-            </div>
-            
-            {/* License detection status */}
-            {licenseError && (
-              <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg flex items-start gap-2">
-                <FaInfoCircle className="text-amber-500 mt-0.5" size={14} />
-                <div className="text-sm text-amber-700 dark:text-amber-300">
-                  <p className="font-medium">Could not auto-detect licenses</p>
-                  <p className="text-xs mt-1">{licenseError}</p>
-                </div>
-              </div>
-            )}
-            
-            {detectedLicenses && !licenseError && (
-              <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-start gap-2">
-                <FaCheck className="text-green-500 mt-0.5" size={14} />
-                <div className="text-sm text-green-700 dark:text-green-300">
-                  <p className="font-medium">Licenses detected from Azure</p>
-                  <p className="text-xs mt-1">
-                    Found {Object.values(detectedLicenses).filter(Boolean).length} licenses. Click "Apply Detected" to update.
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {Object.entries(LICENSE_INFO).map(([key, info]) => {
-                const isEnabled = tenantLicenses.enabled[key as LicenseKey];
-                const isDetected = detectedLicenses?.[key] ?? null;
-                const controlsRequiring = controls.filter(c => c.minLicenses.includes(key as LicenseKey));
-                
-                return (
-                  <div
-                    key={key}
-                    className={`p-4 rounded-lg border ${
-                      isEnabled
-                        ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
-                        : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-medium text-gray-900 dark:text-white">
-                            {info.displayName}
-                          </h3>
-                          {isEnabled && <FaCheck className="text-green-500" size={14} />}
-                          {isDetected !== null && (
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${
-                              isDetected 
-                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300'
-                                : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-                            }`}>
-                              {isDetected ? 'Detected' : 'Not found'}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                          {info.description}
-                        </p>
-                        <p className="text-xs text-gray-400 mt-2">
-                          {controlsRequiring.length} controls require this license
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        <div className="flex items-center gap-2">
-                          {isDetected === false && (
-                            <FaLock className="text-gray-400" size={12} title="Locked - license not available in tenant" />
-                          )}
-                          <button
-                            onClick={() => toggleLicense(key)}
-                            disabled={!isAdmin || isDetected === false}
-                            className={`relative w-12 h-6 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                              isEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
-                            }`}
-                            title={isDetected === false ? 'License not available in your tenant - cannot be enabled' : (!isAdmin ? 'Admin permission required to change licenses' : '')}
-                          >
-                            <span
-                              className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                                isEnabled ? 'translate-x-6' : ''
-                              }`}
-                            />
-                          </button>
-                        </div>
-                        <a
-                          href={info.purchaseUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
-                        >
-                          Learn more <FaExternalLinkAlt size={10} />
-                        </a>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* Audit Tab */}
-      {activeTab === 'audit' && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Audit Log</h2>
+          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Resource Access Policies</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              History of weight and configuration changes
+              Each protected resource defines its own trust threshold and compliance requirements.
+              The connector enforces these per-request using live trust score data.
             </p>
           </div>
-          <div className="p-6">
-            <AuditLogPanel events={weightAuditEvents} maxHeight="max-h-[600px]" />
+          {resourcesLoading ? (
+            <div className="flex items-center justify-center h-32">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+            </div>
+          ) : resources.length === 0 ? (
+            <div className="p-6 text-center text-gray-500">No protected resources found. Add resources in the Resources page.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead className="bg-gray-50 dark:bg-gray-800">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Min Trust Score</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Intune Required</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Affects Access</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                  {resources.map((r: any) => (
+                    <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <td className="px-4 py-3">
+                        <div className="text-sm font-medium text-gray-900 dark:text-white">{r.name}</div>
+                        <div className="text-xs text-gray-500">{r.target_host}:{r.target_port}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          (r.minimum_trust_score || 0) >= 70
+                            ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                            : (r.minimum_trust_score || 0) >= 40
+                            ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                            : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                        }`}>
+                          {r.minimum_trust_score || 0}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          r.require_intune_compliant
+                            ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300'
+                            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                        }`}>
+                          {r.require_intune_compliant ? 'Yes' : 'No'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          r.enabled
+                            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                            : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                        }`}>
+                          {r.enabled ? 'Active' : 'Disabled'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500">Local / Connector</td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">
+                          Yes
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
+            <p className="text-xs text-gray-400">
+              Access is denied if the device trust score is below the resource's minimum, or if Intune compliance is required but not met.
+              These checks run on every proxied request via the ModZero connector.
+            </p>
           </div>
+        </div>
+      )}
+
+      {/* Device Profiles Tab */}
+      {activeTab === 'device-profiles' && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Device Profiles</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Device posture controls and their contribution to the device posture score.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead className="bg-gray-50 dark:bg-gray-800">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Control</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Affects Trust Score</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Weight</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                {controls.filter(c => c.pillar === Pillar.Devices).map(c => (
+                  <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{c.title}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{c.category}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">Microsoft Graph / Intune</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">Yes</td>
+                    <td className="px-4 py-3 text-xs">
+                      <span className="inline-flex px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 font-semibold">
+                        {getEffectiveWeight(c, weightConfig)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {controls.filter(c => c.pillar === Pillar.Devices).length === 0 && (
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No device controls configured</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Context Rules Tab */}
+      {activeTab === 'context-rules' && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Context Rules</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Access context controls including network, application, and data protection requirements.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead className="bg-gray-50 dark:bg-gray-800">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Control</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pillar</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Affects Trust Score</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Weight</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                {controls.filter(c => c.pillar !== Pillar.Devices && c.pillar !== Pillar.Identity).map(c => (
+                  <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{c.title}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{c.pillar}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{c.category}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">Microsoft Graph</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">Yes</td>
+                    <td className="px-4 py-3 text-xs">
+                      <span className="inline-flex px-2 py-1 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 font-semibold">
+                        {getEffectiveWeight(c, weightConfig)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {controls.filter(c => c.pillar !== Pillar.Devices && c.pillar !== Pillar.Identity).length === 0 && (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No context controls configured</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Trust Score Weights Tab */}
+      {activeTab === 'weights' && (
+        <div className="space-y-6">
+          <FypModuleWeightsCard />
         </div>
       )}
     </div>

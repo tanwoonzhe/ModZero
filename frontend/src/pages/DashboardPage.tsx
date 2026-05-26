@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import api from "../api";
 import { OverviewAssessmentData } from "../types";
 import { ResponsiveSankey } from "@nivo/sankey";
@@ -164,6 +165,46 @@ const DashboardPage: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-12">
+      {/* Core Modules Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Link to="/users" className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors group">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2.5 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+              <FaUserShield size={18} />
+            </div>
+            <h2 className="font-semibold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">Users &amp; Identity</h2>
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Manage users and view per-user identity signals from Azure AD.</p>
+          <div className="mt-3">
+            <span className="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">Active</span>
+          </div>
+        </Link>
+        <Link to="/devices" className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 hover:border-purple-400 dark:hover:border-purple-500 transition-colors group">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2.5 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+              <FaDesktop size={18} />
+            </div>
+            <h2 className="font-semibold text-gray-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">Device Posture</h2>
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Device inventory, posture checks (compliance, encryption, OS), and trust score contribution.</p>
+          <div className="mt-3">
+            <span className="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">Active</span>
+          </div>
+        </Link>
+        <Link to="/zero-trust-policies" className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 hover:border-green-400 dark:hover:border-green-500 transition-colors group">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2.5 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400">
+              <FaShieldAlt size={18} />
+            </div>
+            <h2 className="font-semibold text-gray-900 dark:text-white group-hover:text-green-600 dark:group-hover:text-green-400 transition-colors">Trust Scoring Engine</h2>
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Resource policies, device profiles, context rules, and trust score weights.</p>
+          <div className="mt-3">
+            <span className="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">Active</span>
+          </div>
+        </Link>
+      </div>
+
       {/* FYP Trust Score Card (current user + current device) */}
       <TrustScoreCard />
 

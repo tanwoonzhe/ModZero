@@ -5,7 +5,7 @@ import { User, AzureUser, AzureUsersResponse, AzureConnectionTest } from "../typ
 
 const UsersPage: React.FC = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'local' | 'azure'>('local');
+  const [activeTab, setActiveTab] = useState<'local' | 'azure' | 'identity'>('local');
   const [localUsers, setLocalUsers] = useState<User[]>([]);
   const [azureUsers, setAzureUsers] = useState<AzureUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -18,7 +18,7 @@ const UsersPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'azure') {
+    if (activeTab === 'azure' || activeTab === 'identity') {
       testAzureConnection();
     }
   }, [activeTab]);
@@ -121,6 +121,16 @@ const UsersPage: React.FC = () => {
             }`}
           >
             Azure AD Users
+          </button>
+          <button
+            onClick={() => { setActiveTab('identity'); if (azureUsers.length === 0 && connectionStatus?.success) fetchAzureUsers(); }}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'identity'
+                ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+            }`}
+          >
+            Identity Signals
           </button>
         </div>
       </div>
@@ -314,6 +324,104 @@ const UsersPage: React.FC = () => {
                 <li>• Verify AZURE_CLIENT_SECRET</li>
                 <li>• Ensure the Azure app has proper Microsoft Graph permissions</li>
               </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'identity' && (
+        <div>
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold mb-1">Identity Signals</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Per-user identity checks derived from Azure AD. These signals affect trust score calculation.
+            </p>
+          </div>
+
+          {!connectionStatus?.success ? (
+            <div className="text-center py-8 text-gray-500">
+              <p>Azure AD connection required to show identity signals.</p>
+              <button onClick={testAzureConnection} className="mt-3 px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 text-sm">
+                Test Connection
+              </button>
+            </div>
+          ) : azureUsers.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <p>Loading identity signals...</p>
+              {!azureLoading && (
+                <button onClick={fetchAzureUsers} className="mt-3 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm">
+                  Load Users
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead className="bg-gray-50 dark:bg-gray-800">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Account Enabled</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User Type</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MFA Registered</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Admin Role</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Affects Trust Score</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                  {azureUsers.map((user) => {
+                    const isGuest = user.userType === 'Guest';
+                    const isEnabled = user.account_enabled;
+                    return (
+                      <tr key={user.azure_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900 dark:text-white">{user.display_name}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">{user.email}</div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            isEnabled
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                              : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                          }`}>
+                            {isEnabled ? 'Pass' : 'Fail'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            isGuest
+                              ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                              : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                          }`}>
+                            {isGuest ? 'Guest' : 'Member'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                            Not configured
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                            Not configured
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
+                          Microsoft Graph
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">
+                            Yes
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
+                MFA registration and admin role signals require additional Microsoft Graph permissions (UserAuthenticationMethod.Read.All, RoleManagement.Read.All).
+              </p>
             </div>
           )}
         </div>

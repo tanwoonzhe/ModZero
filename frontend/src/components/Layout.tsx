@@ -1,6 +1,6 @@
 import React, { ReactNode, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { FaTachometerAlt, FaHistory, FaUsers, FaGavel, FaNetworkWired, FaFileAlt, FaCog, FaSignOutAlt, FaUserShield, FaLaptopMedical, FaUserCircle, FaBars, FaChevronLeft, FaPlug, FaDesktop, FaKey } from "react-icons/fa";
+import { FaTachometerAlt, FaHistory, FaUsers, FaGavel, FaNetworkWired, FaCog, FaSignOutAlt, FaUserCircle, FaBars, FaChevronLeft, FaPlug, FaDesktop, FaKey } from "react-icons/fa";
 import toast from "react-hot-toast";
 
 interface LayoutProps {
@@ -8,18 +8,14 @@ interface LayoutProps {
 }
 
 const navItems = [
-  { path: "/", label: "Overview", icon: <FaTachometerAlt /> },
-  { path: "/users", label: "Employees", icon: <FaUsers /> },
+  { path: "/", label: "Dashboard", icon: <FaTachometerAlt /> },
+  { path: "/users", label: "Users", icon: <FaUsers /> },
   { path: "/devices", label: "Devices", icon: <FaDesktop /> },
-  { path: "/identity", label: "Identity", icon: <FaUserShield /> },
-  { path: "/devices-testing", label: "Devices Testing", icon: <FaLaptopMedical /> },
-  { path: "/zero-trust-policies", label: "ZT Policies", icon: <FaGavel /> },
   { path: "/resources", label: "Resources", icon: <FaNetworkWired /> },
+  { path: "/zero-trust-policies", label: "Trust Policies", icon: <FaGavel /> },
   { path: "/connectors", label: "Connectors", icon: <FaPlug /> },
-  { path: "/tunnels", label: "Tunnels", icon: <FaNetworkWired /> },
   { path: "/sessions", label: "Sessions", icon: <FaKey /> },
   { path: "/logs", label: "Access Logs", icon: <FaHistory /> },
-  { path: "/templates", label: "Templates", icon: <FaFileAlt /> },
   { path: "/settings", label: "Settings", icon: <FaCog /> },
 ];
 

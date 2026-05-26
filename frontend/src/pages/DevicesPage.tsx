@@ -208,7 +208,7 @@ const DevicesPage: React.FC = () => {
   const [data, setData] = useState<DeviceAssessmentData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<"assessment" | "devices" | "security-tests" | "live-tests">("assessment");
+  const [activeTab, setActiveTab] = useState<"inventory" | "posture" | "contribution">("inventory");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [usingMockData, setUsingMockData] = useState(false);
@@ -542,51 +542,40 @@ const DevicesPage: React.FC = () => {
       <div className="border-b border-gray-200 dark:border-gray-700">
         <nav className="flex gap-4">
           <button
-            onClick={() => setActiveTab("assessment")}
+            onClick={() => setActiveTab("inventory")}
             className={`py-2 px-4 border-b-2 font-medium text-sm ${
-              activeTab === "assessment"
+              activeTab === "inventory"
                 ? "border-indigo-600 text-indigo-600"
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
-            Assessment Results
+            Device Inventory ({total_devices})
           </button>
           <button
-            onClick={() => setActiveTab("security-tests")}
+            onClick={() => setActiveTab("posture")}
             className={`py-2 px-4 border-b-2 font-medium text-sm ${
-              activeTab === "security-tests"
+              activeTab === "posture"
                 ? "border-indigo-600 text-indigo-600"
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
-            Security Tests ({testStats.total})
+            Device Posture Checks
           </button>
           <button
-            onClick={() => { setActiveTab("live-tests"); if (!liveTests) fetchLiveTests(); }}
-            className={`py-2 px-4 border-b-2 font-medium text-sm flex items-center gap-2 ${
-              activeTab === "live-tests"
-                ? "border-green-600 text-green-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            <FaCloud size={14} />
-            Live Graph Tests
-          </button>
-          <button
-            onClick={() => setActiveTab("devices")}
+            onClick={() => setActiveTab("contribution")}
             className={`py-2 px-4 border-b-2 font-medium text-sm ${
-              activeTab === "devices"
+              activeTab === "contribution"
                 ? "border-indigo-600 text-indigo-600"
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
-            Device List ({total_devices})
+            Device Trust Contribution
           </button>
         </nav>
       </div>
 
-      {/* Live Tests Tab */}
-      {activeTab === "live-tests" && (
+      {/* Live Tests Tab (hidden from nav, kept for data fetching) */}
+      {false && activeTab === "posture" && (
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
           <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
             <div>
@@ -766,7 +755,7 @@ const DevicesPage: React.FC = () => {
         </div>
       )}
 
-      {activeTab === "assessment" ? (
+      {activeTab === "contribution" ? (
         <>
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -990,356 +979,75 @@ const DevicesPage: React.FC = () => {
             </div>
           </div>
         </>
-      ) : activeTab === "security-tests" ? (
-        /* Security Tests Tab */
+      ) : activeTab === "posture" ? (
+        /* Device Posture Checks Tab */
         <>
-          {/* Stats Summary */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
-                  <FaCheckCircle className="text-green-600 text-xl" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-green-600">{testStats.passed}</p>
-                  <p className="text-sm text-gray-500">Passed</p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/30">
-                  <FaTimesCircle className="text-red-600 text-xl" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-red-600">{testStats.failed}</p>
-                  <p className="text-sm text-gray-500">Failed</p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30">
-                  <FaExclamationTriangle className="text-amber-500 text-xl" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-amber-500">{testStats.investigate}</p>
-                  <p className="text-sm text-gray-500">Investigate</p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-700">
-                  <FaClock className="text-gray-500 text-xl" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-gray-500">{testStats.skipped}</p>
-                  <p className="text-sm text-gray-500">Skipped</p>
-                </div>
-              </div>
-            </div>
+          {/* Posture Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <SummaryCard icon={<FaCheckCircle />} title="Compliance Rate" value={`${compliance_rate}%`} subtitle={`${compliance_stats.compliant} compliant`} color={compliance_rate >= 80 ? "green" : compliance_rate >= 60 ? "yellow" : "red"} />
+            <SummaryCard icon={<FaLock />} title="Encryption Rate" value={`${encryption_rate}%`} subtitle={`${encryption_stats.encrypted} encrypted`} color={encryption_rate >= 80 ? "green" : encryption_rate >= 60 ? "yellow" : "red"} />
+            <SummaryCard icon={<FaDesktop />} title="Total Devices" value={total_devices} color="indigo" />
+            <SummaryCard icon={<FaMobile />} title="Corporate Devices" value={ownership_stats.corporate} subtitle={`${((ownership_stats.corporate / Math.max(total_devices, 1)) * 100).toFixed(0)}% of total`} color="purple" />
           </div>
-
-          {/* Filters */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-            <div className="flex flex-wrap gap-4 items-center">
-              {/* Search */}
-              <div className="relative flex-1 min-w-[200px]">
-                <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search tests..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
-                />
-              </div>
-
-              {/* SFI Pillar Filter */}
-              <div className="flex flex-wrap gap-2">
-                {uniqueSfiPillars.slice(0, 4).map(pillar => {
-                  const config = getSfiPillarConfig(pillar);
-                  const IconComponent = config.icon;
-                  const isSelected = selectedSfiPillars.includes(pillar);
-                  return (
-                    <button
-                      key={pillar}
-                      onClick={() => toggleFilter(pillar, selectedSfiPillars, setSelectedSfiPillars)}
-                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
-                        isSelected ? `${config.bgColor} ${config.color}` : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
-                      }`}
-                      title={pillar}
-                    >
-                      <IconComponent className="text-sm" />
-                      <span className="hidden sm:inline">{pillar.split(' ').slice(0, 2).join(' ')}...</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Risk Filter */}
-              <div className="flex gap-1">
-                {["High", "Medium", "Low"].map(risk => {
-                  const config = getRiskConfig(risk);
-                  const isSelected = selectedRisks.includes(risk);
-                  return (
-                    <button
-                      key={risk}
-                      onClick={() => toggleFilter(risk, selectedRisks, setSelectedRisks)}
-                      className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${
-                        isSelected ? `bg-gray-800 text-white` : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700'
-                      }`}
-                    >
-                      <config.icon className={config.color} />
-                      {risk}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Status Filter */}
-              <div className="flex gap-1">
-                {["Passed", "Failed", "Investigate", "Skipped"].map(status => {
-                  const config = getStatusConfig(status);
-                  const isSelected = selectedStatuses.includes(status);
-                  return (
-                    <button
-                      key={status}
-                      onClick={() => toggleFilter(status, selectedStatuses, setSelectedStatuses)}
-                      className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${
-                        isSelected ? `${config.bgColor} ${config.textColor}` : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700'
-                      }`}
-                    >
-                      <config.icon className={`text-xs ${config.color}`} />
-                      {status}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Clear Filters */}
-              {(selectedSfiPillars.length > 0 || selectedRisks.length > 0 || selectedStatuses.length > 0 || searchTerm) && (
-                <button
-                  onClick={() => {
-                    setSelectedSfiPillars([]);
-                    setSelectedRisks([]);
-                    setSelectedStatuses([]);
-                    setSearchTerm("");
-                  }}
-                  className="text-xs text-indigo-600 hover:underline"
-                >
-                  Clear filters
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Tests List */}
+          {/* Posture Check Table */}
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
-            <div className="px-4 py-3 border-b dark:border-gray-700">
-              <p className="text-sm text-gray-500">
-                Showing {filteredSecurityTests.length} of {testStats.total} tests
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">Device Posture Checks</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Aggregated posture status across managed devices. Per-device real-time data is available via the ModZero Client app.
               </p>
             </div>
-            <div className="divide-y dark:divide-gray-700 max-h-[600px] overflow-y-auto">
-              {filteredSecurityTests.map((test) => {
-                const statusConfig = getStatusConfig(test.status);
-                const riskConfig = getRiskConfig(test.risk);
-                const pillarConfig = getSfiPillarConfig(test.sfiPillar);
-                const PillarIcon = pillarConfig.icon;
-                const StatusIcon = statusConfig.icon;
-                const RiskIcon = riskConfig.icon;
-                
-                return (
-                  <div
-                    key={test.id}
-                    className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
-                    onClick={() => { setSelectedTest(test); setShowDetail(true); }}
-                  >
-                    <div className="flex items-start gap-4">
-                      <div className={`p-2 rounded-lg ${statusConfig.bgColor}`}>
-                        <StatusIcon className={`text-lg ${statusConfig.color}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs text-gray-400">{test.testId}</span>
-                          <span className={`flex items-center gap-1 text-xs ${riskConfig.color}`}>
-                            <RiskIcon className="text-xs" />
-                            {test.risk}
-                          </span>
-                        </div>
-                        <h4 className="font-medium text-gray-900 dark:text-white">{test.title}</h4>
-                        <div className="flex items-center gap-2 mt-2">
-                          <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded ${pillarConfig.bgColor} ${pillarConfig.color}`}>
-                            <PillarIcon className="text-xs" />
-                            {test.sfiPillar}
-                          </span>
-                          <span className="text-xs text-gray-500">{test.category}</span>
-                        </div>
-                      </div>
-                      <FaExternalLinkAlt className="text-gray-400 text-sm flex-shrink-0" />
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead className="bg-gray-50 dark:bg-gray-800">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Check</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Result</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Affects Trust Score</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Weight</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                  {[
+                    { check: "Device Compliance Policy", source: "Microsoft Graph / Intune", result: compliance_rate >= 80 ? "Pass" : compliance_rate >= 50 ? "Warning" : "Fail", affects: true, weight: "High" },
+                    { check: "Disk Encryption (BitLocker / FileVault)", source: "Microsoft Graph / Intune", result: encryption_rate >= 80 ? "Pass" : encryption_rate >= 50 ? "Warning" : "Fail", affects: true, weight: "High" },
+                    { check: "Intune Compliant", source: "Microsoft Graph / Intune", result: compliance_stats.compliant > 0 ? "Pass" : "Not configured", affects: true, weight: "High" },
+                    { check: "Firewall Enabled", source: "Local Client", result: "Simulated", affects: true, weight: "Medium" },
+                    { check: "Antivirus Enabled", source: "Local Client", result: "Simulated", affects: true, weight: "Medium" },
+                    { check: "Screen Lock Enabled", source: "Local Client", result: "Simulated", affects: true, weight: "Medium" },
+                    { check: "OS Version Supported", source: "Local Client / Microsoft Graph", result: "Simulated", affects: true, weight: "Medium" },
+                    { check: "Last Check-in (≤ 7 days)", source: "Local Client", result: "Simulated", affects: false, weight: "Low" },
+                  ].map((row, idx) => (
+                    <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{row.check}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{row.source}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          row.result === "Pass" ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                          : row.result === "Warning" ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+                          : row.result === "Fail" ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                          : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+                        }`}>
+                          {row.result}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{row.affects ? "Yes" : "No"}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{row.weight}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
+              <p className="text-xs text-gray-400">
+                <strong>Simulated</strong> — firewall, antivirus, screen lock, and OS checks are reported by the ModZero Client agent running on the device. Install the ModZero Client to see real-time per-device posture data.
+              </p>
             </div>
           </div>
-
-          {/* Test Detail Panel */}
-          {showDetail && selectedTest && (
-            <div className="fixed inset-0 z-50 overflow-hidden">
-              <div className="absolute inset-0 bg-black/50" onClick={() => setShowDetail(false)} />
-              <div className="absolute right-0 top-0 h-full w-full max-w-xl bg-white dark:bg-gray-800 shadow-xl overflow-y-auto">
-                {/* Panel Header */}
-                <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-6 z-10">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1 pr-4">
-                      <h2 className="text-xl font-bold text-gray-900 dark:text-white">{selectedTest.title}</h2>
-                      <p className="text-sm text-gray-500 mt-1">Test ID: {selectedTest.testId}</p>
-                    </div>
-                    <button onClick={() => setShowDetail(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-                      <FaTimes size={18} className="text-gray-500" />
-                    </button>
-                  </div>
-                  
-                  {/* Status and Risk */}
-                  <div className="flex items-center gap-3 mt-4">
-                    {(() => {
-                      const statusConfig = getStatusConfig(selectedTest.status);
-                      const StatusIcon = statusConfig.icon;
-                      return (
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${statusConfig.bgColor} ${statusConfig.textColor}`}>
-                          <StatusIcon size={14} />
-                          {selectedTest.status}
-                        </span>
-                      );
-                    })()}
-                    {(() => {
-                      const riskConfig = getRiskConfig(selectedTest.risk);
-                      const RiskIcon = riskConfig.icon;
-                      return (
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-gray-100 dark:bg-gray-700 ${riskConfig.color}`}>
-                          <RiskIcon size={14} />
-                          {selectedTest.risk} Risk
-                        </span>
-                      );
-                    })()}
-                  </div>
-                </div>
-
-                {/* Panel Content */}
-                <div className="p-6 space-y-6">
-                  {/* Test Result Section */}
-                  <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-5 border border-gray-100 dark:border-gray-700">
-                    <div className="flex items-center gap-2 mb-4">
-                      <h3 className="font-semibold text-gray-900 dark:text-white">Test result</h3>
-                      <span className="text-gray-500 dark:text-gray-400">→</span>
-                      {(() => {
-                        const statusConfig = getStatusConfig(selectedTest.status);
-                        return (
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusConfig.bgColor} ${statusConfig.textColor}`}>
-                            {selectedTest.status}
-                          </span>
-                        );
-                      })()}
-                    </div>
-                    <p className="text-gray-700 dark:text-gray-300 text-sm mb-4">
-                      {selectedTest.status === "Passed" 
-                        ? `${selectedTest.title.replace(/don''t|don't/gi, "").replace(/are |is /gi, "")} check completed successfully.`
-                        : selectedTest.status === "Failed"
-                        ? `${selectedTest.title.replace(/don''t|don't/gi, "").replace(/are |is /gi, "")} requires attention.`
-                        : `${selectedTest.title} needs further investigation.`}
-                    </p>
-
-                    {/* Settings Table */}
-                    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                      <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-                        <h4 className="text-sm font-medium text-gray-900 dark:text-white">Configuration settings</h4>
-                      </div>
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b border-gray-200 dark:border-gray-700">
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Setting</th>
-                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr className="border-b border-gray-100 dark:border-gray-700">
-                            <td className="px-4 py-3 text-sm text-indigo-600 dark:text-indigo-400">
-                              {selectedTest.title}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-right">
-                              <span className={`${selectedTest.status === "Passed" ? "text-green-600" : selectedTest.status === "Failed" ? "text-red-600" : "text-amber-600"}`}>
-                                {selectedTest.status === "Passed" ? "Enabled" : selectedTest.status === "Failed" ? "Not configured" : "Needs review"}
-                              </span>
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {/* What was checked */}
-                  <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-5 border border-gray-100 dark:border-gray-700">
-                    <h3 className="font-semibold text-gray-900 dark:text-white mb-3">What was checked</h3>
-                    {(() => {
-                      const remediation = getTestRemediation(selectedTest.testId);
-                      const description = remediation?.description || selectedTest.description;
-                      return (
-                        <div className="text-gray-700 dark:text-gray-300 leading-relaxed text-sm prose prose-sm dark:prose-invert max-w-none">
-                          <ReactMarkdown components={markdownComponents}>{description}</ReactMarkdown>
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  {/* Remediation Action - Dynamic based on test ID from MD files */}
-                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-5 border border-blue-100 dark:border-blue-800">
-                    <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Remediation action</h3>
-                    {(() => {
-                      const remediation = getTestRemediation(selectedTest.testId);
-                      if (remediation && remediation.remediation) {
-                        return (
-                          <div className="text-gray-700 dark:text-gray-300 text-sm prose prose-sm dark:prose-invert max-w-none">
-                            <ReactMarkdown components={markdownComponents}>{remediation.remediation}</ReactMarkdown>
-                          </div>
-                        );
-                      }
-                      return (
-                        <p className="text-gray-500 dark:text-gray-400 text-sm italic">
-                          No specific remediation guidance available for this test.
-                        </p>
-                      );
-                    })()}
-                  </div>
-
-                  {/* Details Grid */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
-                      <p className="text-xs text-gray-500 uppercase tracking-wider">Category</p>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">{selectedTest.category}</p>
-                    </div>
-                    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
-                      <p className="text-xs text-gray-500 uppercase tracking-wider">SFI Pillar</p>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">{selectedTest.sfiPillar || 'N/A'}</p>
-                    </div>
-                    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
-                      <p className="text-xs text-gray-500 uppercase tracking-wider">User Impact</p>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">{selectedTest.userImpact}</p>
-                    </div>
-                    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
-                      <p className="text-xs text-gray-500 uppercase tracking-wider">Implementation Cost</p>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">{selectedTest.implementationCost}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </>
-      ) : (
-        /* Device List Tab */
+      ) : activeTab === "inventory" ? (
+        /* Device Inventory */
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold mb-4">Managed Devices</h3>
           {devices.length === 0 ? (
@@ -1392,7 +1100,7 @@ const DevicesPage: React.FC = () => {
             </div>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 };
