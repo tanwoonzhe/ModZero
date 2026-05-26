@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from .. import schemas
@@ -539,6 +539,7 @@ def request_access(
     token_plain: Optional[str] = None
     expires_at: Optional[datetime] = None
     access_url: Optional[str] = None
+    launch_url: Optional[str] = None
 
     if mint_http_session:
         token_plain = secrets.token_urlsafe(32)
@@ -563,6 +564,15 @@ def request_access(
             access_url = f"{_proxy_base}/access/{session.id}?token={token_plain}"
         else:
             access_url = f"modzero://access/{session.id}"
+
+        # Generate one-time launch code for ZTNA gateway flow (stored as hash only)
+        _launch_code = secrets.token_urlsafe(24)
+        session.launch_code_hash = hashlib.sha256(_launch_code.encode()).hexdigest()
+        session.launch_code_expires_at = datetime.now(timezone.utc) + timedelta(seconds=300)
+        session.launch_code_used = False
+        db.commit()
+
+        launch_url = f"{_proxy_base}/launch/{_launch_code}" if _proxy_base else None
 
     # Tunnel-related audit rows (best-effort).
     if fallback_used:
@@ -600,6 +610,7 @@ def request_access(
         access_token=token_plain,
         expires_at=expires_at,
         access_url=access_url,
+        launch_url=launch_url,
         connector_id=(session.connector_id if session else (online_connector.connector_id if online_connector else None)),
         access_mode=access_mode,
         tunnel_ready=tunnel_ready,
@@ -610,6 +621,54 @@ def request_access(
         tunnel_available=tunnel_eval["tunnel_available"],
         fallback_used=fallback_used,
         fallback_access_url=access_url if mint_http_session else None,
+    )
+
+
+# ── Launch code exchange (ZTNA gateway) ────────────────────────────────────────
+
+@router.post("/launch/exchange", response_model=schemas.AccessLaunchExchangeResponse, tags=["access"])
+def exchange_launch_code(
+    body: schemas.AccessLaunchExchangeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Any:
+    """Connector-facing. Exchanges one-time launch_code for session credentials.
+    Requires X-Connector-Id + X-Connector-Secret headers.
+    Generates a NEW access_token and replaces session_token_hash — old legacy token becomes invalid."""
+    from .connectors import _verify_connector_auth
+    _verify_connector_auth(request, db)
+
+    code_hash = hashlib.sha256(body.launch_code.encode()).hexdigest()
+    session = db.query(AccessSession).filter(
+        AccessSession.launch_code_hash == code_hash
+    ).first()
+    now = datetime.now(timezone.utc)
+
+    if not session:
+        raise HTTPException(status_code=404, detail="launch_code_not_found")
+    if session.launch_code_used:
+        raise HTTPException(status_code=410, detail="launch_code_already_used")
+    if session.launch_code_expires_at and session.launch_code_expires_at < now:
+        raise HTTPException(status_code=410, detail="launch_code_expired")
+    if session.status != "active":
+        raise HTTPException(status_code=403, detail="session_not_active")
+    if session.expires_at < now:
+        raise HTTPException(status_code=410, detail="session_expired")
+
+    new_token = secrets.token_urlsafe(32)
+    session.session_token_hash = hashlib.sha256(new_token.encode()).hexdigest()
+    session.launch_code_used = True
+    db.commit()
+
+    resource = (
+        db.query(ProtectedResource).filter(ProtectedResource.id == session.resource_id).first()
+        if session.resource_id else None
+    )
+    return schemas.AccessLaunchExchangeResponse(
+        session_id=session.id,
+        access_token=new_token,
+        resource_name=resource.name if resource else None,
+        expires_at=session.expires_at,
     )
 
 

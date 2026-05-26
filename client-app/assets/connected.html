@@ -521,7 +521,7 @@
         const score = d.trust_score == null ? "&mdash;" : Math.round(d.trust_score);
         if (d.decision === "allow") {
           const exp = d.expires_at ? new Date(d.expires_at).toLocaleTimeString() : "&mdash;";
-          const url = d.access_url || "";
+          const url = d.launch_url || d.access_url || "";
           const openBtn = url
             ? `<button class="btn-sm" onclick='openAccessUrl(${JSON.stringify(url)})'>Open Access Session</button>`
             : "";

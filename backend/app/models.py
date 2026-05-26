@@ -1433,6 +1433,9 @@ class AccessSession(Base):
     expires_at: datetime = Column(DateTime(timezone=True), nullable=False)
     revoked_at: datetime = Column(DateTime(timezone=True), nullable=True)
     last_used_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    launch_code_hash: str = Column(String(64), nullable=True)
+    launch_code_expires_at: datetime = Column(DateTime(timezone=True), nullable=True)
+    launch_code_used: bool = Column(Boolean, default=False, nullable=True)
 
     def __repr__(self) -> str:
         return f"<AccessSession {self.id} status={self.status}>"

@@ -88,6 +88,26 @@ class ControllerClient:
         except Exception:
             return None
 
+    # ── Launch code exchange (ZTNA gateway) ────────────────────────────────────
+    def exchange_launch_code(self, launch_code: str, timeout: int = 8) -> Optional[dict]:
+        """Exchange one-time launch code for session credentials. Never logs code or token."""
+        url = f"{self.backend}/api/access/launch/exchange"
+        try:
+            r = requests.post(
+                url,
+                headers=self._auth_headers(),
+                json={"launch_code": launch_code},
+                timeout=timeout,
+            )
+            if r.status_code == 200:
+                return r.json()
+            try:
+                return {"error": True, "detail": r.json().get("detail", "unknown")}
+            except Exception:
+                return None
+        except Exception:
+            return None
+
     # ── Tunnel (WG metadata) ────────────────────────────────────────────────
     def tunnel_register(self, node_name: str,
                         node_key: Optional[str] = None,

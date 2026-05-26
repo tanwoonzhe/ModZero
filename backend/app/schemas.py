@@ -561,6 +561,7 @@ class AccessDecisionOut(BaseModel):
     access_token: Optional[str] = None  # raw token, shown once; stored as hash only
     expires_at: Optional[datetime] = None
     access_url: Optional[str] = None
+    launch_url: Optional[str] = None
     connector_id: Optional[UUID] = None
     # Tunnel-aware additive fields (Part 1.C)
     access_mode: Optional[str] = None  # "http_proxy" | "wireguard_tunnel" | "both" | "denied"
@@ -572,6 +573,17 @@ class AccessDecisionOut(BaseModel):
     tunnel_available: bool = False
     fallback_used: bool = False
     fallback_access_url: Optional[str] = None
+
+
+class AccessLaunchExchangeRequest(BaseModel):
+    launch_code: str
+
+
+class AccessLaunchExchangeResponse(BaseModel):
+    session_id: UUID
+    access_token: str
+    resource_name: Optional[str] = None
+    expires_at: Optional[datetime] = None
 
 
 class AccessLogOut(BaseModel):

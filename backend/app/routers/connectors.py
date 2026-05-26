@@ -28,10 +28,12 @@ from ..deps import get_db, get_current_admin
 from .. import schemas
 from ..models import (
     AccessSession,
+    DeviceTrustScore,
     EnrollToken, EnrollTokenStatusEnum,
     Connector, ConnectorOnlineStatusEnum,
     ConnectorResource, ResourceProtocolEnum,
     PolicyBinding, ConnectorAccessLog,
+    PostureReport,
     ProtectedResource,
     TunnelNode,
     User,
@@ -659,8 +661,34 @@ def introspect_access_session(
         db.query(ProtectedResource).filter(ProtectedResource.id == session.resource_id).first()
         if session.resource_id else None
     )
-    if not resource or not resource.enabled:
+    if not resource:
         return schemas.AccessIntrospectResponse(active=False, reason="resource_unavailable")
+    if not resource.enabled:
+        return schemas.AccessIntrospectResponse(active=False, reason="resource_disabled")
+
+    # Live trust score revalidation
+    if session.device_id and resource.minimum_trust_score is not None and resource.minimum_trust_score > 0:
+        latest_score = (
+            db.query(DeviceTrustScore)
+            .filter(DeviceTrustScore.device_id == session.device_id)
+            .order_by(DeviceTrustScore.calculated_at.desc())
+            .first()
+        )
+        if latest_score is None:
+            return schemas.AccessIntrospectResponse(active=False, reason="no_trust_score")
+        if latest_score.total_score < resource.minimum_trust_score:
+            return schemas.AccessIntrospectResponse(active=False, reason="trust_score_below_required")
+
+    # Live intune compliance revalidation
+    if resource.require_intune_compliant and session.device_id:
+        latest_report = (
+            db.query(PostureReport)
+            .filter(PostureReport.device_id == session.device_id)
+            .order_by(PostureReport.reported_at.desc())
+            .first()
+        )
+        if not latest_report or not latest_report.intune_compliant:
+            return schemas.AccessIntrospectResponse(active=False, reason="intune_required")
 
     # Update last_used_at
     session.last_used_at = now

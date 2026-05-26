@@ -1,22 +1,30 @@
 """ModZero connector HTTP proxy: introspect-per-request + forwarding.
 
 Routes:
-  GET  /access/{session_id}                       → Access Granted status page
-  GET/HEAD/POST /access/{session_id}/proxy/{path} → forward to introspect-derived target
+  GET  /launch/{code}                              → exchange launch code, set cookie, redirect
+  GET/HEAD/POST /r/{session_id}/{path}             → gateway (cookie auth, no token in URL)
+  GET  /access/{session_id}                        → legacy status page (token in URL)
+  GET/HEAD/POST /access/{session_id}/proxy/{path}  → legacy forward (token in URL)
 
 Safety:
-  - Every /proxy/ request calls /api/connectors/access/introspect first
+  - Every /r/ and /proxy/ request calls /api/connectors/access/introspect first
+  - Introspect now checks live trust score and intune compliance
+  - Cookie store is in-memory only (cleared on connector restart)
   - Upstream URL built ONLY from introspect result
   - Sensitive client headers stripped: Cookie, Authorization, Proxy-Authorization, X-ModZero-Access-Token
   - Hop-by-hop headers stripped both directions
   - Upstream Location header dropped (no internal-target leakage)
   - 8s upstream timeout, 2MB response cap, 1MB request body cap
-  - Token never logged
+  - Launch code and access token never logged
 """
 
+import datetime as _dt
 import html as html_mod
+import secrets as _secrets
 import threading
+from datetime import timezone as _tz
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Optional
 from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urlparse
 
 import requests
@@ -37,6 +45,36 @@ UPSTREAM_TIMEOUT   = 8
 
 _handler_state: dict = {}
 
+# In-memory cookie store: cookie_id → (session_id, access_token)
+# Cleared on connector restart — users must re-request access after restart.
+_cookie_store: dict = {}
+_cookie_store_lock = threading.Lock()
+COOKIE_NAME = "mz_session"
+
+REASON_MESSAGES: dict = {
+    "no_session":                 "Access denied. Please open ModZero Client and request access.",
+    "session_expired":            "Your session has expired. Please request access again in ModZero Client.",
+    "session_revoked":            "Your session was revoked by an administrator.",
+    "session_not_active":         "Your session is no longer active. Please request access again.",
+    "trust_score_below_required": "Your device trust score no longer meets the minimum for this resource. Run Device Check in ModZero Client.",
+    "resource_disabled":          "This resource is currently disabled by an administrator.",
+    "resource_unavailable":       "This resource target is not configured.",
+    "intune_required":            "Intune device compliance is required for this resource.",
+    "no_trust_score":             "No device trust score found. Please run Device Check in ModZero Client.",
+    "launch_code_already_used":   "This access link was already used. Please request access again in ModZero Client.",
+    "launch_code_expired":        "This access link has expired. Please request access again in ModZero Client.",
+    "launch_code_not_found":      "Invalid access link. Please request access again in ModZero Client.",
+    "connector_mismatch":         "This session is bound to a different connector.",
+}
+
+
+def _parse_cookie(header: str, name: str) -> Optional[str]:
+    for part in header.split(";"):
+        k, _, v = part.strip().partition("=")
+        if k.strip() == name:
+            return v.strip()
+    return None
+
 
 def _filter_hop_by_hop(headers) -> dict:
     return {k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP}
@@ -45,6 +83,37 @@ def _filter_hop_by_hop(headers) -> dict:
 def _strip_token_from_qs(qs: str) -> str:
     pairs = parse_qsl(qs, keep_blank_values=True)
     return urlencode([(k, v) for k, v in pairs if k != "token"])
+
+
+def _denied_page(reason: str, message: str = "") -> str:
+    e = html_mod.escape
+    friendly = message or REASON_MESSAGES.get(reason, "Access denied.")
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ModZero — Access Denied</title>
+  <style>
+    body{{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;display:flex;
+          align-items:center;justify-content:center;min-height:100vh}}
+    .card{{background:#1e293b;border:2px solid #ef4444;border-radius:12px;padding:2rem 2.5rem;
+           max-width:460px;width:100%;text-align:center}}
+    h1{{color:#ef4444;margin-top:0}}
+    .reason{{background:#0f172a;border-radius:6px;padding:.6rem 1rem;
+             font-family:monospace;font-size:1rem;color:#fca5a5;display:inline-block;margin:.5rem 0}}
+    .msg{{color:#94a3b8;font-size:.88rem;margin-top:.75rem;line-height:1.5}}
+    .note{{margin-top:1.25rem;font-size:.75rem;color:#475569}}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>&#x2717; Access Denied</h1>
+    <div class="reason">{e(reason)}</div>
+    <p class="msg">{e(friendly)}</p>
+    <p class="note">ModZero connector runtime &mdash; open ModZero Client to request access</p>
+  </div>
+</body>
+</html>"""
 
 
 def _granted_page(result: dict, session_id: str, token: str) -> str:
@@ -96,35 +165,6 @@ def _granted_page(result: dict, session_id: str, token: str) -> str:
 </html>"""
 
 
-def _denied_page(reason: str) -> str:
-    e = html_mod.escape
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>ModZero — Access Denied</title>
-  <style>
-    body{{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;display:flex;
-          align-items:center;justify-content:center;min-height:100vh}}
-    .card{{background:#1e293b;border:2px solid #ef4444;border-radius:12px;padding:2rem 2.5rem;
-           max-width:420px;width:100%;text-align:center}}
-    h1{{color:#ef4444;margin-top:0}}
-    .reason{{background:#0f172a;border-radius:6px;padding:.6rem 1rem;
-             font-family:monospace;font-size:1rem;color:#fca5a5;display:inline-block;margin:.5rem 0}}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>&#x2717; Access Denied</h1>
-    <div class="reason">{e(reason)}</div>
-    <p style="color:#94a3b8;font-size:.85rem;margin-top:1rem">
-      ModZero connector runtime &mdash; session invalid or expired
-    </p>
-  </div>
-</body>
-</html>"""
-
-
 class _ProxyHandler(BaseHTTPRequestHandler):
     def do_GET(self):  self._dispatch()      # noqa: N802
     def do_HEAD(self): self._dispatch()      # noqa: N802
@@ -135,8 +175,26 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         parts  = [p for p in parsed.path.strip("/").split("/") if p]
 
+        # Root or unknown path without session
+        if not parts:
+            self._html(403, _denied_page("no_session"))
+            return
+
+        # Gateway: /launch/{code}
+        if parts[0] == "launch" and len(parts) == 2:
+            self._handle_launch(parts[1])
+            return
+
+        # Gateway: /r/{session_id}/{path...}
+        if parts[0] == "r" and len(parts) >= 2:
+            session_id   = parts[1]
+            forward_path = "/" + "/".join(parts[2:]) if len(parts) > 2 else "/"
+            self._handle_gateway(session_id, forward_path, parsed.query)
+            return
+
+        # Legacy /access/ routes (kept for backward compatibility)
         if len(parts) < 2 or parts[0] != "access":
-            self._html(404, _denied_page("route_not_found"))
+            self._html(404, _denied_page("route_not_found", "This path is not served by the ModZero connector."))
             return
 
         session_id = parts[1]
@@ -160,7 +218,83 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
         self._html(404, _denied_page("route_not_found"))
 
-    # ── Status page ──────────────────────────────────────────────────────
+    # ── Gateway: exchange launch code ────────────────────────────────────
+    def _handle_launch(self, launch_code: str):
+        client: ControllerClient = _handler_state["client"]
+        result = client.exchange_launch_code(launch_code)
+
+        if not result or result.get("error"):
+            detail = (result or {}).get("detail", "launch_failed")
+            self._html(403, _denied_page(detail, REASON_MESSAGES.get(detail, REASON_MESSAGES["no_session"])))
+            return
+
+        session_id   = result.get("session_id")
+        access_token = result.get("access_token")
+        expires_at_str = result.get("expires_at")
+        if not session_id or not access_token:
+            self._html(403, _denied_page("launch_failed", REASON_MESSAGES["no_session"]))
+            return
+
+        cookie_id = _secrets.token_urlsafe(32)
+        with _cookie_store_lock:
+            _cookie_store[cookie_id] = (session_id, access_token)
+
+        max_age = 3600
+        if expires_at_str:
+            try:
+                exp = _dt.datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+                delta = int((exp - _dt.datetime.now(_tz.utc)).total_seconds())
+                max_age = max(60, min(max_age, delta))
+            except Exception:
+                pass
+
+        # NOTE: Secure flag NOT set — connector runs over HTTP in demo mode
+        cookie_val = (
+            f"{COOKIE_NAME}={cookie_id}; HttpOnly; SameSite=Lax; "
+            f"Path=/r/{session_id}; Max-Age={max_age}"
+        )
+        self.send_response(302)
+        self.send_header("Location", f"/r/{session_id}/")
+        self.send_header("Set-Cookie", cookie_val)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    # ── Gateway: cookie-authenticated proxy ──────────────────────────────
+    def _handle_gateway(self, session_id: str, forward_path: str, query_string: str):
+        cookie_id = _parse_cookie(self.headers.get("Cookie", ""), COOKIE_NAME)
+        if not cookie_id:
+            self._html(403, _denied_page("no_session"))
+            return
+
+        with _cookie_store_lock:
+            entry = _cookie_store.get(cookie_id)
+        if not entry or entry[0] != session_id:
+            self._html(403, _denied_page("no_session"))
+            return
+        _, access_token = entry
+
+        client: ControllerClient = _handler_state["client"]
+        result = client.introspect(session_id, access_token)
+        if result is None:
+            self._html(502, _denied_page("backend_unreachable", "Backend unreachable. Try again shortly."))
+            return
+        if not result.get("active"):
+            reason = result.get("reason", "unknown")
+            with _cookie_store_lock:
+                _cookie_store.pop(cookie_id, None)
+            self._html(403, _denied_page(reason, REASON_MESSAGES.get(reason, "")))
+            return
+
+        target_host = result.get("target_host")
+        target_port = result.get("target_port")
+        protocol    = (result.get("protocol") or "http").lower()
+        if not target_host or not target_port or protocol not in ("http", "https"):
+            self._html(502, _denied_page("resource_unavailable"))
+            return
+
+        self._do_forward(target_host, target_port, protocol, forward_path, query_string)
+
+    # ── Legacy: status page ──────────────────────────────────────────────
     def _handle_status_page(self, session_id: str, token: str):
         client: ControllerClient = _handler_state["client"]
         result = client.introspect(session_id, token)
@@ -172,12 +306,12 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             return
         self._html(200, _granted_page(result, session_id, token))
 
-    # ── Forward ──────────────────────────────────────────────────────────
+    # ── Legacy: token-in-URL forward ─────────────────────────────────────
     def _handle_forward(self, session_id: str, token: str,
                         forward_path: str, query_string: str):
+        info("[proxy] DEPRECATED: token-in-URL legacy route used")
         client: ControllerClient = _handler_state["client"]
 
-        # 1. Introspect
         result = client.introspect(session_id, token)
         if result is None:
             self._html(502, _denied_page("backend_unreachable"))
@@ -186,7 +320,6 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self._html(403, _denied_page(result.get("reason", "unknown")))
             return
 
-        # 2. Validate target
         target_host = result.get("target_host")
         target_port = result.get("target_port")
         protocol    = (result.get("protocol") or "http").lower()
@@ -194,20 +327,22 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self._html(502, _denied_page("invalid_target"))
             return
 
-        # 3. Build upstream URL from introspect ONLY (strip our token)
+        self._do_forward(target_host, target_port, protocol, forward_path, query_string)
+
+    # ── Shared: HTTP forward to upstream ─────────────────────────────────
+    def _do_forward(self, target_host: str, target_port: int,
+                    protocol: str, forward_path: str, query_string: str):
         upstream_qs = _strip_token_from_qs(query_string)
         target_url  = f"{protocol}://{target_host}:{target_port}{forward_path}"
         if upstream_qs:
             target_url += f"?{upstream_qs}"
 
-        # 4. Filter outgoing headers
         upstream_headers = _filter_hop_by_hop(self.headers)
         upstream_headers.pop("Host", None)
         for h in list(upstream_headers):
             if h.lower() in SENSITIVE_UPSTREAM_HEADERS:
                 upstream_headers.pop(h, None)
 
-        # 5. Request body (POST)
         body: bytes | None = None
         if self.command == "POST":
             try:
@@ -220,7 +355,6 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 return
             body = self.rfile.read(clen) if clen > 0 else b""
 
-        # 6. Forward
         try:
             r = requests.request(
                 method=self.command,
@@ -241,7 +375,6 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self._html(502, _denied_page("upstream_error"))
             return
 
-        # 7. Read body up to MAX_RESPONSE_BYTES
         chunks: list[bytes] = []
         total = 0
         try:
@@ -259,7 +392,6 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             return
         body_bytes = b"".join(chunks)
 
-        # 8. Mirror response (strip hop-by-hop, Location, content-length/encoding)
         self.send_response(r.status_code)
         for k, v in r.headers.items():
             kl = k.lower()
@@ -286,8 +418,12 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):  # noqa: N802
         parsed = urlparse(self.path)
+        parts  = [p for p in parsed.path.strip("/").split("/") if p]
         qs = parse_qs(parsed.query)
-        path_display = parsed.path + ("?token=[REDACTED]" if "token" in qs else "")
+        if len(parts) >= 2 and parts[0] == "launch":
+            path_display = "/launch/[REDACTED]"
+        else:
+            path_display = parsed.path + ("?token=[REDACTED]" if "token" in qs else "")
         status = args[1] if len(args) > 1 else "?"
         info(f"[proxy] {self.command} {path_display} → {status}")
 
@@ -311,9 +447,9 @@ class ProxyServer:
         self._thread.start()
         bind = self.host or "0.0.0.0"
         ok(f"Proxy server →")
-        info(f"   status page : http://{bind}:{self.port}/access/{{session_id}}?token={{token}}")
-        info(f"   forwarding  : http://{bind}:{self.port}/access/{{session_id}}/proxy/{{path}}?token={{token}}")
-        info("Session token appears in URL query string — demo use only.")
+        info(f"   gateway (new): http://{bind}:{self.port}/launch/{{code}} → /r/{{session_id}}/")
+        info(f"   legacy (old) : http://{bind}:{self.port}/access/{{session_id}}/proxy/{{path}}?token={{token}}")
+        info("Gateway mode active — HttpOnly cookie, no token in browser URL.")
 
     def stop(self) -> None:
         if self._httpd is not None:

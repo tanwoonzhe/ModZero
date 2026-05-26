@@ -227,3 +227,47 @@ the existing `status` subcommand). `wg instructions` always exits 0. The
 template includes `{LOGIN_SERVER}` / `{NODE_NAME}` / `{HEADSCALE_USER}` as
 literal placeholders — the dashboard Bootstrap action is the source of truth
 for concrete values, and no auth key is ever baked into this output.
+
+---
+
+## Gateway Mode (ZTNA)
+
+### Why enter through ModZero Client first
+
+The HTTP connector gateway is the current policy enforcement path. Direct access to the connector's proxy port is blocked — you must obtain a time-limited session through the ModZero Client before the connector will serve any content.
+
+The internal resource (e.g. `http://127.0.0.1:8088`) must **not** be publicly reachable. The connector is the only valid entry point. Users who can reach the connector port directly (without a session) see only an "Access Denied" page.
+
+### One-time launch code flow
+
+1. ModZero Client calls `POST /api/access/request` → backend returns `launch_url = http://<connector>/launch/<code>`
+2. Electron opens `launch_url` via `shell.openExternal`
+3. Browser opens `/launch/<code>` on the connector
+4. Connector calls `POST /api/access/launch/exchange` (connector-authenticated) → backend validates the one-time code, generates a **new** access token, replaces the session token hash (the old legacy URL token becomes invalid), and returns `{session_id, access_token}`
+5. Connector creates an in-memory cookie entry, sets `Set-Cookie: mz_session=<id>; HttpOnly; SameSite=Lax; Path=/r/<session_id>; Max-Age=<ttl>`
+6. Connector redirects to `/r/<session_id>/` — **no token in the URL**
+7. Every subsequent request to `/r/<session_id>/` sends the cookie; the connector introspects the session on every request
+
+### Per-request live policy revalidation
+
+On every request to `/r/<session_id>/`, the connector calls backend introspect which checks:
+
+- Session exists and is active (not revoked or expired)
+- Token hash matches
+- Resource exists and is **currently enabled**
+- Latest device trust score ≥ `resource.minimum_trust_score`
+- Intune compliance if `resource.require_intune_compliant` is set
+
+If an administrator raises the minimum trust score after a session is granted, the next page refresh will immediately return 403 `trust_score_below_required`. If the resource is disabled, the next refresh returns 403 `resource_disabled`.
+
+### Cookie lifetime
+
+`Max-Age` is set to `min(3600, session_expiry_seconds)`. The `Secure` flag is **not** set in HTTP demo mode. In a future HTTPS deployment, add `Secure` to the `Set-Cookie` header.
+
+### Connector restart
+
+The in-memory cookie store is cleared on connector restart. Users with open browser sessions must close the tab and request access again from the ModZero Client.
+
+### Headscale / WireGuard
+
+The HTTP connector gateway is the current enforcement transport. Headscale and WireGuard are the future transport layer — they provide network-level routing (VPN tunnel) rather than per-request HTTP proxying. Both can coexist; the HTTP gateway remains active regardless of WireGuard state.

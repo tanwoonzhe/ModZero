@@ -309,3 +309,104 @@ npm run package:win:portable
 | `g7h8i9j0k1l2` | Route lifecycle columns + audit |
 | `h8i9j0k1l2m3` | Tunnel access policy cols (ProtectedResource + AccessRequestLog) |
 | `i9j0k1l2m3n4` | `tunnel_access_audit_logs` + `tunnel_user_enrollment_logs` tables |
+
+---
+
+## Gateway Mode Validation
+
+Prerequisites:
+- `alembic upgrade head` — run in backend container after deployment
+- Restart backend: `docker compose up -d --force-recreate backend`
+- Restart connector_runtime: `MODZERO_BACKEND_URL=http://43.106.22.101:8000 python -m connector_runtime run --proxy`
+- Create a session token (Dashboard → Resources → Request Access)
+
+### Test A — Visit connector gateway root without session
+
+```bash
+curl -i http://43.106.22.101:18080/
+```
+
+Expected: `HTTP 403`, body contains "Access denied. Please open ModZero Client and request access."
+
+### Test B — request_access returns launch_url
+
+```bash
+curl -s -X POST http://43.106.22.101:8000/api/access/request \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"resource_id": "<resource_id>"}' | python3 -m json.tool
+```
+
+Expected: JSON includes `launch_url` starting with `http://43.106.22.101:18080/launch/`
+
+### Test C — Open launch_url → connector sets HttpOnly cookie
+
+```bash
+curl -i http://43.106.22.101:18080/launch/<code>
+```
+
+Expected: `HTTP 302`, `Location: /r/<session_id>/`, `Set-Cookie: mz_session=...; HttpOnly; SameSite=Lax`
+
+### Test D — Redirected final URL has no token
+
+Inspect the `Location` header from Test C — it must be `/r/<session_id>/` with no `?token=`.
+
+### Test E — Final clean URL loads AlphaTechs Internal Portal
+
+```bash
+curl -i --cookie "mz_session=<cookie_id>" http://43.106.22.101:18080/r/<session_id>/
+```
+
+Expected: `HTTP 200`, HTML content from the internal resource.
+
+### Test F — Reuse launch code → denied
+
+```bash
+curl -i http://43.106.22.101:18080/launch/<same_code_again>
+```
+
+Expected: `HTTP 403`, reason `launch_code_already_used`
+
+### Test G — Raise minimum_trust_score → refresh denied
+
+1. Note device trust score (e.g. 68)
+2. Set resource minimum score above current score (e.g. 90):
+   `PUT /api/resources/<id>` with `{"minimum_trust_score": 90}`
+3. Refresh the already-open `/r/<session_id>/` page or:
+
+```bash
+curl -i --cookie "mz_session=<cookie_id>" http://43.106.22.101:18080/r/<session_id>/
+```
+
+Expected: `HTTP 403`, reason `trust_score_below_required`
+
+### Test H — Disable resource → refresh denied
+
+1. `PUT /api/resources/<id>` with `{"enabled": false}`
+2. Refresh:
+
+```bash
+curl -i --cookie "mz_session=<cookie_id>" http://43.106.22.101:18080/r/<session_id>/
+```
+
+Expected: `HTTP 403`, reason `resource_disabled`
+
+### Test I — Expired or revoked session → denied
+
+Revoke the session via `POST /api/access/sessions/<id>/revoke` or wait for expiry.
+
+```bash
+curl -i --cookie "mz_session=<cookie_id>" http://43.106.22.101:18080/r/<session_id>/
+```
+
+Expected: `HTTP 403`, reason `session_revoked` or `session_expired`
+
+### Test J — Regression: existing test suites pass
+
+```bash
+python tools/verify_all.py        # expect 90/90
+python tools/verify_tunnels.py    # expect 61/61
+python tools/verify_auth.py       # expect all pass
+python tools/cloud_smoke_test.py  # expect all pass
+python connector_runtime/tests/test_smoke.py  # expect pass
+```
