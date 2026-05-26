@@ -126,7 +126,17 @@ const ZeroTrustPoliciesPage: React.FC = () => {
   useEffect(() => {
     if (activeTab === 'resource-policies' && resources.length === 0) {
       setResourcesLoading(true);
-      api.get('/resources').then(r => setResources(r.data)).catch(() => {}).finally(() => setResourcesLoading(false));
+      api.get('/resources').then(r => {
+        // Deduplicate by resource_id (or name if id missing)
+        const seen = new Set<string>();
+        const deduped = (r.data as any[]).filter(res => {
+          const key = res.resource_id || res.id || res.name;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setResources(deduped);
+      }).catch(() => {}).finally(() => setResourcesLoading(false));
     }
   }, [activeTab]);
 
@@ -437,13 +447,15 @@ const ZeroTrustPoliciesPage: React.FC = () => {
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          (r.minimum_trust_score || 0) >= 70
+                          (r.minimum_trust_score || 0) > 100
+                            ? 'bg-gray-800 text-white dark:bg-gray-600'
+                            : (r.minimum_trust_score || 0) >= 70
                             ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
                             : (r.minimum_trust_score || 0) >= 40
                             ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
                             : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
                         }`}>
-                          {r.minimum_trust_score || 0}
+                          {(r.minimum_trust_score || 0) > 100 ? `${r.minimum_trust_score} (deny test)` : (r.minimum_trust_score || 0)}
                         </span>
                       </td>
                       <td className="px-4 py-3">

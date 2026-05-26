@@ -9,7 +9,6 @@ import {
   FaSync,
   FaDatabase,
   FaShieldAlt,
-  FaBell,
   FaMoon,
   FaSun,
 } from "react-icons/fa";
@@ -23,6 +22,7 @@ const SettingsPage: React.FC = () => {
     document.documentElement.classList.contains("dark")
   );
   const [cacheStatus, setCacheStatus] = useState<any>(null);
+  const [cacheUnavailable, setCacheUnavailable] = useState(false);
 
   useEffect(() => {
     fetchCacheStatus();
@@ -32,8 +32,9 @@ const SettingsPage: React.FC = () => {
     try {
       const res = await api.get("/assessment/cache-status");
       setCacheStatus(res.data);
+      setCacheUnavailable(false);
     } catch (error) {
-      console.error("Failed to fetch cache status");
+      setCacheUnavailable(true);
     }
   };
 
@@ -214,6 +215,9 @@ const SettingsPage: React.FC = () => {
           <h2 className="text-lg font-semibold">Data Cache</h2>
         </div>
 
+        {cacheUnavailable ? (
+          <p className="text-sm text-gray-500">Cache status unavailable on this deployment.</p>
+        ) : (
         <div className="space-y-4">
           <div className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700">
             <div>
@@ -275,6 +279,7 @@ const SettingsPage: React.FC = () => {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* Security Settings */}
@@ -298,23 +303,17 @@ const SettingsPage: React.FC = () => {
               <p className="font-medium">Environment</p>
               <p className="text-sm text-gray-500">Current deployment environment</p>
             </div>
-            <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded text-sm">
-              Development
+            <span className={`px-3 py-1 rounded text-sm ${
+              (import.meta as any).env.PROD
+                ? 'bg-green-100 text-green-800'
+                : 'bg-yellow-100 text-yellow-800'
+            }`}>
+              {(import.meta as any).env.PROD ? 'Production' : 'Development'}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Notification Settings */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <FaBell className="text-xl text-orange-500" />
-          <h2 className="text-lg font-semibold">Notifications</h2>
-        </div>
-        <p className="text-sm text-gray-500">
-          Notification settings will be available in a future update.
-        </p>
-      </div>
     </div>
   );
 };

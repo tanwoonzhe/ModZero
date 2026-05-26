@@ -15,12 +15,14 @@ function getSocketUrl(): string {
 
   const apiBase: string =
     (import.meta as any).env?.VITE_API_BASE || "http://localhost:8000/api";
-  // Strip "/api" suffix to get the server origin
+  // Strip "/api" suffix to get the server origin.
+  // For relative URLs like "/api" (production nginx deployment), use the
+  // current page origin so Socket.IO connects to the same host.
   try {
     const url = new URL(apiBase);
     return url.origin;
   } catch {
-    return "http://localhost:8000";
+    return window.location.origin;
   }
 }
 
@@ -35,7 +37,7 @@ export function getSocket(): Socket {
       transports: ["websocket", "polling"],
       autoConnect: false,
       reconnection: true,
-      reconnectionAttempts: Infinity,
+      reconnectionAttempts: 10,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 10000,
     });

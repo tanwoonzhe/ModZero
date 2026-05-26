@@ -26,12 +26,10 @@ import {
 interface RegisteredResource {
   resource_id: string;
   name: string;
-  slug: string;
-  network_name: string;
-  host: string;
-  port: number;
-  url: string;
-  access_path: string;
+  minimum_trust_score: number;
+  require_intune_compliant: boolean;
+  enabled: boolean;
+  connector_resource_id?: string | null;
 }
 
 const MODULE_META = {
@@ -60,12 +58,13 @@ const ProtectedResourceAccessPanel: React.FC = () => {
     setLoadingResources(true);
     setResourceError(null);
     try {
-      const { data } = await api.get<RegisteredResource[]>('/resource-access/resources');
-      setResources(data);
+      const { data } = await api.get<RegisteredResource[]>('/resources');
+      const enabled = data.filter(r => r.enabled !== false);
+      setResources(enabled);
       setSelectedId(prev => {
-        if (data.length === 0) return '';
-        if (data.find(r => r.resource_id === prev)) return prev;
-        return data[0].resource_id;
+        if (enabled.length === 0) return '';
+        if (enabled.find(r => r.resource_id === prev)) return prev;
+        return enabled[0].resource_id;
       });
     } catch (e: any) {
       setResourceError(e?.response?.data?.detail || 'Failed to load resources');
@@ -150,8 +149,7 @@ const ProtectedResourceAccessPanel: React.FC = () => {
           <div className="text-sm text-red-600">{resourceError}</div>
         ) : resources.length === 0 ? (
           <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3">
-            No resources registered yet. Go to <strong>Resources</strong> and add a network + resource
-            (e.g. the demo intranet at <code>intranet:80</code> on the internal docker network) so the gate has something to protect.
+            No protected resources configured. Go to <strong>Resources</strong> to add resources.
             <button
               onClick={fetchResources}
               className="ml-3 underline text-amber-800"
@@ -168,15 +166,17 @@ const ProtectedResourceAccessPanel: React.FC = () => {
             >
               {resources.map(r => (
                 <option key={r.resource_id} value={r.resource_id}>
-                  {r.name} — {r.network_name} ({r.host}:{r.port})
+                  {r.name}{r.minimum_trust_score > 100 ? ' (deny test)' : ''} — min score: {r.minimum_trust_score}
                 </option>
               ))}
             </select>
             {selected && (
               <span className="inline-flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400">
-                <FaServer /> Protected route:{' '}
-                <code className="text-indigo-700 dark:text-indigo-300 font-semibold">{selected.access_path}</code>
-                <span className="text-gray-400">· target {selected.host}:{selected.port}</span>
+                <FaServer /> Min trust score:{' '}
+                <code className="text-indigo-700 dark:text-indigo-300 font-semibold">{selected.minimum_trust_score}</code>
+                {selected.require_intune_compliant && (
+                  <span className="text-amber-700 dark:text-amber-400 ml-1">· Intune required</span>
+                )}
               </span>
             )}
             <button
