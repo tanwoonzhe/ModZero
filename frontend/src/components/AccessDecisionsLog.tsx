@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { FaCheck, FaTimes, FaSyncAlt, FaSearch, FaInfoCircle, FaUndo } from "react-icons/fa";
+import { FaCheck, FaTimes, FaSyncAlt, FaSearch } from "react-icons/fa";
 import api from "../api";
 
 interface AccessLogRow {
@@ -26,10 +26,8 @@ const DECISION_META: Record<string, { label: string; bg: string; text: string; I
 };
 
 const ACCESS_MODE_META: Record<string, { label: string; cls: string }> = {
-  http_proxy:       { label: "HTTP",   cls: "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200" },
-  wireguard_tunnel: { label: "Tunnel", cls: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300" },
-  both:             { label: "Both",   cls: "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300" },
-  denied:           { label: "Denied", cls: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" },
+  http_proxy: { label: "HTTP",   cls: "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200" },
+  denied:     { label: "Denied", cls: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" },
 };
 
 const fmtTs = (iso: string) => new Date(iso).toLocaleString();
@@ -143,9 +141,6 @@ const AccessDecisionsLog: React.FC = () => {
                 <th className="px-4 py-3">Score / Required</th>
                 <th className="px-4 py-3">Reason</th>
                 <th className="px-4 py-3">Mode</th>
-                <th className="px-4 py-3">Tunnel</th>
-                <th className="px-4 py-3">Why</th>
-                <th className="px-4 py-3">Fallback</th>
               </tr>
             </thead>
             <tbody>
@@ -188,37 +183,12 @@ const AccessDecisionsLog: React.FC = () => {
                         );
                       })() : <span className="text-gray-400">—</span>}
                     </td>
-                    <td className="px-4 py-2 text-center">
-                      {r.tunnel_ready === true ? (
-                        <FaCheck className="inline text-green-600 dark:text-green-400" size={12} />
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-center">
-                      {r.tunnel_reason ? (
-                        <FaInfoCircle
-                          className="inline text-blue-500"
-                          size={12}
-                          title={r.tunnel_reason}
-                        />
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-2 text-center">
-                      {r.fallback_used === true ? (
-                        <FaUndo
-                          className="inline text-amber-500"
-                          size={11}
-                          title="HTTP proxy fallback was used"
-                        />
-                      ) : null}
-                    </td>
                   </tr>
                 );
               })}
               {filtered.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-gray-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500">
                     No access logs match the current filters.
                   </td>
                 </tr>

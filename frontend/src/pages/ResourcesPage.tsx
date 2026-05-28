@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   FaGlobe, FaPlus, FaSearch, FaSyncAlt, FaTrash, FaTimes, FaPencilAlt,
-  FaCheck, FaLock, FaCircle, FaPlug,
+  FaCheck, FaCircle, FaPlug,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 import api from "../api";
@@ -26,11 +26,6 @@ interface ProtectedResource {
   updated_at: string;
 }
 
-const ACCESS_MODE_META: Record<string, { label: string; cls: string }> = {
-  auto:             { label: "Auto",     cls: "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300" },
-  http_proxy:       { label: "HTTP",     cls: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300" },
-  wireguard_tunnel: { label: "Tunnel",   cls: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300" },
-};
 
 interface ConnectorResource {
   resource_id: string;
@@ -197,27 +192,6 @@ const ResourcesPage: React.FC = () => {
                           {r.description}
                         </div>
                       )}
-                      <div className="flex items-center gap-1.5 mt-1">
-                        {(() => {
-                          const mode = r.preferred_access_mode || "auto";
-                          const meta = ACCESS_MODE_META[mode] || ACCESS_MODE_META.auto;
-                          return (
-                            <span
-                              className={`inline-flex items-center px-1.5 py-0.5 text-[10px] rounded font-medium ${meta.cls}`}
-                              title={`Preferred access mode: ${mode}`}
-                            >
-                              {meta.label}
-                            </span>
-                          );
-                        })()}
-                        {r.require_tunnel && (
-                          <FaLock
-                            className="text-emerald-500"
-                            size={10}
-                            title="Tunnel required for this resource"
-                          />
-                        )}
-                      </div>
                     </td>
                     <td className="px-5 py-4">
                       <span className="px-2 py-0.5 text-xs rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium capitalize">
@@ -318,9 +292,6 @@ const BLANK = {
   required_group: "", minimum_trust_score: 0,
   require_intune_compliant: false, enabled: true,
   connector_resource_id: "",
-  preferred_access_mode: "auto" as "auto" | "http_proxy" | "wireguard_tunnel",
-  require_tunnel: false,
-  allow_http_fallback: true,
 };
 
 const ResourceFormModal: React.FC<{
@@ -333,9 +304,6 @@ const ResourceFormModal: React.FC<{
     ...BLANK,
     ...initial,
     connector_resource_id: initial?.connector_resource_id || "",
-    preferred_access_mode: (initial?.preferred_access_mode as any) || "auto",
-    require_tunnel: initial?.require_tunnel ?? false,
-    allow_http_fallback: initial?.allow_http_fallback ?? true,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -343,19 +311,8 @@ const ResourceFormModal: React.FC<{
 
   const set = (field: string, value: unknown) => setForm((f) => ({ ...f, [field]: value }));
 
-  // Client-side guard: HTTP Proxy only + Require tunnel is contradictory.
-  const tunnelGuardError =
-    form.preferred_access_mode === "http_proxy" && form.require_tunnel
-      ? "HTTP Proxy only cannot require a tunnel"
-      : null;
-  const fallbackDisabled = form.preferred_access_mode === "http_proxy";
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (tunnelGuardError) {
-      setError(tunnelGuardError);
-      return;
-    }
     setSaving(true);
     setError(null);
     const payload = {
@@ -369,9 +326,6 @@ const ResourceFormModal: React.FC<{
       require_intune_compliant: form.require_intune_compliant,
       enabled: form.enabled,
       connector_resource_id: form.connector_resource_id || null,
-      preferred_access_mode: form.preferred_access_mode,
-      require_tunnel: !!form.require_tunnel,
-      allow_http_fallback: !!form.allow_http_fallback,
     };
     try {
       if (isEdit) {
@@ -487,84 +441,13 @@ const ResourceFormModal: React.FC<{
             </label>
           </div>
           {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-          <fieldset className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3">
-            <legend className="px-2 text-sm font-semibold text-gray-700 dark:text-gray-200">
-              Tunnel Policy
-            </legend>
-            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-1">
-              Controls how ModZero routes user traffic to this resource.
-            </p>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Preferred access mode
-              </label>
-              <select
-                value={form.preferred_access_mode}
-                onChange={(e) => set("preferred_access_mode", e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="auto">Auto (recommended)</option>
-                <option value="http_proxy">HTTP Proxy only</option>
-                <option value="wireguard_tunnel">WireGuard Tunnel only</option>
-              </select>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Auto uses the tunnel when available and falls back to HTTP. Pick HTTP Proxy only or WireGuard Tunnel only to force one path.
-              </p>
-            </div>
-
-            <div>
-              <label className="flex items-start gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={!!form.require_tunnel}
-                  onChange={(e) => set("require_tunnel", e.target.checked)}
-                  className="mt-0.5 w-4 h-4 text-indigo-600 rounded"
-                />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  Require tunnel
-                </span>
-              </label>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
-                If checked, deny access when the tunnel is not ready (unless HTTP fallback is also allowed).
-              </p>
-              {tunnelGuardError && (
-                <p className="text-xs text-red-600 dark:text-red-400 mt-1 ml-6">
-                  {tunnelGuardError}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="flex items-start gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={fallbackDisabled ? false : !!form.allow_http_fallback}
-                  disabled={fallbackDisabled}
-                  onChange={(e) => set("allow_http_fallback", e.target.checked)}
-                  className="mt-0.5 w-4 h-4 text-indigo-600 rounded disabled:opacity-50"
-                />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  Allow HTTP fallback
-                </span>
-                {fallbackDisabled && (
-                  <span className="text-xs italic text-gray-500 dark:text-gray-400">
-                    (not applicable when HTTP Proxy only)
-                  </span>
-                )}
-              </label>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
-                When the tunnel is unavailable, allow the request to fall back to the HTTP proxy path.
-              </p>
-            </div>
-          </fieldset>
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
             <button type="button" onClick={onClose}
               className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
             >
               Cancel
             </button>
-            <button type="submit" disabled={saving || !!tunnelGuardError}
+            <button type="submit" disabled={saving}
               className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
             >
               {saving ? "Saving…" : isEdit ? "Update" : "Create"}

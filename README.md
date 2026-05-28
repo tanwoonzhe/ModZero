@@ -44,3 +44,21 @@ See `docs/DEMO.md` for a full walkthrough.
 | db        | ~100 MB | PostgreSQL 15                   |
 | connector | ~50 MB  | Python reverse proxy            |
 | **Total** | ~320 MB | Well within 4 GiB               |
+
+## Demo Access Path
+
+The active demo access path is **Connector Gateway (HTTP proxy)**:
+
+```
+Electron Client App → Backend policy engine → Connector Gateway → Protected Resource
+```
+
+Headscale / WireGuard tunnel code is present in the repository as archived future work.
+It is **not part of the active demo scope** and is not enabled in the default deployment.
+
+- `backend/app/routers/tunnels*.py` — Headscale/WireGuard tunnel management endpoints (archived)
+- `client-app/src/main/tunnel-detect.ts` — Read-only Tailscale status probe (archived)
+- `/tunnels` web route — accessible by direct URL but hidden from the admin sidebar
+
+No tunnel UI is shown in the Electron client Overview tab or the admin dashboard sidebar.
+
