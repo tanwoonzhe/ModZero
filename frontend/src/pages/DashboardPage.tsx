@@ -17,11 +17,11 @@ import {
   FaCheckCircle,
   FaMobileAlt,
   FaUserShield,
+  FaInfoCircle,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 
 import TrustScoreCard from "../components/TrustScoreCard";
-import ProtectedResourceAccessPanel from "../components/ProtectedResourceAccessPanel";
 import AccessControlOverviewPanel from "../components/AccessControlOverviewPanel";
 
 const chartColors = {
@@ -138,8 +138,37 @@ const DashboardPage: React.FC = () => {
       {/* Live access-control state from /audit/status-overview */}
       <AccessControlOverviewPanel />
 
-      {/* Protected resource access panel */}
-      <ProtectedResourceAccessPanel />
+      {/* Admin context card */}
+      <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-xl p-5">
+        <div className="flex items-start gap-3 mb-4">
+          <FaInfoCircle className="text-indigo-600 dark:text-indigo-400 mt-0.5 shrink-0" size={16} />
+          <p className="text-sm text-indigo-800 dark:text-indigo-200">
+            <strong>Access requests are performed from the ModZero Client App.</strong>{' '}
+            This dashboard only summarizes access-control state for administrators.
+            Use the links below to manage resources, review audit logs, or adjust trust policies.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            to="/resources"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-white dark:bg-gray-800 border border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 transition-colors"
+          >
+            Resources
+          </Link>
+          <Link
+            to="/logs"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-white dark:bg-gray-800 border border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 transition-colors"
+          >
+            Access Logs
+          </Link>
+          <Link
+            to="/zero-trust-policies"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-white dark:bg-gray-800 border border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 transition-colors"
+          >
+            Trust Policies
+          </Link>
+        </div>
+      </div>
 
       {/* Assessment data sections — only rendered when /assessment/overview is available */}
       {data?.data && (() => {
