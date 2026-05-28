@@ -311,6 +311,12 @@ const SettingsPage: React.FC = () => {
               {(import.meta as any).env.PROD ? 'Production' : 'Development'}
             </span>
           </div>
+          <div className="pt-3">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              <strong>Note:</strong> Admin console access uses admin authentication only.
+              Client device posture enforcement for the admin console can be enabled as a future enhancement.
+            </p>
+          </div>
         </div>
       </div>
 

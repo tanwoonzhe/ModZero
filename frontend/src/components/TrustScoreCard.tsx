@@ -57,11 +57,11 @@ const TrustScoreCard: React.FC = () => {
       <div className="p-5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <FaShieldAlt className="text-indigo-600" /> Your current Trust Score
+            <FaShieldAlt className="text-indigo-600" /> Access Decision Preview
           </h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Computed from Identity baseline, Devices baseline, and module custom tests using the
-            weights configured in ZT Policies.
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 max-w-xl">
+            Shows how ModZero evaluates the current user/device context for protected resource access.
+            This score does <strong>not</strong> gate the admin dashboard login.
           </p>
         </div>
         <div className="text-right">
@@ -92,7 +92,7 @@ const TrustScoreCard: React.FC = () => {
       <div className="px-5 pb-5 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
         <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
           <div className="flex items-center gap-2 text-xs font-medium text-gray-500 mb-1">
-            <FaUser /> Current user
+            <FaUser /> Evaluated user
           </div>
           <div className="font-medium text-gray-900 dark:text-gray-100">{user.name}</div>
           <div className="text-xs text-gray-500">{user.email} · {user.role}</div>
@@ -102,7 +102,7 @@ const TrustScoreCard: React.FC = () => {
         </div>
         <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
           <div className="flex items-center gap-2 text-xs font-medium text-gray-500 mb-1">
-            <FaDesktop /> Current device (browser fingerprint)
+            <FaDesktop /> Evaluated device / browser fingerprint
           </div>
           <div className="font-mono text-xs break-all text-gray-900 dark:text-gray-100">{deviceId}</div>
           <div className="text-xs text-gray-500 mt-1">
@@ -115,11 +115,11 @@ const TrustScoreCard: React.FC = () => {
         willAllowAccess ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'
       }`}>
         <span>
-          Access threshold: <strong>{threshold}</strong> · Access would be{' '}
+          Access threshold: <strong>{threshold}</strong> · Preview decision:{' '}
           <strong className={willAllowAccess ? 'text-green-700' : 'text-red-700'}>
-            {willAllowAccess ? 'ALLOWED' : 'DENIED'}
+            {willAllowAccess ? 'ALLOW' : 'DENY'}
           </strong>{' '}
-          for the protected resource (via <code>/r/&lt;slug&gt;</code>)
+          <span className="text-gray-500 text-xs">(protected resource via <code>/r/&lt;slug&gt;</code>)</span>
         </span>
         <span className="text-xs text-gray-500">
           {trust.lastUpdated ? `updated ${new Date(trust.lastUpdated).toLocaleString()}` : 'no scan yet'}
