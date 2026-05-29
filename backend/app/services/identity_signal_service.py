@@ -110,11 +110,10 @@ def score_identity_signals(signals: IdentitySignals) -> tuple[float, list[dict]]
             "source": signals.source,
         })
 
-    # Normalize to 100 based on available signals
-    if available_max == 0:
-        identity_score = 100.0
-    else:
-        identity_score = round((earned / available_max) * 100, 1)
+    # Use fixed 100-pt denominator: unknown signals score 0, not excluded.
+    # Zero Trust principle: unknown MFA / sign-in = not trusted.
+    TOTAL_MAX = sum(item["max"] for item in _SIGNALS)  # 100
+    identity_score = round((earned / TOTAL_MAX) * 100, 1)
 
     return identity_score, breakdown
 
