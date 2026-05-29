@@ -24,7 +24,7 @@ import {
 const MODULE_LABELS = {
   devicePostureScore: { label: 'Device Posture', icon: FaLaptop, color: 'text-indigo-600', weightKey: 'device_posture' as const },
   contextAnalysisScore: { label: 'Context Analysis', icon: FaNetworkWired, color: 'text-amber-600', weightKey: 'context_analysis' as const },
-  trustScoringEngineScore: { label: 'Trust Scoring Engine', icon: FaShieldAlt, color: 'text-emerald-600', weightKey: 'trust_scoring_engine' as const },
+  trustScoringEngineScore: { label: 'Identity / Policy Score', icon: FaShieldAlt, color: 'text-emerald-600', weightKey: 'trust_scoring_engine' as const },
 };
 
 function getDeviceFingerprint(): string {

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..deps import get_db, get_current_user, get_current_admin
 from ..azure_service import azure_service
+from ..services.posture_scoring import score_posture, weighted_total
 
 router = APIRouter()
 
@@ -134,3 +135,92 @@ def delete_device(
     db.delete(device)
     db.commit()
     return None
+
+
+# ── GET /api/devices/{device_id}/posture ──────────────────────────────────────
+
+@router.get("/{device_id}/posture")
+def get_device_posture(
+    device_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> Any:
+    """Return the latest posture report and per-check breakdown for a device."""
+    device = db.query(models.Device).filter(models.Device.device_id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if current_user.role != models.RoleEnum.ADMIN and device.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Not your device")
+
+    report = (
+        db.query(models.PostureReport)
+        .filter(models.PostureReport.device_id == device_id)
+        .order_by(models.PostureReport.reported_at.desc())
+        .first()
+    )
+    if not report:
+        return {
+            "device_id": device_id,
+            "report": None,
+            "posture_score": None,
+            "breakdown": [],
+            "message": "No posture report found for this device.",
+        }
+
+    posture_score, breakdown = score_posture(report)
+    return {
+        "device_id": str(device.device_id),
+        "device_name": device.device_name,
+        "report_id": str(report.report_id),
+        "reported_at": report.reported_at.isoformat() if report.reported_at else None,
+        "posture_score": posture_score,
+        "breakdown": breakdown,
+    }
+
+
+# ── GET /api/devices/{device_id}/trust-contribution ───────────────────────────
+
+@router.get("/{device_id}/trust-contribution")
+def get_device_trust_contribution(
+    device_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> Any:
+    """Return how this device's posture score contributes to the final trust score."""
+    device = db.query(models.Device).filter(models.Device.device_id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if current_user.role != models.RoleEnum.ADMIN and device.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Not your device")
+
+    trust = (
+        db.query(models.DeviceTrustScore)
+        .filter(models.DeviceTrustScore.device_id == device_id)
+        .order_by(models.DeviceTrustScore.calculated_at.desc())
+        .first()
+    )
+    if not trust:
+        return {
+            "device_id": device_id,
+            "posture_score": None,
+            "posture_weight": 0.40,
+            "trust_contribution": None,
+            "context_score": None,
+            "identity_score": None,
+            "total_score": None,
+            "message": "No trust score found for this device.",
+        }
+
+    posture_contribution = round(trust.posture_score * 0.40, 1) if trust.posture_score else None
+    return {
+        "device_id": str(device.device_id),
+        "device_name": device.device_name,
+        "posture_score": trust.posture_score,
+        "posture_weight": 0.40,
+        "trust_contribution": posture_contribution,
+        "context_score": trust.context_score,
+        "identity_score": getattr(trust, "identity_score", None),
+        "total_score": trust.total_score,
+        "calculated_at": trust.calculated_at.isoformat() if trust.calculated_at else None,
+        "breakdown": trust.breakdown,
+    }

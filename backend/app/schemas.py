@@ -407,11 +407,13 @@ class PostureReportIn(BaseModel):
     os_version: Optional[str] = None
     fingerprint: Optional[str] = None   # used for device lookup / auto-register
 
-    # The five posture factors
+    # The posture factors
     firewall_enabled: Optional[bool] = None
     antivirus_enabled: Optional[bool] = None
     disk_encryption_enabled: Optional[bool] = None
     os_supported: Optional[bool] = None
+    screen_lock_enabled: Optional[bool] = None
+    client_healthy: Optional[bool] = None
     # Pass the value from Graph deviceManagement lookup, or True/False manually
     intune_compliant: Optional[bool] = None
 

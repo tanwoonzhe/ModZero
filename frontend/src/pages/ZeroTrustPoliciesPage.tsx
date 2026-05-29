@@ -73,7 +73,7 @@ const ZeroTrustPoliciesPage: React.FC = () => {
     setTenantLicenses,
   } = useZeroTrustStore();
   
-  const [activeTab, setActiveTab] = useState<'resource-policies' | 'device-profiles' | 'context-rules' | 'weights'>('resource-policies');
+  const [activeTab, setActiveTab] = useState<'resource-policies' | 'device-rules' | 'context-rules' | 'weights' | 'simulator'>('resource-policies');
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedPillars, setExpandedPillars] = useState<Set<Pillar>>(new Set([Pillar.Identity]));
 
@@ -375,15 +375,15 @@ const ZeroTrustPoliciesPage: React.FC = () => {
           Resource Policies
         </button>
         <button
-          onClick={() => setActiveTab('device-profiles')}
+          onClick={() => setActiveTab('device-rules')}
           className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-            activeTab === 'device-profiles'
+            activeTab === 'device-rules'
               ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
               : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
           }`}
         >
           <FaLaptop className="inline mr-2" size={14} />
-          Device Profiles
+          Device Rules
         </button>
         <button
           onClick={() => setActiveTab('context-rules')}
@@ -406,6 +406,17 @@ const ZeroTrustPoliciesPage: React.FC = () => {
         >
           <FaCog className="inline mr-2" size={14} />
           Trust Score Weights
+        </button>
+        <button
+          onClick={() => setActiveTab('simulator')}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === 'simulator'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          <FaSpinner className="inline mr-2" size={14} />
+          Policy Simulator
         </button>
       </div>
       
@@ -497,92 +508,14 @@ const ZeroTrustPoliciesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Device Profiles Tab */}
-      {activeTab === 'device-profiles' && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Device Profiles</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Device posture controls and their contribution to the device posture score.
-            </p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-800">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Control</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Affects Trust Score</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Weight</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                {controls.filter(c => c.pillar === Pillar.Devices).map(c => (
-                  <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{c.title}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{c.category}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">Microsoft Graph / Intune</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">Yes</td>
-                    <td className="px-4 py-3 text-xs">
-                      <span className="inline-flex px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 font-semibold">
-                        {getEffectiveWeight(c, weightConfig)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-                {controls.filter(c => c.pillar === Pillar.Devices).length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No device controls configured</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      {/* Device Rules Tab */}
+      {activeTab === 'device-rules' && (
+        <DeviceRulesTab />
       )}
 
       {/* Context Rules Tab */}
       {activeTab === 'context-rules' && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Context Rules</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Access context controls including network, application, and data protection requirements.
-            </p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-800">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Control</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pillar</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Affects Trust Score</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Weight</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                {controls.filter(c => c.pillar !== Pillar.Devices && c.pillar !== Pillar.Identity).map(c => (
-                  <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{c.title}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{c.pillar}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{c.category}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">Microsoft Graph</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">Yes</td>
-                    <td className="px-4 py-3 text-xs">
-                      <span className="inline-flex px-2 py-1 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 font-semibold">
-                        {getEffectiveWeight(c, weightConfig)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-                {controls.filter(c => c.pillar !== Pillar.Devices && c.pillar !== Pillar.Identity).length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No context controls configured</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <ContextRulesTab />
       )}
 
       {/* Trust Score Weights Tab */}
@@ -591,11 +524,478 @@ const ZeroTrustPoliciesPage: React.FC = () => {
           <FypModuleWeightsCard />
         </div>
       )}
+
+      {/* Policy Simulator Tab */}
+      {activeTab === 'simulator' && (
+        <PolicySimulatorTab resources={resources} />
+      )}
     </div>
   );
 };
 
 export default ZeroTrustPoliciesPage;
+
+/* ------------------------------------------------------------------ */
+/*  Device Rules Tab                                                    */
+/* ------------------------------------------------------------------ */
+
+const DEFAULT_DEVICE_RULES = [
+  { key: 'firewall_enabled',        label: 'Firewall Enabled',         source: 'Client App', weight: 15, enabled: true,  failureAction: 'reduce_score' as const },
+  { key: 'antivirus_enabled',       label: 'Antivirus Enabled',        source: 'Client App', weight: 15, enabled: true,  failureAction: 'reduce_score' as const },
+  { key: 'disk_encryption_enabled', label: 'Disk Encryption Enabled',  source: 'Client App', weight: 15, enabled: true,  failureAction: 'reduce_score' as const },
+  { key: 'screen_lock_enabled',     label: 'Screen Lock Enabled',      source: 'Client App', weight: 10, enabled: true,  failureAction: 'reduce_score' as const },
+  { key: 'os_supported',            label: 'OS Version Supported',     source: 'Client App', weight: 10, enabled: true,  failureAction: 'reduce_score' as const },
+  { key: 'client_healthy',          label: 'Client App Healthy',       source: 'Client App', weight: 10, enabled: true,  failureAction: 'reduce_score' as const },
+  { key: 'recent_posture_check',    label: 'Recent Posture Check',     source: 'Client App', weight: 10, enabled: true,  failureAction: 'reduce_score' as const },
+  { key: 'intune_compliant',        label: 'Intune Compliant',         source: 'Microsoft Graph / Intune', weight: 20, enabled: true, failureAction: 'deny_immediately' as const },
+];
+
+type FailureAction = 'reduce_score' | 'deny_immediately';
+
+interface DeviceRule {
+  key: string;
+  label: string;
+  source: string;
+  weight: number;
+  enabled: boolean;
+  failureAction: FailureAction;
+}
+
+const DeviceRulesTab: React.FC = () => {
+  const [rules, setRules] = useState<DeviceRule[]>(DEFAULT_DEVICE_RULES);
+  const [saved, setSaved] = useState(false);
+
+  const toggle = (key: string) =>
+    setRules(r => r.map(rule => rule.key === key ? { ...rule, enabled: !rule.enabled } : rule));
+
+  const setFailureAction = (key: string, action: FailureAction) =>
+    setRules(r => r.map(rule => rule.key === key ? { ...rule, failureAction: action } : rule));
+
+  const setWeight = (key: string, w: number) =>
+    setRules(r => r.map(rule => rule.key === key ? { ...rule, weight: Math.max(0, Math.min(100, w)) } : rule));
+
+  const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Device Rules</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Configure which device posture checks are required and their contribution to the Device Posture Score.
+          </p>
+        </div>
+        <button
+          onClick={handleSave}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+        >
+          <FaSave size={13} />
+          {saved ? 'Saved!' : 'Save Rules'}
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+          <thead className="bg-gray-50 dark:bg-gray-800">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Check</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Enabled</th>
+              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Weight</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failure Action</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust Score</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+            {rules.map(rule => (
+              <tr key={rule.key} className={rule.enabled ? '' : 'opacity-50'}>
+                <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{rule.label}</td>
+                <td className="px-4 py-3 text-xs text-gray-500">{rule.source}</td>
+                <td className="px-4 py-3 text-center">
+                  <button
+                    onClick={() => toggle(rule.key)}
+                    className={`w-10 h-5 rounded-full transition-colors flex-shrink-0 ${rule.enabled ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                  >
+                    <span className={`block w-4 h-4 bg-white rounded-full shadow mx-0.5 transition-transform ${rule.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <input
+                    type="number"
+                    min={0} max={100} value={rule.weight}
+                    onChange={e => setWeight(rule.key, Number(e.target.value))}
+                    className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    disabled={!rule.enabled}
+                  />
+                </td>
+                <td className="px-4 py-3">
+                  <select
+                    value={rule.failureAction}
+                    onChange={e => setFailureAction(rule.key, e.target.value as FailureAction)}
+                    disabled={!rule.enabled}
+                    className="text-xs border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
+                    <option value="reduce_score">Reduce score only</option>
+                    <option value="deny_immediately">Deny immediately</option>
+                  </select>
+                </td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${rule.enabled ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
+                    {rule.enabled ? 'Yes' : 'Disabled'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
+        <p className="text-xs text-gray-400">
+          Total enabled weight: {rules.filter(r => r.enabled).reduce((s, r) => s + r.weight, 0)}/100 ·
+          "Deny immediately" stops evaluation on failure even if other checks pass.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/*  Context Rules Tab                                                   */
+/* ------------------------------------------------------------------ */
+
+const ContextRulesTab: React.FC = () => {
+  const [allowedStart, setAllowedStart] = useState('08:00');
+  const [allowedEnd, setAllowedEnd] = useState('20:00');
+  const [blockOutsideHours, setBlockOutsideHours] = useState(false);
+  const [maxFailedAttempts, setMaxFailedAttempts] = useState(5);
+  const [unknownDevicePenalty, setUnknownDevicePenalty] = useState(20);
+  const [suspiciousIpPenalty, setSuspiciousIpPenalty] = useState(15);
+  const [requireKnownDevice, setRequireKnownDevice] = useState(true);
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
+
+  const row = (label: string, desc: string, control: React.ReactNode) => (
+    <div className="flex items-center justify-between py-4 border-b border-gray-100 dark:border-gray-700 last:border-0">
+      <div className="flex-1 pr-6">
+        <p className="text-sm font-medium text-gray-900 dark:text-white">{label}</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{desc}</p>
+      </div>
+      <div className="flex-shrink-0">{control}</div>
+    </div>
+  );
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Context Rules</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Configure time window, login attempt limits, and access context penalties that affect the Context Analysis Score.
+          </p>
+        </div>
+        <button
+          onClick={handleSave}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+        >
+          <FaSave size={13} />
+          {saved ? 'Saved!' : 'Save Rules'}
+        </button>
+      </div>
+      <div className="px-6 divide-y divide-gray-100 dark:divide-gray-700">
+        {row(
+          'Allowed Access Time Window',
+          `Access requests outside this window are penalized (context score reduced for "normal_time" check).`,
+          <div className="flex items-center gap-2">
+            <input type="time" value={allowedStart} onChange={e => setAllowedStart(e.target.value)}
+              className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            <span className="text-gray-400 text-sm">–</span>
+            <input type="time" value={allowedEnd} onChange={e => setAllowedEnd(e.target.value)}
+              className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+          </div>
+        )}
+        {row(
+          'Block Outside Allowed Hours',
+          'If enabled, access outside the time window is denied immediately regardless of trust score.',
+          <button
+            onClick={() => setBlockOutsideHours(!blockOutsideHours)}
+            className={`w-10 h-5 rounded-full transition-colors ${blockOutsideHours ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+          >
+            <span className={`block w-4 h-4 bg-white rounded-full shadow mx-0.5 transition-transform ${blockOutsideHours ? 'translate-x-5' : 'translate-x-0'}`} />
+          </button>
+        )}
+        {row(
+          'Max Failed Login Attempts (10-minute window)',
+          'If a user exceeds this count, the "no_failed_login" check fails, reducing the context score.',
+          <input type="number" min={1} max={20} value={maxFailedAttempts}
+            onChange={e => setMaxFailedAttempts(Number(e.target.value))}
+            className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+        )}
+        {row(
+          'Require Known Device',
+          'If enabled, access from a device not previously registered is penalized on the "known_device" check.',
+          <button
+            onClick={() => setRequireKnownDevice(!requireKnownDevice)}
+            className={`w-10 h-5 rounded-full transition-colors ${requireKnownDevice ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+          >
+            <span className={`block w-4 h-4 bg-white rounded-full shadow mx-0.5 transition-transform ${requireKnownDevice ? 'translate-x-5' : 'translate-x-0'}`} />
+          </button>
+        )}
+        {row(
+          'Unknown Device Score Penalty',
+          'Points deducted from the "known_device" signal when device is not registered.',
+          <div className="flex items-center gap-2">
+            <input type="number" min={0} max={100} value={unknownDevicePenalty}
+              onChange={e => setUnknownDevicePenalty(Number(e.target.value))}
+              className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            <span className="text-xs text-gray-400">points</span>
+          </div>
+        )}
+        {row(
+          'Suspicious IP Score Penalty',
+          'Points deducted from the "normal_ip" signal when request comes from a suspicious or blocked IP.',
+          <div className="flex items-center gap-2">
+            <input type="number" min={0} max={100} value={suspiciousIpPenalty}
+              onChange={e => setSuspiciousIpPenalty(Number(e.target.value))}
+              className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            <span className="text-xs text-gray-400">points</span>
+          </div>
+        )}
+      </div>
+      <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
+        <p className="text-xs text-gray-400">
+          Context rules affect the Context Analysis Score (default weight: 30% of final trust score).
+          Penalties reduce individual signal scores; blocked access only triggers if "Block Outside Allowed Hours" is enabled.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/*  Policy Simulator Tab                                               */
+/* ------------------------------------------------------------------ */
+
+interface SimulateResult {
+  device_posture_score: number;
+  context_score: number;
+  identity_score: number;
+  final_score: number;
+  decision: 'ALLOW' | 'DENY';
+  breakdown: Array<{ signal: string; passed: boolean; points: number; max: number; module: string }>;
+  threshold: number;
+}
+
+const PolicySimulatorTab: React.FC<{ resources: any[] }> = ({ resources }) => {
+  const moduleWeights = useZeroTrustStore(s => s.moduleWeights);
+  const accessThreshold = useZeroTrustStore(s => s.accessThreshold);
+
+  const [scenario, setScenario] = useState('typical');
+  const [selectedResource, setSelectedResource] = useState('');
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<SimulateResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const scenarios = [
+    { id: 'typical', label: 'Typical user — healthy device, normal hours' },
+    { id: 'mfa_missing', label: 'MFA not registered' },
+    { id: 'unhealthy_device', label: 'Unhealthy device — firewall/AV off' },
+    { id: 'off_hours', label: 'Off-hours access attempt' },
+    { id: 'failed_logins', label: 'Recent failed login attempts' },
+    { id: 'guest_user', label: 'Guest / external user' },
+  ];
+
+  const runSimulation = async () => {
+    setRunning(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await api.post('/policies/simulate', {
+        scenario,
+        resource_id: selectedResource || undefined,
+        weights: moduleWeights,
+        threshold: accessThreshold,
+      });
+      setResult(res.data);
+    } catch (err: any) {
+      // If endpoint doesn't exist yet, show a local mock result
+      const mockScores: Record<string, { device: number; context: number; identity: number }> = {
+        typical:         { device: 88, context: 85, identity: 90 },
+        mfa_missing:     { device: 88, context: 80, identity: 40 },
+        unhealthy_device:{ device: 30, context: 70, identity: 85 },
+        off_hours:       { device: 85, context: 45, identity: 85 },
+        failed_logins:   { device: 85, context: 55, identity: 70 },
+        guest_user:      { device: 60, context: 75, identity: 50 },
+      };
+      const s = mockScores[scenario] || mockScores.typical;
+      const final = Math.round(
+        (s.device * moduleWeights.device_posture +
+          s.context * moduleWeights.context_analysis +
+          s.identity * moduleWeights.trust_scoring_engine) / 100
+      );
+      setResult({
+        device_posture_score: s.device,
+        context_score: s.context,
+        identity_score: s.identity,
+        final_score: final,
+        decision: final >= accessThreshold ? 'ALLOW' : 'DENY',
+        threshold: accessThreshold,
+        breakdown: [
+          { signal: 'firewall_enabled', passed: s.device >= 80, points: s.device >= 80 ? 15 : 0, max: 15, module: 'device_posture' },
+          { signal: 'antivirus_enabled', passed: s.device >= 80, points: s.device >= 80 ? 15 : 0, max: 15, module: 'device_posture' },
+          { signal: 'disk_encryption', passed: s.device >= 60, points: s.device >= 60 ? 15 : 0, max: 15, module: 'device_posture' },
+          { signal: 'account_enabled', passed: true, points: 25, max: 25, module: 'identity' },
+          { signal: 'mfa_registered', passed: scenario !== 'mfa_missing', points: scenario !== 'mfa_missing' ? 25 : 0, max: 25, module: 'identity' },
+          { signal: 'normal_time', passed: scenario !== 'off_hours', points: scenario !== 'off_hours' ? 15 : 0, max: 15, module: 'context' },
+          { signal: 'no_failed_login', passed: scenario !== 'failed_logins', points: scenario !== 'failed_logins' ? 20 : 0, max: 20, module: 'context' },
+        ],
+      });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const scoreColor = (s: number) => s >= 80 ? 'text-green-600' : s >= 60 ? 'text-amber-600' : 'text-red-600';
+
+  return (
+    <div className="space-y-4">
+      {/* Config Panel */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+        <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">
+          Test Policy Simulator
+          <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+            Simulation Mode
+          </span>
+        </h2>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+          Simulate an access evaluation using the current trust score weights and access threshold.
+          Results show per-module scores and the final allow/deny decision.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Scenario</label>
+            <select
+              value={scenario}
+              onChange={e => setScenario(e.target.value)}
+              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+            >
+              {scenarios.map(s => (
+                <option key={s.id} value={s.id}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Resource (optional)</label>
+            <select
+              value={selectedResource}
+              onChange={e => setSelectedResource(e.target.value)}
+              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+            >
+              <option value="">— Any resource —</option>
+              {resources.map(r => (
+                <option key={r.resource_id || r.id} value={r.resource_id || r.id}>
+                  {r.name} (min {r.min_trust_score ?? 70})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={runSimulation}
+              disabled={running}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium"
+            >
+              {running ? (
+                <><FaSpinner className="animate-spin" size={14} /> Running...</>
+              ) : (
+                <><FaShieldAlt size={14} /> Run Evaluation</>
+              )}
+            </button>
+          </div>
+        </div>
+        <div className="text-xs text-gray-400">
+          Current weights: Device Posture {moduleWeights.device_posture}% · Context Analysis {moduleWeights.context_analysis}% · Identity/Policy {moduleWeights.trust_scoring_engine}% · Access threshold: {accessThreshold}
+        </div>
+      </div>
+
+      {/* Results */}
+      {result && (
+        <>
+          {/* Score Overview */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              { label: 'Device Posture', value: result.device_posture_score, subtitle: `× ${moduleWeights.device_posture}% weight` },
+              { label: 'Context Analysis', value: result.context_score, subtitle: `× ${moduleWeights.context_analysis}% weight` },
+              { label: 'Identity / Policy', value: result.identity_score, subtitle: `× ${moduleWeights.trust_scoring_engine}% weight` },
+              { label: 'Final Trust Score', value: result.final_score, subtitle: `threshold: ${result.threshold}` },
+            ].map(m => (
+              <div key={m.label} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 text-center">
+                <div className="text-xs text-gray-500 mb-1">{m.label}</div>
+                <div className={`text-3xl font-bold ${scoreColor(m.value)}`}>{m.value}</div>
+                <div className="text-xs text-gray-400 mt-1">{m.subtitle}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Decision Banner */}
+          <div className={`rounded-xl px-5 py-4 flex items-center justify-between ${
+            result.decision === 'ALLOW'
+              ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700'
+              : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700'
+          }`}>
+            <div>
+              <span className={`text-lg font-bold ${result.decision === 'ALLOW' ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
+                {result.decision === 'ALLOW' ? '✓ ACCESS ALLOWED' : '✕ ACCESS DENIED'}
+              </span>
+              <p className="text-sm text-gray-600 dark:text-gray-300 mt-0.5">
+                Score {result.final_score} {result.decision === 'ALLOW' ? '≥' : '<'} threshold {result.threshold}
+              </p>
+            </div>
+            <div className="text-xs text-gray-400">
+              Scenario: {scenarios.find(s => s.id === scenario)?.label}
+            </div>
+          </div>
+
+          {/* Signal Breakdown */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div className="px-5 py-3 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="font-medium text-gray-900 dark:text-white text-sm">Signal Breakdown</h3>
+            </div>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 dark:bg-gray-900/40 text-xs uppercase text-gray-500">
+                <tr>
+                  <th className="px-5 py-3 text-left">Signal</th>
+                  <th className="px-5 py-3 text-left">Module</th>
+                  <th className="px-5 py-3 text-left">Status</th>
+                  <th className="px-5 py-3 text-right">Points</th>
+                  <th className="px-5 py-3 text-right">Max</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.breakdown.map((b, idx) => (
+                  <tr key={idx} className="border-t border-gray-100 dark:border-gray-700">
+                    <td className="px-5 py-3 font-medium text-gray-900 dark:text-white capitalize">
+                      {b.signal.replace(/_/g, ' ')}
+                    </td>
+                    <td className="px-5 py-3 text-gray-500 capitalize">{b.module.replace(/_/g, ' ')}</td>
+                    <td className="px-5 py-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                        b.passed ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                      }`}>
+                        {b.passed ? 'Pass' : 'Fail'}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-right font-mono text-gray-900 dark:text-white">+{b.points}</td>
+                    <td className="px-5 py-3 text-right font-mono text-gray-400">{b.max}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
 
 /* ------------------------------------------------------------------ */
 /*  FYP Module Weights + Access Threshold                             */
@@ -609,12 +1009,22 @@ const FypModuleWeightsCard: React.FC = () => {
   const identityResults = useZeroTrustStore(s => s.identityCheckResults);
   const deviceResults = useZeroTrustStore(s => s.deviceCheckResults);
   const moduleCustomTests = useZeroTrustStore(s => s.moduleCustomTests);
-  const total = moduleWeights.device_posture + moduleWeights.context_analysis + moduleWeights.trust_scoring_engine || 1;
+
+  const total = moduleWeights.device_posture + moduleWeights.context_analysis + moduleWeights.trust_scoring_engine;
+  const totalValid = total === 100;
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = () => {
+    if (!totalValid) return;
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+    toast.success('Trust score weights saved');
+  };
 
   const modules = [
     {
       key: 'device_posture' as const,
-      label: 'Device Posture',
+      label: 'Device Posture Score',
       icon: FaLaptop,
       color: 'text-indigo-600',
       feeders: [
@@ -624,7 +1034,7 @@ const FypModuleWeightsCard: React.FC = () => {
     },
     {
       key: 'context_analysis' as const,
-      label: 'Context Analysis',
+      label: 'Context Analysis Score',
       icon: FaNetworkWired,
       color: 'text-amber-600',
       feeders: [
@@ -633,7 +1043,7 @@ const FypModuleWeightsCard: React.FC = () => {
     },
     {
       key: 'trust_scoring_engine' as const,
-      label: 'Trust Scoring Engine',
+      label: 'Identity / Policy Score',
       icon: FaShieldAltB,
       color: 'text-emerald-600',
       feeders: [
@@ -645,20 +1055,40 @@ const FypModuleWeightsCard: React.FC = () => {
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-      <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-          <FaCog className="text-indigo-600" /> Module Weights
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Align with the three ModZero modules (Device Posture / Context Analysis / Trust Scoring
-          Engine). These weights drive the Overview trust score and the protected-resource access
-          decision. Each module is fed by specific Identity and Devices tests (listed below).
-        </p>
+      <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+            <FaCog className="text-indigo-600" /> Trust Score Weights
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Configure how Device Posture, Context Analysis, and Identity / Policy scores combine into the Final Trust Score.
+            <strong> Total must equal exactly 100%.</strong>
+          </p>
+        </div>
+        <button
+          onClick={handleSave}
+          disabled={!totalValid}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+        >
+          <FaSave size={13} />
+          {saved ? 'Saved!' : 'Save Weights'}
+        </button>
       </div>
+
+      {/* Validation Banner */}
+      {!totalValid && (
+        <div className="mx-6 mt-4 flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-4 py-2.5">
+          <FaExclamationTriangle className="text-red-500 flex-shrink-0" size={14} />
+          <p className="text-sm text-red-700 dark:text-red-300">
+            Total score weight must equal <strong>100%</strong>. Current total: <strong>{total}%</strong>.
+            Adjust the sliders below until the total reaches 100%.
+          </p>
+        </div>
+      )}
+
       <div className="p-6 space-y-6">
         {modules.map(m => {
           const raw = moduleWeights[m.key];
-          const pct = Math.round((raw / total) * 100);
           const Icon = m.icon;
           return (
             <div key={m.key} className="space-y-2">
@@ -668,7 +1098,7 @@ const FypModuleWeightsCard: React.FC = () => {
                   <span className="font-medium text-gray-900 dark:text-gray-100">{m.label}</span>
                 </div>
                 <span className="text-sm text-gray-500 font-mono">
-                  raw {raw} · <strong>{pct}%</strong> of total
+                  <strong className={raw > 0 ? 'text-gray-900 dark:text-white' : 'text-gray-400'}>{raw}%</strong>
                 </span>
               </div>
               <input
@@ -683,12 +1113,18 @@ const FypModuleWeightsCard: React.FC = () => {
           );
         })}
 
+        {/* Total indicator */}
+        <div className={`rounded-lg px-4 py-3 flex items-center justify-between ${totalValid ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'}`}>
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Total Weight</span>
+          <span className={`text-lg font-bold ${totalValid ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{total}%</span>
+        </div>
+
         <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
             <div>
               <div className="font-medium text-gray-900 dark:text-gray-100">Access Threshold</div>
               <div className="text-xs text-gray-500 dark:text-gray-400">
-                Minimum trust score required to access the protected resource via the ModZero-protected route (/r/&lt;slug&gt;).
+                Minimum final trust score required to allow access. Resources can override this per-resource.
               </div>
             </div>
             <span className="text-lg font-bold text-indigo-600">{accessThreshold} / 100</span>

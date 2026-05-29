@@ -1,12 +1,23 @@
 """User management endpoints."""
 
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..deps import get_db, get_current_user, get_current_admin
+from ..settings import get_settings
+from ..services.identity_signal_service import (
+    score_identity_signals,
+    signals_from_local_user,
+    get_mock_identity_signals,
+)
+
+
+class UserPatch(BaseModel):
+    role: Optional[models.RoleEnum] = None
 
 router = APIRouter()
 
@@ -99,6 +110,24 @@ def get_user_details(
     }
 
 
+@router.patch("/{user_id}", response_model=schemas.UserOut)
+def patch_user(
+    user_id: str,
+    payload: UserPatch,
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(get_current_admin),
+) -> Any:
+    """Update a user's role (admin only)."""
+    user = db.query(models.User).filter(models.User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if payload.role is not None:
+        user.role = payload.role
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: str,
@@ -111,3 +140,40 @@ def delete_user(
     db.delete(user)
     db.commit()
     return None
+
+
+# ── GET /api/users/{user_id}/identity-signals ─────────────────────────────────
+
+@router.get("/{user_id}/identity-signals")
+def get_user_identity_signals(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> Any:
+    """Return per-signal identity breakdown for trust scoring (GRAPH_MODE aware)."""
+    settings = get_settings()
+
+    if current_user.role != models.RoleEnum.ADMIN and str(current_user.user_id) != user_id:
+        raise HTTPException(status_code=403, detail="Not authorised")
+
+    user = db.query(models.User).filter(models.User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if settings.graph_mode == "real":
+        # Placeholder: real Graph call would go here
+        signals = signals_from_local_user(user)
+    elif settings.graph_mode == "mock":
+        signals = get_mock_identity_signals(user)
+    else:
+        signals = signals_from_local_user(user)
+
+    identity_score, breakdown = score_identity_signals(signals)
+    return {
+        "user_id": str(user.user_id),
+        "username": user.username,
+        "identity_score": identity_score,
+        "graph_mode": settings.graph_mode,
+        "source": signals.source,
+        "breakdown": breakdown,
+    }

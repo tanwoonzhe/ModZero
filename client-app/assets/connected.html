@@ -99,13 +99,27 @@
     .res-row .grow { flex: 1; }
     .res-row .decision { font-size: 12px; padding: 4px 10px; border-radius: 6px; }
 
-    .factor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+    .factor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 8px; }
     .factor { padding: 10px 12px; background: #0b1220; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
     .factor .f-name { color: var(--muted); margin-bottom: 4px; }
     .factor .f-val { font-weight: 600; }
+    .factor .f-pts { color: var(--muted); font-size: 11px; margin-top: 2px; }
+    .factor.pass { border-color: rgba(16,185,129,.4); }
     .factor.pass .f-val { color: #6ee7b7; }
+    .factor.fail { border-color: rgba(239,68,68,.35); }
     .factor.fail .f-val { color: #fca5a5; }
     .factor.unknown .f-val { color: var(--muted); }
+
+    .decision-banner {
+      display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+      border-radius: 10px; margin-top: 12px; font-size: 13px;
+    }
+    .decision-banner.allow { background: rgba(16,185,129,.10); border: 1px solid rgba(16,185,129,.35); }
+    .decision-banner.deny  { background: rgba(239,68,68,.10);  border: 1px solid rgba(239,68,68,.35); }
+    .decision-banner .big-d { font-size: 18px; font-weight: 700; }
+    .decision-banner.allow .big-d { color: #6ee7b7; }
+    .decision-banner.deny  .big-d { color: #fca5a5; }
+    .decision-banner .detail { flex: 1; color: var(--muted); }
 
     input[type="text"] {
       width: 100%; padding: 9px 12px; font-size: 13px;
@@ -128,6 +142,25 @@
       border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    .toggle { position: relative; display: inline-block; width: 36px; height: 20px; cursor: pointer; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      position: absolute; cursor: pointer; inset: 0;
+      background: #334155; border-radius: 20px; transition: .2s;
+    }
+    .toggle-track::before {
+      content: ""; position: absolute; height: 14px; width: 14px; left: 3px; bottom: 3px;
+      background: white; border-radius: 50%; transition: .2s;
+    }
+    .toggle input:checked + .toggle-track { background: var(--accent); }
+    .toggle input:checked + .toggle-track::before { transform: translateX(16px); }
+
+    .sim-banner {
+      display: none; padding: 3px 10px; border-radius: 999px; margin-left: 8px;
+      background: rgba(245,158,11,.18); border: 1px solid rgba(245,158,11,.4);
+      color: #fcd34d; font-size: 11px; font-weight: 700;
+    }
   </style>
 </head>
 <body>
@@ -139,6 +172,7 @@
         <div class="sub" id="serverHint">Connected</div>
       </div>
       <div id="statusPill" class="status-pill"><span class="dot"></span> <span id="statusText">Connected</span></div>
+      <span id="simBanner" class="sim-banner">⚠ Simulation only</span>
     </div>
 
     <div class="tabs" role="tablist">
@@ -182,6 +216,17 @@
         </dl>
       </div>
 
+      <div class="panel" id="lastDecisionPanel">
+        <h2>Last Access Decision</h2>
+        <dl class="kv" id="lastDecisionContent">
+          <dt>Resource</dt><dd id="ldResource">—</dd>
+          <dt>Decision</dt><dd id="ldDecision"><span class="badge neutral">No decision yet</span></dd>
+          <dt>Trust Score</dt><dd id="ldScore">—</dd>
+          <dt>Reason</dt><dd id="ldReason">—</dd>
+          <dt>Time</dt><dd id="ldTime">—</dd>
+        </dl>
+      </div>
+
       <div class="row">
         <button class="ghost" id="refresh">Refresh</button>
         <button class="ghost" id="disconnect">Disconnect</button>
@@ -206,24 +251,26 @@
         <h2>Latest Score</h2>
         <div class="grid">
           <div class="tile">
-            <div class="label">Total Score</div>
-            <div class="score"><span class="big" id="resTotal">—</span><span class="max">/ 100</span></div>
-            <div class="bar"><div id="resTotalBar" style="width:0%"></div></div>
+            <div class="label">Device Posture Score</div>
+            <div class="score"><span class="big" id="resPosture">—</span><span class="max">/ 100</span></div>
+            <div class="bar"><div id="resPostureBar" style="width:0%"></div></div>
           </div>
           <div class="tile">
-            <div class="label">Posture Score</div>
-            <div class="value" id="resPosture">—</div>
+            <div class="label">Total Trust Score</div>
+            <div class="score"><span class="big" id="resTotal">—</span><span class="max">/ 100</span></div>
+            <div class="bar"><div id="resTotalBar" style="width:0%"></div></div>
           </div>
           <div class="tile">
             <div class="label">Context Score</div>
             <div class="value" id="resContext">—</div>
           </div>
           <div class="tile">
-            <div class="label">Risk Level</div>
-            <div class="value" id="resRisk">—</div>
+            <div class="label">Identity Score</div>
+            <div class="value" id="resIdentity">—</div>
           </div>
         </div>
-        <h2 style="margin-top:14px">Factor Breakdown</h2>
+        <div id="decisionBanner" style="display:none"></div>
+        <h2 style="margin-top:14px">Posture Check Breakdown</h2>
         <div class="factor-grid" id="factorGrid"></div>
       </div>
     </section>
@@ -259,6 +306,31 @@
           <dt>Hostname</dt><dd id="setHostname">—</dd>
           <dt>Fingerprint</dt><dd id="setFingerprint">—</dd>
         </dl>
+      </div>
+
+      <div class="panel">
+        <h2>Demo Mode</h2>
+        <p style="color:var(--muted);font-size:12px;margin:0 0 12px">
+          Simulate posture failures for FYP demonstration. When enabled, device check signals
+          can be overridden without requiring real OS checks.
+        </p>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <label style="font-size:13px">Enable Demo Mode</label>
+          <label class="toggle">
+            <input type="checkbox" id="demoModeToggle">
+            <span class="toggle-track"></span>
+          </label>
+          <span id="demoBadgeSettings" class="badge warn" style="display:none">Simulation only</span>
+        </div>
+        <div id="demoScenarios" style="display:none">
+          <p style="color:var(--muted);font-size:12px;margin:0 0 8px">Preset failure scenarios:</p>
+          <div class="row" style="flex-wrap:wrap">
+            <button class="ghost" id="demoScenarioPass" style="font-size:12px">✓ All Checks Pass</button>
+            <button class="ghost" id="demoScenarioFirewall" style="font-size:12px">✕ Firewall Off</button>
+            <button class="ghost" id="demoScenarioAV" style="font-size:12px">✕ Antivirus Off</button>
+            <button class="ghost" id="demoScenarioFail" style="font-size:12px">✕ Multiple Failures</button>
+          </div>
+        </div>
       </div>
     </section>
   </div>
@@ -346,28 +418,58 @@
     $("refresh").addEventListener("click", () => M.heartbeatNow().then(tick));
     $("disconnect").addEventListener("click", () => M.disconnect());
 
-    // ── Device check ──
+    const FACTOR_LABELS = {
+      firewall_enabled:        "Firewall Enabled",
+      antivirus_enabled:       "Antivirus Enabled",
+      disk_encryption_enabled: "Disk Encryption",
+      screen_lock_enabled:     "Screen Lock",
+      os_supported:            "OS Supported",
+      client_healthy:          "Client Healthy",
+      recent_check:            "Recent Check (≤7d)",
+      intune_compliant:        "Intune Compliant",
+    };
+
     function renderFactors(breakdown) {
       const grid = $("factorGrid");
       grid.innerHTML = "";
       (breakdown || []).forEach((b) => {
         const cls = b.value == null ? "unknown" : b.passed ? "pass" : "fail";
-        const label = b.value == null ? "unknown" : b.passed ? "pass" : "fail";
+        const label = b.value == null ? "Unknown" : b.passed ? "Pass ✓" : "Fail ✗";
+        const name = FACTOR_LABELS[b.factor] || b.factor.replace(/_/g, " ");
+        const note = b.note ? ` <span style="color:var(--muted)">(${b.note})</span>` : "";
         const el = document.createElement("div");
         el.className = "factor " + cls;
-        el.innerHTML = `<div class="f-name">${b.factor}</div><div class="f-val">${label} (+${b.points})</div>`;
+        el.innerHTML = `<div class="f-name">${name}${note}</div><div class="f-val">${label}</div><div class="f-pts">+${b.points ?? 0} / ${b.max ?? "—"} pts</div>`;
         grid.appendChild(el);
       });
     }
 
     function showScore(r) {
+      const DEFAULT_THRESHOLD = 60;
       $("postureResultPanel").style.display = "";
-      $("resTotal").textContent = Math.round(r.total_score);
-      $("resTotalBar").style.width = Math.max(0, Math.min(100, r.total_score)) + "%";
-      $("resPosture").textContent = Math.round(r.posture_score);
-      $("resContext").textContent = Math.round(r.context_score);
-      const [risk] = riskLevel(r.total_score);
-      $("resRisk").textContent = risk;
+      const posture = Math.round(r.posture_score ?? 0);
+      const total   = Math.round(r.total_score ?? 0);
+      const context = Math.round(r.context_score ?? 100);
+      const identity = Math.round(r.identity_score ?? 100);
+      $("resPosture").textContent = posture;
+      $("resPostureBar").style.width = Math.max(0, Math.min(100, posture)) + "%";
+      $("resTotal").textContent = total;
+      $("resTotalBar").style.width = Math.max(0, Math.min(100, total)) + "%";
+      $("resContext").textContent  = context;
+      $("resIdentity").textContent = identity;
+
+      // Decision banner
+      const banner = $("decisionBanner");
+      const allow = total >= DEFAULT_THRESHOLD;
+      banner.style.display = "";
+      banner.className = "decision-banner " + (allow ? "allow" : "deny");
+      banner.innerHTML = `
+        <div class="big-d">${allow ? "✓ ALLOW" : "✕ DENY"}</div>
+        <div class="detail">
+          Score <strong>${total}</strong> ${allow ? "≥" : "<"} threshold <strong>${DEFAULT_THRESHOLD}</strong>
+          &nbsp;·&nbsp; Posture contributes <strong>${Math.round(posture * 0.4)}/40</strong>
+        </div>
+      `;
       renderFactors(r.breakdown);
     }
 
@@ -448,11 +550,11 @@
         </div>
         <button class="primary" data-rid="${res.id}">Request Access</button>
       `;
-      row.querySelector("button").addEventListener("click", (e) => requestAccess(res.id, e.currentTarget));
+      row.querySelector("button").addEventListener("click", (e) => requestAccess(res.id, res.name, e.currentTarget));
       $("resList").appendChild(row);
     }
 
-    async function requestAccess(resourceId, btn) {
+    async function requestAccess(resourceId, resourceName, btn) {
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span>Requesting&hellip;';
       try {
@@ -477,11 +579,13 @@
             `<span class="badge neutral">Session expires ${exp}</span>` +
             openBtn;
           toast("ok", `ALLOW: ${d.reason}`);
+          saveLastDecision(resourceName || resourceId, "allow", d.trust_score, d.reason || "Score meets requirement");
         } else {
           target.innerHTML =
             `<span class="badge err">DENY</span> ` +
             `${escapeHtml(d.reason || "")} (score ${score} / required ${d.required_score ?? 0})`;
           toast("err", `DENY: ${d.reason}`);
+          saveLastDecision(resourceName || resourceId, "deny", d.trust_score, d.reason || "Score below requirement");
         }
       } catch (e) {
         toast("err", String(e?.message || e));
@@ -537,6 +641,81 @@
 
     tick();
     setInterval(tick, 5000);
+
+    // ── Demo Mode ──
+    const DEMO_KEY = "modzero_demo_mode";
+    const DEMO_OVERRIDE_KEY = "modzero_demo_signals";
+
+    function isDemoMode() {
+      return localStorage.getItem(DEMO_KEY) === "true";
+    }
+    function applyDemoModeUI(enabled) {
+      $("simBanner").style.display = enabled ? "inline-block" : "none";
+      $("demoBadgeSettings").style.display = enabled ? "inline-block" : "none";
+      $("demoScenarios").style.display = enabled ? "" : "none";
+      if (!enabled) localStorage.removeItem(DEMO_OVERRIDE_KEY);
+    }
+    function initDemoMode() {
+      const enabled = isDemoMode();
+      $("demoModeToggle").checked = enabled;
+      applyDemoModeUI(enabled);
+    }
+    $("demoModeToggle").addEventListener("change", (e) => {
+      const enabled = e.target.checked;
+      localStorage.setItem(DEMO_KEY, enabled ? "true" : "false");
+      applyDemoModeUI(enabled);
+      toast(enabled ? "warn" : "info", enabled ? "Demo Mode ON — Simulation only" : "Demo Mode OFF");
+    });
+
+    const DEMO_SCENARIOS = {
+      pass:     { firewall_enabled: true,  antivirus_enabled: true,  disk_encryption_enabled: true,  screen_lock_enabled: true,  os_supported: true,  client_healthy: true,  intune_compliant: true },
+      firewall: { firewall_enabled: false, antivirus_enabled: true,  disk_encryption_enabled: true,  screen_lock_enabled: true,  os_supported: true,  client_healthy: true,  intune_compliant: true },
+      av:       { firewall_enabled: true,  antivirus_enabled: false, disk_encryption_enabled: true,  screen_lock_enabled: true,  os_supported: true,  client_healthy: true,  intune_compliant: true },
+      fail:     { firewall_enabled: false, antivirus_enabled: false, disk_encryption_enabled: false, screen_lock_enabled: false, os_supported: true,  client_healthy: true,  intune_compliant: false },
+    };
+    $("demoScenarioPass").addEventListener("click", () => {
+      localStorage.setItem(DEMO_OVERRIDE_KEY, JSON.stringify(DEMO_SCENARIOS.pass));
+      toast("ok", "Demo: All checks pass loaded");
+    });
+    $("demoScenarioFirewall").addEventListener("click", () => {
+      localStorage.setItem(DEMO_OVERRIDE_KEY, JSON.stringify(DEMO_SCENARIOS.firewall));
+      toast("warn", "Demo: Firewall disabled scenario loaded");
+    });
+    $("demoScenarioAV").addEventListener("click", () => {
+      localStorage.setItem(DEMO_OVERRIDE_KEY, JSON.stringify(DEMO_SCENARIOS.av));
+      toast("warn", "Demo: Antivirus disabled scenario loaded");
+    });
+    $("demoScenarioFail").addEventListener("click", () => {
+      localStorage.setItem(DEMO_OVERRIDE_KEY, JSON.stringify(DEMO_SCENARIOS.fail));
+      toast("err", "Demo: Multiple failures scenario loaded");
+    });
+
+    // ── Last Access Decision ──
+    const LAST_DECISION_KEY = "modzero_last_decision";
+
+    function saveLastDecision(resourceName, decision, trustScore, reason) {
+      localStorage.setItem(LAST_DECISION_KEY, JSON.stringify({
+        resource: resourceName, decision, trustScore, reason, time: Date.now(),
+      }));
+      renderLastDecision();
+    }
+    function renderLastDecision() {
+      const raw = localStorage.getItem(LAST_DECISION_KEY);
+      if (!raw) return;
+      try {
+        const d = JSON.parse(raw);
+        $("ldResource").textContent = d.resource || "—";
+        const cls = d.decision === "allow" ? "ok" : "err";
+        const label = d.decision === "allow" ? "ALLOW ✓" : "DENY ✕";
+        $("ldDecision").innerHTML = `<span class="badge ${cls}">${label}</span>`;
+        $("ldScore").textContent = d.trustScore != null ? `${Math.round(d.trustScore)} / 100` : "—";
+        $("ldReason").textContent = d.reason || "—";
+        $("ldTime").textContent = d.time ? new Date(d.time).toLocaleString() : "—";
+      } catch (_) {}
+    }
+
+    renderLastDecision();
+    initDemoMode();
   </script>
 </body>
 </html>

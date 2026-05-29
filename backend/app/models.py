@@ -1250,6 +1250,9 @@ class PostureReport(Base):
     antivirus_enabled: bool = Column(Boolean, nullable=True)
     disk_encryption_enabled: bool = Column(Boolean, nullable=True)
     os_supported: bool = Column(Boolean, nullable=True)
+    # Phase 2 additional factors
+    screen_lock_enabled: bool = Column(Boolean, nullable=True)
+    client_healthy: bool = Column(Boolean, nullable=True)
     # Accepted from Graph /deviceManagement lookup or passed as manual placeholder
     intune_compliant: bool = Column(Boolean, nullable=True)
 
@@ -1288,8 +1291,9 @@ class DeviceTrustScore(Base):
     # Component scores (0–100 each)
     posture_score: float = Column(Float, nullable=False)
     context_score: float = Column(Float, nullable=False, default=100.0)
+    identity_score: float = Column(Float, nullable=True, default=100.0)
 
-    # Weighted total: posture*0.8 + context*0.2
+    # Weighted total: posture*0.4 + context*0.3 + identity*0.3
     total_score: float = Column(Float, nullable=False)
 
     # Factor-level breakdown stored as JSON for audit / UI display

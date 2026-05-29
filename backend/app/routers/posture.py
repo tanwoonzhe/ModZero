@@ -18,7 +18,8 @@ from sqlalchemy.orm import Session
 from .. import schemas
 from ..deps import get_db, get_current_user
 from ..models import Device, DeviceTrustScore, PostureReport, RoleEnum, User
-from ..services.posture_scoring import score_context, score_posture, weighted_total
+from ..services.posture_scoring import score_context, score_posture, weighted_total, score_identity
+from ..settings import get_settings
 
 router = APIRouter()
 
@@ -66,6 +67,7 @@ def _score_dict(score: DeviceTrustScore) -> dict:
         "report_id": str(score.report_id) if score.report_id else None,
         "posture_score": score.posture_score,
         "context_score": score.context_score,
+        "identity_score": getattr(score, "identity_score", 100.0) or 100.0,
         "total_score": score.total_score,
         "breakdown": score.breakdown,
         "calculated_at": score.calculated_at,
@@ -96,6 +98,8 @@ def submit_posture_report(
         antivirus_enabled=payload.antivirus_enabled,
         disk_encryption_enabled=payload.disk_encryption_enabled,
         os_supported=payload.os_supported,
+        screen_lock_enabled=payload.screen_lock_enabled,
+        client_healthy=payload.client_healthy,
         intune_compliant=payload.intune_compliant,
         ip_address=(request.client.host if request.client else None),
     )
@@ -104,13 +108,15 @@ def submit_posture_report(
 
     posture_score, breakdown = score_posture(report)
     ctx = score_context()
-    total = weighted_total(posture_score, ctx)
+    identity = score_identity()
+    total = weighted_total(posture_score, ctx, identity)
 
     trust = DeviceTrustScore(
         device_id=device.device_id,
         report_id=report.report_id,
         posture_score=posture_score,
         context_score=ctx,
+        identity_score=identity,
         total_score=total,
         breakdown=breakdown,
     )
@@ -182,3 +188,74 @@ def get_device_trust_score(
     if not score:
         raise HTTPException(status_code=404, detail="No trust score found for this device")
     return _score_dict(score)
+
+
+# ── POST /api/client/posture-report  (alias for client app) ──────────────────
+
+@router.post("/client/posture-report", status_code=status.HTTP_201_CREATED)
+def client_posture_report(
+    payload: schemas.PostureReportIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """Alias for POST /api/posture/report — used by the ModZero Client App.
+
+    Accepts the same payload and returns the same response plus a human-readable
+    status message and graph_mode indicator.
+    """
+    settings = get_settings()
+    device = _resolve_device(payload, current_user, db)
+
+    report = PostureReport(
+        device_id=device.device_id,
+        firewall_enabled=payload.firewall_enabled,
+        antivirus_enabled=payload.antivirus_enabled,
+        disk_encryption_enabled=payload.disk_encryption_enabled,
+        os_supported=payload.os_supported,
+        screen_lock_enabled=payload.screen_lock_enabled,
+        client_healthy=payload.client_healthy,
+        intune_compliant=payload.intune_compliant,
+        ip_address=(request.client.host if request.client else None),
+    )
+    db.add(report)
+    db.flush()
+
+    posture_score, breakdown = score_posture(report)
+    ctx      = score_context()
+    identity = score_identity()
+    total    = weighted_total(posture_score, ctx, identity)
+
+    trust = DeviceTrustScore(
+        device_id=device.device_id,
+        report_id=report.report_id,
+        posture_score=posture_score,
+        context_score=ctx,
+        identity_score=identity,
+        total_score=total,
+        breakdown=breakdown,
+    )
+    db.add(trust)
+    db.commit()
+
+    if posture_score >= 80:
+        ps_status = "healthy"
+    elif posture_score >= 60:
+        ps_status = "warning"
+    else:
+        ps_status = "critical"
+
+    failed = [b["factor"] for b in breakdown if not b.get("passed") and b.get("note") != "not configured"]
+    message = "Posture report received."
+    if failed:
+        message += f" Check{'s' if len(failed) > 1 else ''} failed: {', '.join(failed)}."
+
+    return {
+        "device_posture_score": posture_score,
+        "total_trust_score": total,
+        "status": ps_status,
+        "message": message,
+        "graph_mode": settings.graph_mode,
+        "report_id": str(report.report_id),
+        "device_id": str(device.device_id),
+    }

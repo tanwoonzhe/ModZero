@@ -11,7 +11,7 @@ Registered routers
 
 from fastapi import APIRouter
 
-from . import auth, users, graph, devices, posture, protected_resources, access, connectors, assessment, tunnels, tunnels_bootstrap, tunnels_routes, tunnels_user_enrollment, resource_access, templates, identity_checks, device_checks, audit, azure, client_app
+from . import auth, users, graph, devices, posture, protected_resources, access, connectors, assessment, tunnels, tunnels_bootstrap, tunnels_routes, tunnels_user_enrollment, resource_access, templates, identity_checks, device_checks, audit, azure, client_app, evaluate
 
 api_router = APIRouter()
 
@@ -42,3 +42,4 @@ api_router.include_router(device_checks.router,    tags=["device-checks"])
 api_router.include_router(audit.router)
 api_router.include_router(azure.router,            prefix="/azure",  tags=["azure"])
 api_router.include_router(client_app.router)
+api_router.include_router(evaluate.router,     tags=["evaluate"])

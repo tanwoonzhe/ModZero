@@ -77,6 +77,12 @@ class Settings(BaseSettings):
         "https://graph.microsoft.com/.default", env="MS_GRAPH_SCOPES"
     )
 
+    # Graph mode: "disabled" | "mock" | "real"
+    # disabled = no Graph calls, local data only
+    # mock     = return mock Graph data (demo mode)
+    # real     = call real Microsoft Graph API
+    graph_mode: str = Field("mock", env="GRAPH_MODE")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

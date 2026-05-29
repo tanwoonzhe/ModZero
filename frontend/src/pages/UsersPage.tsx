@@ -1,21 +1,34 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api";
-import { User, AzureUser, AzureUsersResponse, AzureConnectionTest } from "../types";
+import { User, AzureUser, AzureUsersResponse, AzureConnectionTest, Device } from "../types";
 
 const UsersPage: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'local' | 'azure' | 'identity'>('local');
   const [localUsers, setLocalUsers] = useState<User[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
   const [azureUsers, setAzureUsers] = useState<AzureUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [azureLoading, setAzureLoading] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<AzureConnectionTest | null>(null);
-  const [syncing, setSyncing] = useState<string | null>(null); // Track which user is being synced
+  const [syncing, setSyncing] = useState<string | null>(null);
+  const [roleModal, setRoleModal] = useState<{ userId: string; current: string } | null>(null);
+  const [roleUpdating, setRoleUpdating] = useState(false);
 
   useEffect(() => {
     fetchLocalUsers();
+    fetchDevices();
   }, []);
+
+  const fetchDevices = async () => {
+    try {
+      const res = await api.get<Device[]>("/devices");
+      setDevices(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setDevices([]);
+    }
+  };
 
   useEffect(() => {
     if (activeTab === 'azure' || activeTab === 'identity') {
@@ -95,8 +108,51 @@ const UsersPage: React.FC = () => {
     }
   };
 
+  const assignRole = async (userId: string, newRole: string) => {
+    setRoleUpdating(true);
+    try {
+      await api.patch(`/users/${userId}`, { role: newRole });
+      await fetchLocalUsers();
+      setRoleModal(null);
+    } catch {
+      alert("Failed to update role");
+    } finally {
+      setRoleUpdating(false);
+    }
+  };
+
+  const deviceCountFor = (userId: string) =>
+    devices.filter(d => d.user_id === userId).length;
+
   return (
     <div>
+      {/* Role Assignment Modal */}
+      {roleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 w-80">
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Assign Role</h3>
+            <p className="text-sm text-gray-500 mb-4">Current role: <strong>{roleModal.current}</strong></p>
+            <div className="flex flex-col gap-2">
+              {["ADMIN", "EMPLOYEE"].map(r => (
+                <button
+                  key={r}
+                  disabled={roleUpdating || r === roleModal.current}
+                  onClick={() => assignRole(roleModal.userId, r)}
+                  className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-sm font-medium hover:bg-indigo-50 dark:hover:bg-indigo-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {r === roleModal.current ? `${r} (current)` : `Set as ${r}`}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setRoleModal(null)}
+              className="mt-4 w-full px-4 py-2 text-sm text-gray-500 hover:text-gray-700"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">User Management</h1>
         
@@ -120,7 +176,7 @@ const UsersPage: React.FC = () => {
                 : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
             }`}
           >
-            Azure AD Users
+            Entra Users
           </button>
           <button
             onClick={() => { setActiveTab('identity'); if (azureUsers.length === 0 && connectionStatus?.success) fetchAzureUsers(); }}
@@ -137,10 +193,31 @@ const UsersPage: React.FC = () => {
 
       {activeTab === 'local' && (
         <div>
+          {/* Summary stat cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">Total Users</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{localUsers.length}</p>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">Admins</p>
+              <p className="text-2xl font-bold text-red-600">{localUsers.filter(u => u.role === 'ADMIN').length}</p>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">With Devices</p>
+              <p className="text-2xl font-bold text-purple-600">{localUsers.filter(u => deviceCountFor(u.user_id) > 0).length}</p>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">Without MFA</p>
+              <p className="text-2xl font-bold text-yellow-600">—</p>
+              <p className="text-xs text-gray-400">Requires Graph</p>
+            </div>
+          </div>
+
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-semibold">Local Database Users</h2>
             <button
-              onClick={fetchLocalUsers}
+              onClick={() => { fetchLocalUsers(); fetchDevices(); }}
               className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
               disabled={loading}
             >
@@ -158,40 +235,64 @@ const UsersPage: React.FC = () => {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Linked Devices</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Login</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Avg Trust Score</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                  {localUsers.map((user) => (
-                    <tr 
-                      key={user.user_id} 
-                      onClick={() => navigate(`/users/${user.user_id}`)}
-                      className="hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
-                    >
-                      <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                        {user.username}
-                      </td>
-                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                        {user.email}
-                      </td>
-                      <td className="px-4 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          user.role === 'ADMIN' 
-                            ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                            : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                        }`}>
-                          {user.role}
-                        </span>
-                      </td>
-                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                        {new Date(user.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="px-4 py-4 whitespace-nowrap text-sm text-indigo-600 hover:text-indigo-700">
-                        View Details →
-                      </td>
-                    </tr>
-                  ))}
+                  {localUsers.map((user) => {
+                    const devCount = deviceCountFor(user.user_id);
+                    return (
+                      <tr key={user.user_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                        <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                          {user.username}
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                          {user.email}
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            user.role === 'ADMIN'
+                              ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                              : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                          }`}>
+                            {user.role}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm">
+                          {devCount > 0
+                            ? <span className="inline-flex items-center gap-1 text-purple-600 font-medium">{devCount} device{devCount !== 1 ? 's' : ''}</span>
+                            : <span className="text-gray-400">None</span>}
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-400">—</td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-400">—</td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm">
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={() => navigate(`/users/${user.user_id}`)}
+                              className="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
+                            >
+                              Details
+                            </button>
+                            <button
+                              onClick={() => setRoleModal({ userId: user.user_id, current: user.role })}
+                              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                            >
+                              Role
+                            </button>
+                            <button
+                              onClick={() => navigate(`/access-logs?user=${user.username}`)}
+                              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                            >
+                              Logs
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               {localUsers.length === 0 && (
@@ -334,96 +435,179 @@ const UsersPage: React.FC = () => {
           <div className="mb-4">
             <h2 className="text-lg font-semibold mb-1">Identity Signals</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Per-user identity checks derived from Azure AD. These signals affect trust score calculation.
+              Per-user identity checks that feed into the Trust Scoring Engine.
+              Identity / Policy Score = account_enabled(25) + mfa_registered(25) + user_type(15) + admin_risk(10) + recent_signin(15) + failed_login(10).
             </p>
           </div>
 
-          {!connectionStatus?.success ? (
-            <div className="text-center py-8 text-gray-500">
-              <p>Azure AD connection required to show identity signals.</p>
-              <button onClick={testAzureConnection} className="mt-3 px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 text-sm">
-                Test Connection
-              </button>
-            </div>
-          ) : azureUsers.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              <p>Loading identity signals...</p>
-              {!azureLoading && (
-                <button onClick={fetchAzureUsers} className="mt-3 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm">
-                  Load Users
-                </button>
-              )}
-            </div>
-          ) : (
+          {/* Local users signals (always available) */}
+          <div className="mb-6">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">Local</span>
+              Local User Identity Signals
+            </h3>
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
                 <thead className="bg-gray-50 dark:bg-gray-800">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Account Enabled</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User Type</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MFA Registered</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Admin Role</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Affects Trust Score</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Enabled</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MFA Registered</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User Type</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Admin Role</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failed Logins</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Identity Score</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                  {azureUsers.map((user) => {
-                    const isGuest = user.userType === 'Guest';
-                    const isEnabled = user.account_enabled;
+                  {localUsers.map((user) => {
+                    const isAdmin = user.role === 'ADMIN';
+                    // Score: account_enabled(25) + user_type_member(15) + not_admin_risk(10) + low_failed_login(10) = 60 max (mfa/signin unknown)
+                    const score = 25 + 15 + (isAdmin ? 0 : 10) + 10;
+                    const maxAvailable = 60; // mfa + recent_signin not available locally
+                    const identityScore = Math.round((score / maxAvailable) * 100);
                     return (
-                      <tr key={user.azure_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900 dark:text-white">{user.display_name}</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">{user.email}</div>
+                      <tr key={user.user_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-gray-900 dark:text-white">{user.username}</div>
+                          <div className="text-xs text-gray-500">{user.email}</div>
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            isEnabled
-                              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                              : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                          }`}>
-                            {isEnabled ? 'Pass' : 'Fail'}
+                        <td className="px-4 py-3">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Pass +25</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">Not configured</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200">Member +15</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {isAdmin
+                            ? <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-200">Yes +0</span>
+                            : <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">No +10</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">0 +10</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`font-semibold text-base ${identityScore >= 80 ? 'text-green-600 dark:text-green-400' : identityScore >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
+                            {identityScore}
                           </span>
+                          <span className="text-xs text-gray-400 ml-1">/ 100</span>
+                          <div className="text-xs text-gray-400">partial (4/6 signals)</div>
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            isGuest
-                              ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                              : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                          }`}>
-                            {isGuest ? 'Guest' : 'Member'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                            Not configured
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                            Not configured
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
-                          Microsoft Graph
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">
-                            Yes
-                          </span>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">Yes</span>
                         </td>
                       </tr>
                     );
                   })}
+                  {localUsers.length === 0 && !loading && (
+                    <tr><td colSpan={8} className="px-4 py-6 text-center text-gray-400">No local users found.</td></tr>
+                  )}
                 </tbody>
               </table>
-              <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
-                MFA registration and admin role signals require additional Microsoft Graph permissions (UserAuthenticationMethod.Read.All, RoleManagement.Read.All).
-              </p>
             </div>
-          )}
+          </div>
+
+          {/* Azure/Entra users signals */}
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">Entra</span>
+              Entra / Azure AD Identity Signals
+              {!connectionStatus?.success && (
+                <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400">Graph Not Configured</span>
+              )}
+            </h3>
+            {!connectionStatus?.success ? (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-5 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                <p>Microsoft Graph is not configured. ModZero is currently using local user identity signals only.</p>
+                <p className="mt-1 text-xs">Configure AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET to enable Entra identity signals.</p>
+                <button onClick={testAzureConnection} className="mt-3 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 text-sm">
+                  Test Connection
+                </button>
+              </div>
+            ) : azureUsers.length === 0 ? (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-5 py-6 text-center text-sm text-gray-500">
+                <p>Connected to Microsoft Graph.</p>
+                <button onClick={fetchAzureUsers} disabled={azureLoading} className="mt-3 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm disabled:opacity-50">
+                  {azureLoading ? 'Loading...' : 'Load Entra Users'}
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+                  <thead className="bg-gray-50 dark:bg-gray-800">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Enabled</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MFA Registered</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User Type</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Admin Role</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failed Logins</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Identity Score</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                    {azureUsers.map((user) => {
+                      const isGuest = user.userType === 'Guest';
+                      const isEnabled = user.account_enabled;
+                      // Score: account_enabled(25) + user_type_member(15) = 40 max (mfa/admin/signin not available without extra permissions)
+                      const score = (isEnabled ? 25 : 0) + (isGuest ? 0 : 15);
+                      const identityScore = Math.round((score / 40) * 100);
+                      return (
+                        <tr key={user.azure_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-gray-900 dark:text-white">{user.display_name}</div>
+                            <div className="text-xs text-gray-500">{user.email}</div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${isEnabled ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'}`}>
+                              {isEnabled ? 'Pass +25' : 'Fail +0'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300" title="Requires UserAuthenticationMethod.Read.All permission">
+                              Not configured
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${isGuest ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200'}`}>
+                              {isGuest ? 'Guest +0' : 'Member +15'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300" title="Requires RoleManagement.Read.All permission">
+                              Not configured
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">Not configured</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`font-semibold text-base ${identityScore >= 80 ? 'text-green-600 dark:text-green-400' : identityScore >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
+                              {identityScore}
+                            </span>
+                            <span className="text-xs text-gray-400 ml-1">/ 100</span>
+                            <div className="text-xs text-gray-400">partial (2/6 signals)</div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">Yes</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <p className="mt-3 text-xs text-gray-400 dark:text-gray-500 px-2">
+                  MFA registration, admin role, and sign-in signals require additional Microsoft Graph permissions (UserAuthenticationMethod.Read.All, RoleManagement.Read.All, AuditLog.Read.All).
+                  Scores shown are based on available signals only.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
