@@ -15,6 +15,7 @@ const UsersPage: React.FC = () => {
   const [syncing, setSyncing] = useState<string | null>(null);
   const [roleModal, setRoleModal] = useState<{ userId: string; current: string } | null>(null);
   const [roleUpdating, setRoleUpdating] = useState(false);
+  const [userDetails, setUserDetails] = useState<Record<string, { lastLogin: string | null; avgScore: number | null }>>({});
 
   useEffect(() => {
     fetchLocalUsers();
@@ -40,6 +41,25 @@ const UsersPage: React.FC = () => {
     try {
       const res = await api.get<User[]>("/users");
       setLocalUsers(res.data);
+      // Fetch per-user details for last login + avg trust score
+      const details: Record<string, { lastLogin: string | null; avgScore: number | null }> = {};
+      await Promise.allSettled(
+        res.data.map(async (u) => {
+          try {
+            const d = await api.get(`/users/${u.user_id}/details`);
+            const attempts: any[] = d.data.recent_attempts ?? [];
+            const lastAttempt = attempts.find(a => a.result === "allow" || a.result === "ALLOW");
+            const scores = attempts.map(a => a.total_score).filter(s => s != null);
+            details[u.user_id] = {
+              lastLogin: lastAttempt?.timestamp ?? (attempts[0]?.timestamp ?? null),
+              avgScore: scores.length > 0 ? Math.round(scores.reduce((a: number, b: number) => a + b, 0) / scores.length) : null,
+            };
+          } catch {
+            details[u.user_id] = { lastLogin: null, avgScore: null };
+          }
+        })
+      );
+      setUserDetails(details);
     } catch (error) {
       console.error("Error fetching local users:", error);
     } finally {
@@ -266,8 +286,16 @@ const UsersPage: React.FC = () => {
                             ? <span className="inline-flex items-center gap-1 text-purple-600 font-medium">{devCount} device{devCount !== 1 ? 's' : ''}</span>
                             : <span className="text-gray-400">None</span>}
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-400">—</td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-400">—</td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                          {userDetails[user.user_id]?.lastLogin
+                            ? new Date(userDetails[user.user_id].lastLogin!).toLocaleString()
+                            : <span className="text-gray-300 dark:text-gray-600">No activity</span>}
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm">
+                          {userDetails[user.user_id]?.avgScore != null
+                            ? <span className={`font-semibold ${userDetails[user.user_id].avgScore! >= 80 ? "text-green-600" : userDetails[user.user_id].avgScore! >= 60 ? "text-amber-600" : "text-red-600"}`}>{userDetails[user.user_id].avgScore}</span>
+                            : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                        </td>
                         <td className="px-4 py-4 whitespace-nowrap text-sm">
                           <div className="flex items-center gap-3">
                             <button

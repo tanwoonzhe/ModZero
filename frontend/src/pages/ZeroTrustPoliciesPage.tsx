@@ -561,8 +561,16 @@ interface DeviceRule {
   failureAction: FailureAction;
 }
 
+const DEVICE_RULES_KEY = 'modzero-device-rules';
+
 const DeviceRulesTab: React.FC = () => {
-  const [rules, setRules] = useState<DeviceRule[]>(DEFAULT_DEVICE_RULES);
+  const [rules, setRules] = useState<DeviceRule[]>(() => {
+    try {
+      const saved = localStorage.getItem(DEVICE_RULES_KEY);
+      if (saved) return JSON.parse(saved) as DeviceRule[];
+    } catch {}
+    return DEFAULT_DEVICE_RULES;
+  });
   const [saved, setSaved] = useState(false);
 
   const toggle = (key: string) =>
@@ -574,7 +582,11 @@ const DeviceRulesTab: React.FC = () => {
   const setWeight = (key: string, w: number) =>
     setRules(r => r.map(rule => rule.key === key ? { ...rule, weight: Math.max(0, Math.min(100, w)) } : rule));
 
-  const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
+  const handleSave = () => {
+    localStorage.setItem(DEVICE_RULES_KEY, JSON.stringify(rules));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
@@ -662,17 +674,34 @@ const DeviceRulesTab: React.FC = () => {
 /*  Context Rules Tab                                                   */
 /* ------------------------------------------------------------------ */
 
+const CONTEXT_RULES_KEY = 'modzero-context-rules';
+
 const ContextRulesTab: React.FC = () => {
-  const [allowedStart, setAllowedStart] = useState('08:00');
-  const [allowedEnd, setAllowedEnd] = useState('20:00');
-  const [blockOutsideHours, setBlockOutsideHours] = useState(false);
-  const [maxFailedAttempts, setMaxFailedAttempts] = useState(5);
-  const [unknownDevicePenalty, setUnknownDevicePenalty] = useState(20);
-  const [suspiciousIpPenalty, setSuspiciousIpPenalty] = useState(15);
-  const [requireKnownDevice, setRequireKnownDevice] = useState(true);
+  const loadSaved = () => {
+    try {
+      const s = localStorage.getItem(CONTEXT_RULES_KEY);
+      if (s) return JSON.parse(s);
+    } catch {}
+    return null;
+  };
+  const saved0 = loadSaved();
+  const [allowedStart, setAllowedStart] = useState(saved0?.allowedStart ?? '08:00');
+  const [allowedEnd, setAllowedEnd] = useState(saved0?.allowedEnd ?? '20:00');
+  const [blockOutsideHours, setBlockOutsideHours] = useState(saved0?.blockOutsideHours ?? false);
+  const [maxFailedAttempts, setMaxFailedAttempts] = useState(saved0?.maxFailedAttempts ?? 5);
+  const [unknownDevicePenalty, setUnknownDevicePenalty] = useState(saved0?.unknownDevicePenalty ?? 20);
+  const [suspiciousIpPenalty, setSuspiciousIpPenalty] = useState(saved0?.suspiciousIpPenalty ?? 15);
+  const [requireKnownDevice, setRequireKnownDevice] = useState(saved0?.requireKnownDevice ?? true);
   const [saved, setSaved] = useState(false);
 
-  const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
+  const handleSave = () => {
+    localStorage.setItem(CONTEXT_RULES_KEY, JSON.stringify({
+      allowedStart, allowedEnd, blockOutsideHours, maxFailedAttempts,
+      unknownDevicePenalty, suspiciousIpPenalty, requireKnownDevice,
+    }));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
 
   const row = (label: string, desc: string, control: React.ReactNode) => (
     <div className="flex items-center justify-between py-4 border-b border-gray-100 dark:border-gray-700 last:border-0">
