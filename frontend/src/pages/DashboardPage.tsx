@@ -68,23 +68,6 @@ const HEALTH_LABEL: Record<HealthStatus, string> = {
   unknown: "Unknown",
 };
 
-const MOCK_TREND = [
-  { day: "Mon", Allow: 42, Deny: 8,  Review: 2 },
-  { day: "Tue", Allow: 38, Deny: 12, Review: 3 },
-  { day: "Wed", Allow: 55, Deny: 6,  Review: 1 },
-  { day: "Thu", Allow: 47, Deny: 9,  Review: 4 },
-  { day: "Fri", Allow: 61, Deny: 14, Review: 2 },
-  { day: "Sat", Allow: 22, Deny: 3,  Review: 0 },
-  { day: "Sun", Allow: 18, Deny: 2,  Review: 1 },
-];
-
-const MOCK_LOGS: AccessLog[] = [
-  { id: "1", time: "2026-05-29 08:14", user: "admin",  device: "DESKTOP-T6E1NIC", resource: "Internal Portal",  final_score: 87.2, required_score: 60, decision: "ALLOW", reason: "score_meets_policy" },
-  { id: "2", time: "2026-05-29 07:52", user: "alice",  device: "LAPTOP-A1B2C",    resource: "HR Dashboard",     final_score: 43.0, required_score: 70, decision: "DENY",  reason: "trust_score_below_required" },
-  { id: "3", time: "2026-05-29 07:31", user: "bob",    device: "DESKTOP-D4E5F",   resource: "Internal Portal",  final_score: 72.5, required_score: 60, decision: "ALLOW", reason: "score_meets_policy" },
-  { id: "4", time: "2026-05-29 06:48", user: "carol",  device: "LAPTOP-G6H7I",    resource: "Finance Reports",  final_score: 38.0, required_score: 80, decision: "DENY",  reason: "mfa_required" },
-  { id: "5", time: "2026-05-29 06:22", user: "admin",  device: "DESKTOP-T6E1NIC", resource: "Admin Console",    final_score: 91.0, required_score: 85, decision: "ALLOW", reason: "score_meets_policy" },
-];
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
@@ -104,7 +87,8 @@ const DashboardPage: React.FC = () => {
     "Trust Scoring Engine": "unknown",
     "Graph Integration": "unknown",
   });
-  const [recentLogs] = useState<AccessLog[]>(MOCK_LOGS);
+  const [recentLogs, setRecentLogs] = useState<AccessLog[]>([]);
+  const [trendData, setTrendData] = useState<{ day: string; Allow: number; Deny: number; Review: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { fetchData(); }, []);
@@ -112,30 +96,77 @@ const DashboardPage: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [usersRes, devicesRes, resourcesRes, trustRes] = await Promise.allSettled([
-        api.get("/users"),
-        api.get("/devices"),
-        api.get("/resources"),
-        api.get("/trust/latest"),
-      ]);
+      const [usersRes, devicesRes, resourcesRes, trustRes, recentDecRes, allDecRes, graphStatusRes] =
+        await Promise.allSettled([
+          api.get("/users"),
+          api.get("/devices"),
+          api.get("/resources"),
+          api.get("/trust/latest"),
+          api.get("/audit/access-decisions?limit=5"),
+          api.get("/audit/access-decisions?limit=200"),
+          api.get("/graph/status"),
+        ]);
 
-      const userList: unknown[]    = usersRes.status    === "fulfilled" ? (Array.isArray(usersRes.value.data)    ? usersRes.value.data    : (usersRes.value.data.users    ?? [])) : [];
-      const deviceList: unknown[]  = devicesRes.status  === "fulfilled" ? (Array.isArray(devicesRes.value.data)  ? devicesRes.value.data  : (devicesRes.value.data.devices  ?? [])) : [];
+      const userList: any[]     = usersRes.status     === "fulfilled" ? (Array.isArray(usersRes.value.data)     ? usersRes.value.data     : (usersRes.value.data.users     ?? [])) : [];
+      const deviceList: any[]   = devicesRes.status   === "fulfilled" ? (Array.isArray(devicesRes.value.data)   ? devicesRes.value.data   : (devicesRes.value.data.devices  ?? [])) : [];
       const resourceList: Array<{ enabled?: boolean }> = resourcesRes.status === "fulfilled" ? (Array.isArray(resourcesRes.value.data) ? resourcesRes.value.data : (resourcesRes.value.data.resources ?? [])) : [];
-      const latestTrust = trustRes.status === "fulfilled" ? trustRes.value.data : null;
+      const latestTrust         = trustRes.status      === "fulfilled" ? trustRes.value.data      : null;
 
-      const total   = userList.length;
-      const devices = deviceList.length;
-      const atRisk  = Math.max(0, Math.round(devices * 0.25));
-      const policies = resourceList.filter(r => r.enabled !== false).length;
-      const avgScore: number | null = latestTrust?.total_score ?? null;
+      // Graph mode from live /graph/status
+      const graphStatus         = graphStatusRes.status === "fulfilled" ? graphStatusRes.value.data : null;
+      const graphMode: "disabled" | "mock" | "real" =
+        graphStatus?.token_ok   ? "real"     :
+        graphStatus?.configured ? "mock"     : "disabled";
 
-      const dist = devices > 0
+      // Recent access logs
+      const rawLogs: any[] = recentDecRes.status === "fulfilled" ? recentDecRes.value.data : [];
+      const deviceIdToName = Object.fromEntries(deviceList.map((d: any) => [d.device_id, d.hostname ?? null]));
+      setRecentLogs(rawLogs.map((l: any) => ({
+        id:             l.decision_id,
+        time:           new Date(l.ts).toLocaleString(),
+        user:           l.user_name ?? "—",
+        device:         deviceIdToName[l.device_id] ?? (l.device_id ? `${String(l.device_id).slice(0, 8)}…` : "—"),
+        resource:       l.resource_name ?? "—",
+        final_score:    l.score    ?? 0,
+        required_score: l.threshold ?? 0,
+        decision:       ((l.decision ?? "deny") as string).toUpperCase() as "ALLOW" | "DENY",
+        reason:         l.reason   ?? "—",
+      })));
+
+      // Access decision trend — last 7 days from real audit data
+      const allDecs: any[] = allDecRes.status === "fulfilled" ? allDecRes.value.data : [];
+      const last7 = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (6 - i));
+        return { dateStr: d.toISOString().split("T")[0], day: d.toLocaleDateString("en-US", { weekday: "short" }) };
+      });
+      setTrendData(last7.map(({ dateStr, day }) => {
+        const dayItems = allDecs.filter((l: any) => l.ts && String(l.ts).startsWith(dateStr));
+        return {
+          day,
+          Allow:  dayItems.filter((l: any) => l.decision === "allow").length,
+          Deny:   dayItems.filter((l: any) => l.decision === "deny").length,
+          Review: dayItems.filter((l: any) => l.category === "bootstrap_deny").length,
+        };
+      }));
+
+      // Fetch real posture scores for all local devices
+      const postureScores: number[] = [];
+      await Promise.allSettled(
+        deviceList.map(async (d: any) => {
+          try {
+            const r = await api.get(`/devices/${d.device_id}/posture`);
+            if (r.data?.posture_score != null) postureScores.push(Number(r.data.posture_score));
+          } catch { /* ignore */ }
+        })
+      );
+      const atRisk = postureScores.filter(s => s < 60).length;
+      const dist = deviceList.length > 0
         ? [
-            { id: "critical", label: "Critical (0–40)",  value: Math.max(1, Math.round(devices * 0.10)), color: "#ef4444" },
-            { id: "warning",  label: "Warning (41–60)",  value: Math.max(1, Math.round(devices * 0.15)), color: "#f59e0b" },
-            { id: "moderate", label: "Moderate (61–80)", value: Math.max(1, Math.round(devices * 0.45)), color: "#3b82f6" },
-            { id: "healthy",  label: "Healthy (81–100)", value: Math.max(1, Math.round(devices * 0.30)), color: "#22c55e" },
+            { id: "critical", label: "Critical (0–40)",  value: postureScores.filter(s => s < 40).length,            color: "#ef4444" },
+            { id: "warning",  label: "Warning (41–60)",  value: postureScores.filter(s => s >= 40 && s < 60).length, color: "#f59e0b" },
+            { id: "moderate", label: "Moderate (61–80)", value: postureScores.filter(s => s >= 60 && s < 80).length, color: "#3b82f6" },
+            { id: "healthy",  label: "Healthy (81–100)", value: postureScores.filter(s => s >= 80).length,           color: "#22c55e" },
           ]
         : [
             { id: "critical", label: "Critical (0–40)",  value: 0, color: "#ef4444" },
@@ -145,12 +176,19 @@ const DashboardPage: React.FC = () => {
           ];
 
       setTrustDist(dist);
-      setStats({ totalUsers: total, registeredDevices: devices, devicesAtRisk: atRisk, policiesEnforced: policies, avgTrustScore: avgScore, graphMode: "mock" });
+      setStats({
+        totalUsers:        userList.length,
+        registeredDevices: deviceList.length,
+        devicesAtRisk:     atRisk,
+        policiesEnforced:  resourceList.filter(r => r.enabled !== false).length,
+        avgTrustScore:     latestTrust?.total_score ?? null,
+        graphMode,
+      });
       setModuleHealth({
         "Device Posture":       devicesRes.status  === "fulfilled" ? "healthy" : "warning",
         "Context Analysis":     "healthy",
         "Trust Scoring Engine": trustRes.status    === "fulfilled" ? "healthy" : "warning",
-        "Graph Integration":    "warning",
+        "Graph Integration":    graphMode === "real" ? "healthy" : graphMode === "mock" ? "warning" : "error",
       });
     } catch (err) {
       console.error("Dashboard data fetch error:", err);
@@ -294,7 +332,7 @@ const DashboardPage: React.FC = () => {
           <p className="text-xs text-gray-400 mb-3">Last 7 days</p>
           <div className="h-44">
             <ResponsiveBar
-              data={MOCK_TREND}
+              data={trendData}
               keys={["Allow", "Deny", "Review"]}
               indexBy="day"
               margin={{ top: 5, right: 80, bottom: 30, left: 35 }}
@@ -322,7 +360,7 @@ const DashboardPage: React.FC = () => {
               }]}
             />
           </div>
-          <p className="text-xs text-gray-400 mt-2">Simulated — connect audit API for live counts.</p>
+          <p className="text-xs text-gray-400 mt-2">Live data from audit log — last 200 access decisions.</p>
         </div>
       </div>
 
@@ -357,6 +395,9 @@ const DashboardPage: React.FC = () => {
           </h3>
           <Link to="/access-logs" className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">View all →</Link>
         </div>
+        {recentLogs.length === 0
+          ? <p className="text-sm text-gray-400 py-4 text-center">No access decisions recorded yet.</p>
+          : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -393,7 +434,7 @@ const DashboardPage: React.FC = () => {
             </tbody>
           </table>
         </div>
-        <p className="text-xs text-gray-400 mt-3">Showing sample logs — connect audit log API for live data.</p>
+          )}
       </div>
 
       {/* Admin context card with quick links */}
