@@ -491,10 +491,10 @@ const UsersPage: React.FC = () => {
                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                   {localUsers.map((user) => {
                     const isAdmin = user.role === 'ADMIN';
-                    // Score: account_enabled(25) + user_type_member(15) + not_admin_risk(10) + low_failed_login(10) = 60 max (mfa/signin unknown)
+                    // Score out of 100: account_enabled(25) + user_type_member(15) + not_admin_risk(10) + low_failed_login(10) = 60
+                    // MFA(25) + recent_signin(15) unknown locally → 0 pts (Zero Trust: unknown = untrusted)
                     const score = 25 + 15 + (isAdmin ? 0 : 10) + 10;
-                    const maxAvailable = 60; // mfa + recent_signin not available locally
-                    const identityScore = Math.round((score / maxAvailable) * 100);
+                    const identityScore = score; // already out of 100
                     return (
                       <tr key={user.user_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                         <td className="px-4 py-3">
@@ -582,9 +582,10 @@ const UsersPage: React.FC = () => {
                     {azureUsers.map((user) => {
                       const isGuest = user.userType === 'Guest';
                       const isEnabled = user.account_enabled;
-                      // Score: account_enabled(25) + user_type_member(15) = 40 max (mfa/admin/signin not available without extra permissions)
+                      // Score out of 100: account_enabled(25) + user_type_member(15) = 40
+                      // MFA(25) + admin_risk(10) + recent_signin(15) + failed_login(10) unknown → 0 pts each
                       const score = (isEnabled ? 25 : 0) + (isGuest ? 0 : 15);
-                      const identityScore = Math.round((score / 40) * 100);
+                      const identityScore = score; // already out of 100
                       return (
                         <tr key={user.azure_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                           <td className="px-4 py-3">
@@ -631,7 +632,7 @@ const UsersPage: React.FC = () => {
                 </table>
                 <p className="mt-3 text-xs text-gray-400 dark:text-gray-500 px-2">
                   MFA registration, admin role, and sign-in signals require additional Microsoft Graph permissions (UserAuthenticationMethod.Read.All, RoleManagement.Read.All, AuditLog.Read.All).
-                  Scores shown are based on available signals only.
+                  Unknown signals score 0 — Zero Trust principle: unknown = untrusted.
                 </p>
               </div>
             )}
