@@ -84,17 +84,22 @@ def _score_dict(score: DeviceTrustScore) -> dict:
 def _lookup_intune_compliance(device_hostname: Optional[str]) -> Optional[bool]:
     """Try to fetch this device's Intune compliance from Microsoft Graph.
 
+    Only called when GRAPH_MODE=real (i.e., real Azure credentials are configured).
     Returns True (compliant), False (not compliant), or None (not found / error).
     """
     if not device_hostname:
         return None
     try:
-        devices = azure_service.get_managed_devices(top=200)
+        devices = azure_service.get_managed_devices(top=500)
         for d in devices:
             if (d.get("deviceName") or "").lower() == device_hostname.lower():
-                return d.get("complianceState") == "compliant"
+                compliant = d.get("complianceState") == "compliant"
+                log.info("Intune lookup: %s → complianceState=%s, compliant=%s",
+                         device_hostname, d.get("complianceState"), compliant)
+                return compliant
+        log.warning("Intune lookup: device '%s' not found in %d managed devices", device_hostname, len(devices))
     except Exception as exc:
-        log.debug("Intune lookup failed: %s", exc)
+        log.warning("Intune Graph lookup failed for '%s': %s", device_hostname, exc)
     return None
 
 
@@ -128,10 +133,13 @@ def submit_posture_report(
     # ── 1. Intune compliance overlay from Graph ────────────────────────────────
     intune_val = payload.intune_compliant
     intune_source = "client"
-    if intune_val is None:
+    if intune_val is None and settings.graph_mode == "real":
         hostname = getattr(device, "device_name", None) or payload.device_name
+        log.info("Attempting Intune Graph lookup for hostname: %s", hostname)
         intune_val = _lookup_intune_compliance(hostname)
-        intune_source = "graph" if intune_val is not None else "not_configured"
+        intune_source = "graph" if intune_val is not None else "graph_not_found"
+    elif intune_val is None:
+        intune_source = "not_configured"
 
     # ── 2. Persist posture report ──────────────────────────────────────────────
     report = PostureReport(
@@ -325,10 +333,13 @@ def client_posture_report(
     # Intune overlay
     intune_val = payload.intune_compliant
     intune_source = "client"
-    if intune_val is None:
+    if intune_val is None and settings.graph_mode == "real":
         hostname = getattr(device, "device_name", None) or payload.device_name
+        log.info("Attempting Intune Graph lookup for hostname: %s", hostname)
         intune_val = _lookup_intune_compliance(hostname)
-        intune_source = "graph" if intune_val is not None else "not_configured"
+        intune_source = "graph" if intune_val is not None else "graph_not_found"
+    elif intune_val is None:
+        intune_source = "not_configured"
 
     report = PostureReport(
         device_id=device.device_id,
