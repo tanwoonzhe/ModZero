@@ -393,7 +393,7 @@ const DashboardPage: React.FC = () => {
             <FaClock className="text-indigo-500" size={13} />
             Latest Access Logs
           </h3>
-          <Link to="/access-logs" className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">View all →</Link>
+          <Link to="/logs" className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">View all →</Link>
         </div>
         {recentLogs.length === 0
           ? <p className="text-sm text-gray-400 py-4 text-center">No access decisions recorded yet.</p>
@@ -451,7 +451,7 @@ const DashboardPage: React.FC = () => {
             { to: "/users",              label: "Manage Users" },
             { to: "/devices",            label: "Manage Devices" },
             { to: "/zero-trust-policies",label: "Edit Trust Policies" },
-            { to: "/access-logs",        label: "View Access Logs" },
+            { to: "/logs",               label: "View Access Logs" },
           ].map(({ to, label }) => (
             <Link key={to} to={to} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-white dark:bg-gray-800 border border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 transition-colors">
               {label}

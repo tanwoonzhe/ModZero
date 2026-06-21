@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { FaUser, FaEnvelope, FaIdBadge, FaCalendarAlt, FaShieldAlt } from "react-icons/fa";
+import { FaUser, FaEnvelope, FaIdBadge, FaCalendarAlt, FaShieldAlt, FaKey } from "react-icons/fa";
 import api from "../api";
 import toast from "react-hot-toast";
 
@@ -15,6 +15,8 @@ interface UserProfile {
 const UserProfilePage: React.FC = () => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pwForm, setPwForm] = useState({ current: "", newPw: "", confirm: "" });
+  const [pwLoading, setPwLoading] = useState(false);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -56,6 +58,31 @@ const UserProfilePage: React.FC = () => {
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pwForm.newPw !== pwForm.confirm) {
+      toast.error("New passwords do not match");
+      return;
+    }
+    if (pwForm.newPw.length < 8) {
+      toast.error("Password must be at least 8 characters");
+      return;
+    }
+    setPwLoading(true);
+    try {
+      await api.post("/users/me/change-password", {
+        current_password: pwForm.current,
+        new_password: pwForm.newPw,
+      });
+      toast.success("Password changed successfully");
+      setPwForm({ current: "", newPw: "", confirm: "" });
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || "Failed to change password");
+    } finally {
+      setPwLoading(false);
+    }
   };
 
   const getRoleBadgeColor = (role: string) => {
@@ -214,6 +241,56 @@ const UserProfilePage: React.FC = () => {
             </ul>
           </div>
         </div>
+      </div>
+
+      {/* Change Password */}
+      <div className="mt-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <FaKey className="w-4 h-4 text-gray-400" />
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Change Password</h3>
+        </div>
+        <form onSubmit={handleChangePassword} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Current Password</label>
+            <input
+              type="password"
+              value={pwForm.current}
+              onChange={e => setPwForm(f => ({ ...f, current: e.target.value }))}
+              required
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">New Password</label>
+            <input
+              type="password"
+              value={pwForm.newPw}
+              onChange={e => setPwForm(f => ({ ...f, newPw: e.target.value }))}
+              required
+              minLength={8}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Confirm New Password</label>
+            <input
+              type="password"
+              value={pwForm.confirm}
+              onChange={e => setPwForm(f => ({ ...f, confirm: e.target.value }))}
+              required
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div className="md:col-span-3">
+            <button
+              type="submit"
+              disabled={pwLoading}
+              className="px-6 py-2 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {pwLoading ? "Updating…" : "Update Password"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

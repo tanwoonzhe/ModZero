@@ -72,6 +72,41 @@ def get_azure_users(
         )
 
 
+@router.get("/users/mfa-status")
+def get_users_mfa_status_route(
+    current_admin: models.User = Depends(get_current_admin)
+) -> Any:
+    """Get MFA registration status for all Entra users (admin only).
+
+    Calls Microsoft Graph /users/{id}/authentication/methods for each user.
+    Requires UserAuthenticationMethod.Read.All application permission with admin consent.
+    """
+    try:
+        users = azure_service.get_users(top=100)
+        user_ids = [u.get("id") for u in users if u.get("id")]
+        mfa_map = azure_service.get_users_mfa_status(user_ids)
+
+        result = []
+        for u in users:
+            uid = u.get("id")
+            mfa_info = mfa_map.get(uid, {"mfa_registered": None, "mfa_methods": []})
+            result.append({
+                "azure_id": uid,
+                "display_name": u.get("displayName"),
+                "mfa_registered": mfa_info.get("mfa_registered"),
+                "mfa_methods": mfa_info.get("mfa_methods", []),
+                "error": mfa_info.get("error"),
+            })
+
+        return {"total": len(result), "users": result}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch MFA status: {str(e)}"
+        )
+
+
 @router.get("/users/{azure_user_id}")
 def get_azure_user(
     azure_user_id: str,
@@ -166,6 +201,7 @@ def sync_azure_user_to_local(
             "message": "User synced successfully",
             "user_id": str(new_user.user_id),
             "action": "created",
+            "temp_password": temp_password,
             "azure_data": {
                 "display_name": azure_user.get("displayName", ""),
                 "job_title": azure_user.get("jobTitle", ""),
