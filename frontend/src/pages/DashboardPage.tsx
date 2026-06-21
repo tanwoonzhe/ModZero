@@ -17,7 +17,6 @@ import {
   FaCircle,
 } from "react-icons/fa";
 
-import TrustScoreCard from "../components/TrustScoreCard";
 import AccessControlOverviewPanel from "../components/AccessControlOverviewPanel";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -283,8 +282,7 @@ const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Trust Score Card + Access Overview (existing components) */}
-      <TrustScoreCard />
+      {/* Access Overview */}
       <AccessControlOverviewPanel />
 
       {/* Charts */}
