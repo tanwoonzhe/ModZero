@@ -73,7 +73,7 @@ const ZeroTrustPoliciesPage: React.FC = () => {
     setTenantLicenses,
   } = useZeroTrustStore();
   
-  const [activeTab, setActiveTab] = useState<'resource-policies' | 'device-rules' | 'context-rules' | 'weights' | 'simulator'>('resource-policies');
+  const [activeTab, setActiveTab] = useState<'resource-policies' | 'device-rules' | 'identity-rules' | 'context-rules' | 'weights' | 'simulator'>('resource-policies');
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedPillars, setExpandedPillars] = useState<Set<Pillar>>(new Set([Pillar.Identity]));
 
@@ -386,6 +386,17 @@ const ZeroTrustPoliciesPage: React.FC = () => {
           Device Rules
         </button>
         <button
+          onClick={() => setActiveTab('identity-rules')}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === 'identity-rules'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          <FaShieldAlt className="inline mr-2" size={14} />
+          Identity Rules
+        </button>
+        <button
           onClick={() => setActiveTab('context-rules')}
           className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
             activeTab === 'context-rules'
@@ -513,6 +524,11 @@ const ZeroTrustPoliciesPage: React.FC = () => {
         <DeviceRulesTab />
       )}
 
+      {/* Identity Rules Tab */}
+      {activeTab === 'identity-rules' && (
+        <IdentityRulesTab />
+      )}
+
       {/* Context Rules Tab */}
       {activeTab === 'context-rules' && (
         <ContextRulesTab />
@@ -537,6 +553,107 @@ export default ZeroTrustPoliciesPage;
 
 /* ------------------------------------------------------------------ */
 /*  Device Rules Tab                                                    */
+/* ------------------------------------------------------------------ */
+/*  Identity Rules Tab                                                  */
+/* ------------------------------------------------------------------ */
+
+const IDENTITY_SIGNALS_INFO = [
+  {
+    key:         'account_enabled',
+    label:       'Account Enabled',
+    source:      'Local Auth',
+    maxPoints:   30,
+    description: 'User account is active and can successfully authenticate to ModZero.',
+    alwaysTrue:  true,
+  },
+  {
+    key:         'role_valid',
+    label:       'Role Valid',
+    source:      'Local Auth',
+    maxPoints:   20,
+    description: 'User has a recognised role assigned (ADMIN or EMPLOYEE). No role = no points.',
+    alwaysTrue:  false,
+  },
+  {
+    key:         'recent_login',
+    label:       'Recent Login',
+    source:      'Local Auth',
+    maxPoints:   15,
+    description: 'User authenticated recently (implied by the active JWT used to submit this request).',
+    alwaysTrue:  true,
+  },
+  {
+    key:         'low_failed_logins',
+    label:       'Low Failed Login Count',
+    source:      'Local Auth',
+    maxPoints:   25,
+    description: 'No excessive failed login attempts detected (threshold: 5). No tracking = assumed clean.',
+    alwaysTrue:  true,
+  },
+  {
+    key:         'not_locked',
+    label:       'Account Not Locked',
+    source:      'Local Auth',
+    maxPoints:   10,
+    description: 'Account is not locked out. No lock field in local DB = assumed unlocked.',
+    alwaysTrue:  true,
+  },
+];
+
+const IdentityRulesTab: React.FC = () => (
+  <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+    <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Identity Rules</h2>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+        Five identity signals evaluated server-side for every access request.
+        Identity Score = sum of passed signal points (max 100). Contributes 30% to the Final Trust Score.
+      </p>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+        <thead className="bg-gray-50 dark:bg-gray-800">
+          <tr>
+            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Signal</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Max Points</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust Score</th>
+          </tr>
+        </thead>
+        <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+          {IDENTITY_SIGNALS_INFO.map(sig => (
+            <tr key={sig.key}>
+              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{sig.label}</td>
+              <td className="px-4 py-3 text-xs text-gray-500">
+                <span className="inline-flex px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                  {sig.source}
+                </span>
+              </td>
+              <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs">{sig.description}</td>
+              <td className="px-4 py-3 text-center">
+                <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">
+                  +{sig.maxPoints}
+                </span>
+              </td>
+              <td className="px-4 py-3">
+                <span className="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                  Yes
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
+      <p className="text-xs text-gray-400">
+        Total max: 100 pts · Identity Score × 30% weight = up to 30 pts in Final Trust Score.
+        Signal values are evaluated by the backend on every posture report — source: <code className="font-mono">identity_signal_service.py</code>.
+      </p>
+    </div>
+  </div>
+);
+
 /* ------------------------------------------------------------------ */
 
 const DEFAULT_DEVICE_RULES = [
