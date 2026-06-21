@@ -674,33 +674,57 @@ const DeviceRulesTab: React.FC = () => {
 /*  Context Rules Tab                                                   */
 /* ------------------------------------------------------------------ */
 
-const CONTEXT_RULES_KEY = 'modzero-context-rules';
-
 const ContextRulesTab: React.FC = () => {
-  const loadSaved = () => {
-    try {
-      const s = localStorage.getItem(CONTEXT_RULES_KEY);
-      if (s) return JSON.parse(s);
-    } catch {}
-    return null;
-  };
-  const saved0 = loadSaved();
-  const [allowedStart, setAllowedStart] = useState(saved0?.allowedStart ?? '08:00');
-  const [allowedEnd, setAllowedEnd] = useState(saved0?.allowedEnd ?? '20:00');
-  const [blockOutsideHours, setBlockOutsideHours] = useState(saved0?.blockOutsideHours ?? false);
-  const [maxFailedAttempts, setMaxFailedAttempts] = useState(saved0?.maxFailedAttempts ?? 5);
-  const [unknownDevicePenalty, setUnknownDevicePenalty] = useState(saved0?.unknownDevicePenalty ?? 20);
-  const [suspiciousIpPenalty, setSuspiciousIpPenalty] = useState(saved0?.suspiciousIpPenalty ?? 15);
-  const [requireKnownDevice, setRequireKnownDevice] = useState(saved0?.requireKnownDevice ?? true);
-  const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savedOk, setSavedOk] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSave = () => {
-    localStorage.setItem(CONTEXT_RULES_KEY, JSON.stringify({
-      allowedStart, allowedEnd, blockOutsideHours, maxFailedAttempts,
-      unknownDevicePenalty, suspiciousIpPenalty, requireKnownDevice,
-    }));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  const [allowedStartHour, setAllowedStartHour] = useState(8);
+  const [allowedEndHour, setAllowedEndHour]     = useState(20);
+  const [blockOutsideHours, setBlockOutsideHours]       = useState(false);
+  const [maxFailedAttempts, setMaxFailedAttempts]       = useState(5);
+  const [unknownDevicePenalty, setUnknownDevicePenalty] = useState(20);
+  const [suspiciousIpPenalty, setSuspiciousIpPenalty]   = useState(15);
+  const [requireKnownDevice, setRequireKnownDevice]     = useState(true);
+
+  useEffect(() => {
+    api.get('/trust-policy/active')
+      .then(r => {
+        const d = r.data;
+        setAllowedStartHour(d.allowed_start_hour ?? 8);
+        setAllowedEndHour(d.allowed_end_hour ?? 20);
+        setBlockOutsideHours(d.block_outside_hours ?? false);
+        setMaxFailedAttempts(d.max_failed_attempts ?? 5);
+        setUnknownDevicePenalty(d.unknown_device_penalty ?? 20);
+        setSuspiciousIpPenalty(d.suspicious_ip_penalty ?? 15);
+        setRequireKnownDevice(d.require_known_device ?? true);
+      })
+      .catch(() => setError('Failed to load context rules from backend.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.patch('/trust-policy/active', {
+        allowed_start_hour: allowedStartHour,
+        allowed_end_hour: allowedEndHour,
+        block_outside_hours: blockOutsideHours,
+        max_failed_attempts: maxFailedAttempts,
+        unknown_device_penalty: unknownDevicePenalty,
+        suspicious_ip_penalty: suspiciousIpPenalty,
+        require_known_device: requireKnownDevice,
+      });
+      setSavedOk(true);
+      toast.success('Context rules saved to backend');
+      setTimeout(() => setSavedOk(false), 2000);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Save failed.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const row = (label: string, desc: string, control: React.ReactNode) => (
@@ -713,34 +737,51 @@ const ContextRulesTab: React.FC = () => {
     </div>
   );
 
+  if (loading) return (
+    <div className="flex items-center justify-center h-32">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+    </div>
+  );
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Context Rules</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Configure time window, login attempt limits, and access context penalties that affect the Context Analysis Score.
+            Time window, login attempt limits, and access context penalties — stored in the backend and used by every trust score calculation.
           </p>
         </div>
         <button
           onClick={handleSave}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+          disabled={saving}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium"
         >
           <FaSave size={13} />
-          {saved ? 'Saved!' : 'Save Rules'}
+          {saving ? 'Saving…' : savedOk ? 'Saved!' : 'Save Rules'}
         </button>
       </div>
+
+      {error && (
+        <div className="mx-6 mt-3 px-4 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg text-sm text-red-700 dark:text-red-300">
+          {error}
+        </div>
+      )}
+
       <div className="px-6 divide-y divide-gray-100 dark:divide-gray-700">
         {row(
-          'Allowed Access Time Window',
-          `Access requests outside this window are penalized (context score reduced for "normal_time" check).`,
-          <div className="flex items-center gap-2">
-            <input type="time" value={allowedStart} onChange={e => setAllowedStart(e.target.value)}
-              className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-            <span className="text-gray-400 text-sm">–</span>
-            <input type="time" value={allowedEnd} onChange={e => setAllowedEnd(e.target.value)}
-              className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-          </div>
+          'Allowed Access Start Hour (0–23)',
+          'Context score "normal_access_time" check passes only when the request hour is within this range.',
+          <input type="number" min={0} max={23} value={allowedStartHour}
+            onChange={e => setAllowedStartHour(Number(e.target.value))}
+            className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+        )}
+        {row(
+          'Allowed Access End Hour (0–23)',
+          `Access at or after this hour (local server time) is considered outside working hours.`,
+          <input type="number" min={0} max={23} value={allowedEndHour}
+            onChange={e => setAllowedEndHour(Number(e.target.value))}
+            className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
         )}
         {row(
           'Block Outside Allowed Hours',
@@ -753,15 +794,15 @@ const ContextRulesTab: React.FC = () => {
           </button>
         )}
         {row(
-          'Max Failed Login Attempts (10-minute window)',
-          'If a user exceeds this count, the "no_failed_login" check fails, reducing the context score.',
+          'Max Failed Login Attempts',
+          'If a user exceeds this count, the "no_repeated_failed_login" check fails, reducing the context score.',
           <input type="number" min={1} max={20} value={maxFailedAttempts}
             onChange={e => setMaxFailedAttempts(Number(e.target.value))}
             className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
         )}
         {row(
           'Require Known Device',
-          'If enabled, access from a device not previously registered is penalized on the "known_device" check.',
+          'If enabled, access from a device not previously registered penalizes the "known_device" check.',
           <button
             onClick={() => setRequireKnownDevice(!requireKnownDevice)}
             className={`w-10 h-5 rounded-full transition-colors ${requireKnownDevice ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
@@ -771,29 +812,29 @@ const ContextRulesTab: React.FC = () => {
         )}
         {row(
           'Unknown Device Score Penalty',
-          'Points deducted from the "known_device" signal when device is not registered.',
+          'Points deducted from the "known_device" signal when the device is not registered.',
           <div className="flex items-center gap-2">
             <input type="number" min={0} max={100} value={unknownDevicePenalty}
               onChange={e => setUnknownDevicePenalty(Number(e.target.value))}
               className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-            <span className="text-xs text-gray-400">points</span>
+            <span className="text-xs text-gray-400">pts</span>
           </div>
         )}
         {row(
           'Suspicious IP Score Penalty',
-          'Points deducted from the "normal_ip" signal when request comes from a suspicious or blocked IP.',
+          'Points deducted from the "normal_ip" signal when the request comes from a blocked IP.',
           <div className="flex items-center gap-2">
             <input type="number" min={0} max={100} value={suspiciousIpPenalty}
               onChange={e => setSuspiciousIpPenalty(Number(e.target.value))}
               className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-            <span className="text-xs text-gray-400">points</span>
+            <span className="text-xs text-gray-400">pts</span>
           </div>
         )}
       </div>
       <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
         <p className="text-xs text-gray-400">
-          Context rules affect the Context Analysis Score (default weight: 30% of final trust score).
-          Penalties reduce individual signal scores; blocked access only triggers if "Block Outside Allowed Hours" is enabled.
+          These rules are stored in the backend database and applied by every trust score calculation (client app device check, resource access gate, dashboard).
+          Source: <code>TrustPolicyConfig</code> via <code>PATCH /api/trust-policy/active</code>.
         </p>
       </div>
     </div>
@@ -1031,56 +1072,80 @@ const PolicySimulatorTab: React.FC<{ resources: any[] }> = ({ resources }) => {
 /* ------------------------------------------------------------------ */
 
 const FypModuleWeightsCard: React.FC = () => {
-  const moduleWeights = useZeroTrustStore(s => s.moduleWeights);
-  const setModuleWeight = useZeroTrustStore(s => s.setModuleWeight);
-  const accessThreshold = useZeroTrustStore(s => s.accessThreshold);
-  const setAccessThreshold = useZeroTrustStore(s => s.setAccessThreshold);
-  const identityResults = useZeroTrustStore(s => s.identityCheckResults);
-  const deviceResults = useZeroTrustStore(s => s.deviceCheckResults);
-  const moduleCustomTests = useZeroTrustStore(s => s.moduleCustomTests);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savedOk, setSavedOk] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const total = moduleWeights.device_posture + moduleWeights.context_analysis + moduleWeights.trust_scoring_engine;
+  // Weights stored as percentages (0-100) in UI; API uses 0.0-1.0
+  const [devicePct, setDevicePct]     = useState(40);
+  const [contextPct, setContextPct]   = useState(30);
+  const [identityPct, setIdentityPct] = useState(30);
+  const [threshold, setThreshold]     = useState(60);
+
+  useEffect(() => {
+    api.get('/trust-policy/active')
+      .then(r => {
+        const d = r.data;
+        setDevicePct(Math.round((d.device_weight ?? 0.4) * 100));
+        setContextPct(Math.round((d.context_weight ?? 0.3) * 100));
+        setIdentityPct(Math.round((d.identity_weight ?? 0.3) * 100));
+        setThreshold(d.default_threshold ?? 60);
+      })
+      .catch(() => setError('Failed to load weights from backend.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const total = devicePct + contextPct + identityPct;
   const totalValid = total === 100;
-  const [saved, setSaved] = useState(false);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!totalValid) return;
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-    toast.success('Trust score weights saved');
+    setSaving(true);
+    setError(null);
+    try {
+      await api.patch('/trust-policy/active', {
+        device_weight:   devicePct / 100,
+        context_weight:  contextPct / 100,
+        identity_weight: identityPct / 100,
+        default_threshold: threshold,
+      });
+      setSavedOk(true);
+      toast.success('Trust score weights saved to backend');
+      setTimeout(() => setSavedOk(false), 2000);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Save failed.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const modules = [
     {
-      key: 'device_posture' as const,
+      pct: devicePct, setPct: setDevicePct,
       label: 'Device Posture Score',
-      icon: FaLaptop,
-      color: 'text-indigo-600',
-      feeders: [
-        `${deviceResults.length} device baseline test${deviceResults.length === 1 ? '' : 's'} (D-001..D-005)`,
-        `${moduleCustomTests.filter(t => t.module === 'device_posture').length} custom test(s)`,
-      ],
+      icon: FaLaptop, color: 'text-indigo-600',
+      desc: 'Firewall, AV, disk encryption, screen lock, OS version, client health, Intune compliance.',
     },
     {
-      key: 'context_analysis' as const,
+      pct: contextPct, setPct: setContextPct,
       label: 'Context Analysis Score',
-      icon: FaNetworkWired,
-      color: 'text-amber-600',
-      feeders: [
-        `${moduleCustomTests.filter(t => t.module === 'context_analysis').length} custom test(s)`,
-      ],
+      icon: FaNetworkWired, color: 'text-amber-600',
+      desc: 'Known device, access time window, failed login count, source IP, user-device pair.',
     },
     {
-      key: 'trust_scoring_engine' as const,
-      label: 'Identity / Policy Score',
-      icon: FaShieldAltB,
-      color: 'text-emerald-600',
-      feeders: [
-        `${identityResults.length} identity baseline test(s)`,
-        `${moduleCustomTests.filter(t => t.module === 'trust_scoring_engine').length} custom test(s)`,
-      ],
+      pct: identityPct, setPct: setIdentityPct,
+      label: 'Identity Score',
+      icon: FaShieldAltB, color: 'text-emerald-600',
+      desc: 'Account enabled, MFA registered, admin role, guest status, last sign-in recency.',
     },
   ];
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-32">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+    </div>
+  );
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
@@ -1090,79 +1155,88 @@ const FypModuleWeightsCard: React.FC = () => {
             <FaCog className="text-indigo-600" /> Trust Score Weights
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Configure how Device Posture, Context Analysis, and Identity / Policy scores combine into the Final Trust Score.
-            <strong> Total must equal exactly 100%.</strong>
+            These weights are stored in the backend and used by every trust score calculation — client app device check,
+            resource access gate, and dashboard. <strong>Total must equal exactly 100%.</strong>
           </p>
         </div>
         <button
           onClick={handleSave}
-          disabled={!totalValid}
+          disabled={!totalValid || saving}
           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
         >
           <FaSave size={13} />
-          {saved ? 'Saved!' : 'Save Weights'}
+          {saving ? 'Saving…' : savedOk ? 'Saved!' : 'Save Weights'}
         </button>
       </div>
 
-      {/* Validation Banner */}
+      {error && (
+        <div className="mx-6 mt-4 px-4 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg text-sm text-red-700 dark:text-red-300">
+          {error}
+        </div>
+      )}
+
       {!totalValid && (
         <div className="mx-6 mt-4 flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-4 py-2.5">
           <FaExclamationTriangle className="text-red-500 flex-shrink-0" size={14} />
           <p className="text-sm text-red-700 dark:text-red-300">
-            Total score weight must equal <strong>100%</strong>. Current total: <strong>{total}%</strong>.
-            Adjust the sliders below until the total reaches 100%.
+            Weights must sum to <strong>100%</strong>. Current total: <strong>{total}%</strong>.
           </p>
         </div>
       )}
 
       <div className="p-6 space-y-6">
         {modules.map(m => {
-          const raw = moduleWeights[m.key];
           const Icon = m.icon;
           return (
-            <div key={m.key} className="space-y-2">
+            <div key={m.label} className="space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Icon className={m.color} />
                   <span className="font-medium text-gray-900 dark:text-gray-100">{m.label}</span>
                 </div>
-                <span className="text-sm text-gray-500 font-mono">
-                  <strong className={raw > 0 ? 'text-gray-900 dark:text-white' : 'text-gray-400'}>{raw}%</strong>
-                </span>
+                <span className="text-sm font-mono font-bold text-gray-900 dark:text-white">{m.pct}%</span>
               </div>
               <input
-                type="range" min={0} max={100} value={raw}
-                onChange={e => setModuleWeight(m.key, Number(e.target.value))}
+                type="range" min={0} max={100} value={m.pct}
+                onChange={e => m.setPct(Number(e.target.value))}
                 className="w-full"
               />
-              <div className="text-xs text-gray-500 dark:text-gray-400">
-                Fed by: {m.feeders.join(' + ')}
-              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{m.desc}</div>
             </div>
           );
         })}
 
-        {/* Total indicator */}
-        <div className={`rounded-lg px-4 py-3 flex items-center justify-between ${totalValid ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'}`}>
+        <div className={`rounded-lg px-4 py-3 flex items-center justify-between ${
+          totalValid
+            ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+            : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
+        }`}>
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Total Weight</span>
-          <span className={`text-lg font-bold ${totalValid ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{total}%</span>
+          <span className={`text-lg font-bold ${totalValid ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+            {total}%
+          </span>
         </div>
 
         <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-2">
             <div>
               <div className="font-medium text-gray-900 dark:text-gray-100">Access Threshold</div>
               <div className="text-xs text-gray-500 dark:text-gray-400">
-                Minimum final trust score required to allow access. Resources can override this per-resource.
+                Minimum final trust score required to allow access. Resources can set a higher per-resource threshold.
               </div>
             </div>
-            <span className="text-lg font-bold text-indigo-600">{accessThreshold} / 100</span>
+            <span className="text-lg font-bold text-indigo-600">{threshold} / 100</span>
           </div>
           <input
-            type="range" min={0} max={100} value={accessThreshold}
-            onChange={e => setAccessThreshold(Number(e.target.value))}
-            className="w-full mt-2"
+            type="range" min={0} max={100} value={threshold}
+            onChange={e => setThreshold(Number(e.target.value))}
+            className="w-full"
           />
+        </div>
+
+        <div className="text-xs text-gray-400 pt-1">
+          Source: backend <code>TrustPolicyConfig</code> via <code>GET/PATCH /api/trust-policy/active</code>.
+          Changes take effect on the next trust score calculation.
         </div>
       </div>
     </div>

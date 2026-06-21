@@ -459,6 +459,41 @@ class DeviceTrustScoreOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+## Trust Policy Config schemas
+
+class TrustPolicyConfigOut(BaseModel):
+    """Active trust scoring policy returned by GET /api/trust-policy/active."""
+    device_weight:             float
+    context_weight:            float
+    identity_weight:           float
+    default_threshold:         int
+    allowed_start_hour:        int
+    allowed_end_hour:          int
+    max_failed_attempts:       int
+    block_outside_hours:       bool
+    require_known_device:      bool
+    unknown_device_penalty:    int
+    suspicious_ip_penalty:     int
+    updated_at:                Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TrustPolicyConfigUpdate(BaseModel):
+    """Fields that can be updated via PATCH /api/trust-policy/active."""
+    device_weight:             Optional[float] = None
+    context_weight:            Optional[float] = None
+    identity_weight:           Optional[float] = None
+    default_threshold:         Optional[int]   = None
+    allowed_start_hour:        Optional[int]   = None
+    allowed_end_hour:          Optional[int]   = None
+    max_failed_attempts:       Optional[int]   = None
+    block_outside_hours:       Optional[bool]  = None
+    require_known_device:      Optional[bool]  = None
+    unknown_device_penalty:    Optional[int]   = None
+    suspicious_ip_penalty:     Optional[int]   = None
+
+
 ## Protected Resource schemas
 
 _ALLOWED_ACCESS_MODES = {"auto", "http_proxy", "wireguard_tunnel"}

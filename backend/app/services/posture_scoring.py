@@ -94,25 +94,23 @@ def score_posture(report: Any) -> tuple[float, list[dict]]:
     return posture_score, breakdown
 
 
-def score_context() -> float:
-    """Return context score (placeholder = 100 until policy/network layer is added)."""
-    return 100.0
-
-
-def score_identity() -> float:
-    """Return identity score (placeholder = 100 until identity service is added)."""
-    return 100.0
-
-
 def weighted_total(
     posture_score: float,
     context_score: float,
     identity_score: float = 100.0,
+    *,
+    device_weight: float = _DEVICE_WEIGHT,
+    context_weight: float = _CONTEXT_WEIGHT,
+    identity_weight: float = _IDENTITY_WEIGHT,
 ) -> float:
-    """Combine device posture (40%), context (30%), identity (30%) into final trust score."""
+    """Combine three module scores into the final trust score.
+
+    Weights default to the module-level constants but can be overridden
+    by passing values read from the TrustPolicyConfig DB row.
+    """
     return round(
-        posture_score  * _DEVICE_WEIGHT
-        + context_score  * _CONTEXT_WEIGHT
-        + identity_score * _IDENTITY_WEIGHT,
+        posture_score   * device_weight
+        + context_score  * context_weight
+        + identity_score * identity_weight,
         1,
     )

@@ -62,15 +62,22 @@ class ContextSignals:
         self.gateway_online = gateway_online
 
 
-def score_context_signals(signals: ContextSignals) -> tuple[float, list[dict]]:
+def score_context_signals(
+    signals: ContextSignals,
+    *,
+    allowed_start_hour: int = _ALLOWED_START_HOUR,
+    allowed_end_hour: int = _ALLOWED_END_HOUR,
+    max_failed_attempts: int = _MAX_FAILED_ATTEMPTS,
+) -> tuple[float, list[dict]]:
     """Compute context score (0–100) and per-signal breakdown.
 
     Returns (context_score, breakdown).
+    Optional keyword overrides let the posture endpoint pass DB-stored rules.
     """
     # Derive boolean results
     hour = signals.request_time.hour
-    normal_time = _ALLOWED_START_HOUR <= hour < _ALLOWED_END_HOUR
-    no_failed_login = signals.failed_attempt_count < _MAX_FAILED_ATTEMPTS
+    normal_time = allowed_start_hour <= hour < allowed_end_hour
+    no_failed_login = signals.failed_attempt_count < max_failed_attempts
 
     normal_ip: bool
     if signals.source_ip and signals.blocked_ips:
@@ -107,9 +114,29 @@ def score_context_signals(signals: ContextSignals) -> tuple[float, list[dict]]:
     return round(earned, 1), breakdown
 
 
-def score_context_default() -> float:
-    """Default context score when no access-attempt signals are available."""
-    # Use current time for time check; assume all other signals pass
-    signals = ContextSignals()
-    score, _ = score_context_signals(signals)
-    return score
+def score_context_default(
+    *,
+    source_ip: Optional[str] = None,
+    known_device: Optional[bool] = None,
+    failed_attempt_count: int = 0,
+    allowed_start_hour: int = _ALLOWED_START_HOUR,
+    allowed_end_hour: int = _ALLOWED_END_HOUR,
+    max_failed_attempts: int = _MAX_FAILED_ATTEMPTS,
+) -> tuple[float, list[dict]]:
+    """Compute context score from basic posture-report context.
+
+    Called during posture check (not a full resource-access attempt).
+    Uses current time + caller-supplied signals; other signals default to pass.
+    Returns (score, breakdown).
+    """
+    signals = ContextSignals(
+        known_device=known_device,
+        source_ip=source_ip,
+        failed_attempt_count=failed_attempt_count,
+    )
+    return score_context_signals(
+        signals,
+        allowed_start_hour=allowed_start_hour,
+        allowed_end_hour=allowed_end_hour,
+        max_failed_attempts=max_failed_attempts,
+    )
