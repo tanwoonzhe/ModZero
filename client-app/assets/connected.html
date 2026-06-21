@@ -272,6 +272,16 @@
         <div id="decisionBanner" style="display:none"></div>
         <h2 style="margin-top:14px">Posture Check Breakdown</h2>
         <div class="factor-grid" id="factorGrid"></div>
+
+        <div id="contextBreakdownSection" style="display:none">
+          <h2 style="margin-top:14px">Context Signals Breakdown</h2>
+          <div class="factor-grid" id="contextGrid"></div>
+        </div>
+
+        <div id="identityBreakdownSection" style="display:none">
+          <h2 style="margin-top:14px">Identity Signals Breakdown</h2>
+          <div class="factor-grid" id="identityGrid"></div>
+        </div>
       </div>
     </section>
 
@@ -429,6 +439,24 @@
       intune_compliant:        "Intune Compliant",
     };
 
+    const CONTEXT_LABELS = {
+      known_device:              "Known Device",
+      normal_access_time:        "Normal Access Time",
+      no_repeated_failed_login:  "No Failed Logins",
+      normal_ip:                 "Normal IP Address",
+      known_user_device_pair:    "Known User-Device Pair",
+      resource_pattern_normal:   "Resource Pattern Normal",
+      gateway_online:            "Gateway Online",
+    };
+
+    const IDENTITY_LABELS = {
+      account_enabled:   "Account Enabled",
+      role_valid:        "Role Valid",
+      recent_login:      "Recent Login",
+      low_failed_logins: "Low Failed Logins",
+      not_locked:        "Account Not Locked",
+    };
+
     function renderFactors(breakdown) {
       const grid = $("factorGrid");
       grid.innerHTML = "";
@@ -444,13 +472,28 @@
       });
     }
 
+    function renderSignalGrid(breakdown, grid, labelMap) {
+      grid.innerHTML = "";
+      (breakdown || []).forEach((b) => {
+        const cls = b.passed == null ? "unknown" : b.passed ? "pass" : "fail";
+        const label = b.passed == null ? "Unknown" : b.passed ? "Pass ✓" : "Fail ✗";
+        const name = labelMap[b.signal] || b.signal.replace(/_/g, " ");
+        const note = b.note ? ` <span style="color:var(--muted)">(${b.note})</span>` : "";
+        const el = document.createElement("div");
+        el.className = "factor " + cls;
+        el.innerHTML = `<div class="f-name">${name}${note}</div><div class="f-val">${label}</div><div class="f-pts">+${b.points ?? 0} / ${b.max ?? "—"} pts</div>`;
+        grid.appendChild(el);
+      });
+    }
+
     function showScore(r) {
-      const DEFAULT_THRESHOLD = 60;
       $("postureResultPanel").style.display = "";
-      const posture = Math.round(r.posture_score ?? 0);
-      const total   = Math.round(r.total_score ?? 0);
-      const context = Math.round(r.context_score ?? 100);
+      const posture  = Math.round(r.posture_score ?? 0);
+      const total    = Math.round(r.total_score   ?? 0);
+      const context  = Math.round(r.context_score  ?? 100);
       const identity = Math.round(r.identity_score ?? 100);
+      const threshold = r.threshold ?? 60;
+      const weights  = r.weights || { device: 0.4, context: 0.3, identity: 0.3 };
       $("resPosture").textContent = posture;
       $("resPostureBar").style.width = Math.max(0, Math.min(100, posture)) + "%";
       $("resTotal").textContent = total;
@@ -460,17 +503,30 @@
 
       // Decision banner
       const banner = $("decisionBanner");
-      const allow = total >= DEFAULT_THRESHOLD;
+      const allow = total >= threshold;
+      const dw = Math.round((weights.device   ?? 0.4) * 100);
+      const cw = Math.round((weights.context  ?? 0.3) * 100);
+      const iw = Math.round((weights.identity ?? 0.3) * 100);
       banner.style.display = "";
       banner.className = "decision-banner " + (allow ? "allow" : "deny");
       banner.innerHTML = `
         <div class="big-d">${allow ? "✓ ALLOW" : "✕ DENY"}</div>
         <div class="detail">
-          Score <strong>${total}</strong> ${allow ? "≥" : "<"} threshold <strong>${DEFAULT_THRESHOLD}</strong>
-          &nbsp;·&nbsp; Posture contributes <strong>${Math.round(posture * 0.4)}/40</strong>
+          Score <strong>${total}</strong> ${allow ? "≥" : "<"} threshold <strong>${threshold}</strong>
+          &nbsp;·&nbsp;
+          Device <strong>${Math.round(posture * weights.device)}</strong> (${dw}%)
+          + Context <strong>${Math.round(context * (weights.context ?? 0.3))}</strong> (${cw}%)
+          + Identity <strong>${Math.round(identity * (weights.identity ?? 0.3))}</strong> (${iw}%)
         </div>
       `;
+
       renderFactors(r.breakdown);
+      renderSignalGrid(r.context_breakdown  || [], $("contextGrid"),  CONTEXT_LABELS);
+      renderSignalGrid(r.identity_breakdown || [], $("identityGrid"), IDENTITY_LABELS);
+
+      // Show/hide breakdown sections
+      $("contextBreakdownSection").style.display  = (r.context_breakdown  && r.context_breakdown.length)  ? "" : "none";
+      $("identityBreakdownSection").style.display = (r.identity_breakdown && r.identity_breakdown.length) ? "" : "none";
     }
 
     $("btnRunCheck").addEventListener("click", async () => {

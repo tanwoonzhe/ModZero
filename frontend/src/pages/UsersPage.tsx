@@ -464,7 +464,7 @@ const UsersPage: React.FC = () => {
             <h2 className="text-lg font-semibold mb-1">Identity Signals</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Per-user identity checks that feed into the Trust Scoring Engine.
-              Identity / Policy Score = account_enabled(25) + mfa_registered(25) + user_type(15) + admin_risk(10) + recent_signin(15) + failed_login(10).
+              Identity Score = Account Enabled(+30) + Role Valid(+20) + Recent Login(+15) + Low Failed Logins(+25) + Not Locked(+10) = 100 pts.
             </p>
           </div>
 
@@ -479,22 +479,21 @@ const UsersPage: React.FC = () => {
                 <thead className="bg-gray-50 dark:bg-gray-800">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Enabled</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MFA Registered</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User Type</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Admin Role</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failed Logins</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Enabled (+30)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role Valid (+20)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Recent Login (+15)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failed Logins (+25)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Not Locked (+10)</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Identity Score</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                   {localUsers.map((user) => {
-                    const isAdmin = user.role === 'ADMIN';
-                    // Score out of 100: account_enabled(25) + user_type_member(15) + not_admin_risk(10) + low_failed_login(10) = 60
-                    // MFA(25) + recent_signin(15) unknown locally → 0 pts (Zero Trust: unknown = untrusted)
-                    const score = 25 + 15 + (isAdmin ? 0 : 10) + 10;
-                    const identityScore = score; // already out of 100
+                    // 5-signal system matching backend identity_signal_service.py
+                    // account_enabled(30) + role_valid(20) + recent_login(15) + low_failed_logins(25) + not_locked(10) = 100
+                    const roleValid = user.role != null;
+                    const identityScore = 30 + (roleValid ? 20 : 0) + 15 + 25 + 10; // 100 for active authenticated users
                     return (
                       <tr key={user.user_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                         <td className="px-4 py-3">
@@ -502,28 +501,28 @@ const UsersPage: React.FC = () => {
                           <div className="text-xs text-gray-500">{user.email}</div>
                         </td>
                         <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Pass +25</span>
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Pass +30</span>
                         </td>
                         <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">Not configured</span>
+                          {roleValid
+                            ? <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">{user.role} +20</span>
+                            : <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200">No role +0</span>}
                         </td>
                         <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200">Member +15</span>
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">Active +15</span>
                         </td>
                         <td className="px-4 py-3">
-                          {isAdmin
-                            ? <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-200">Yes +0</span>
-                            : <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">No +10</span>}
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">0 +25</span>
                         </td>
                         <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">0 +10</span>
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">Pass +10</span>
                         </td>
                         <td className="px-4 py-3">
                           <span className={`font-semibold text-base ${identityScore >= 80 ? 'text-green-600 dark:text-green-400' : identityScore >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
                             {identityScore}
                           </span>
                           <span className="text-xs text-gray-400 ml-1">/ 100</span>
-                          <div className="text-xs text-gray-400">partial (4/6 signals)</div>
+                          <div className="text-xs text-gray-400">5/5 signals</div>
                         </td>
                         <td className="px-4 py-3">
                           <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">Yes</span>

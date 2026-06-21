@@ -53,7 +53,7 @@ class ContextSignals:
         gateway_online: Optional[bool] = None,
     ) -> None:
         self.known_device = known_device
-        self.request_time = request_time or datetime.datetime.utcnow()
+        self.request_time = request_time or datetime.datetime.now()
         self.failed_attempt_count = failed_attempt_count
         self.source_ip = source_ip
         self.blocked_ips: list[str] = blocked_ips or []
