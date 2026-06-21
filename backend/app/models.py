@@ -20,6 +20,7 @@ from sqlalchemy import (
     Enum as PgEnum,
     Float,
     ForeignKey,
+    Integer,
     Numeric,
     String,
     Text,
@@ -978,6 +979,54 @@ class PillarWeightConfiguration(Base):
 
     def __repr__(self) -> str:
         return f"<PillarWeightConfiguration {self.pillar}={self.weight} user={self.user_id}>"
+
+
+# ============================================================================
+# TRUST POLICY CONFIG  (singleton — one row, always config_id = 1)
+# ============================================================================
+
+class TrustPolicyConfig(Base):
+    """Global trust scoring weights and context rules.
+
+    Single-row table (config_id = 1).  All scoring endpoints read from here
+    so that the Web Dashboard, Client App, and Access Decisions share the
+    same engine configuration.
+
+    Weights must sum to 1.0.  The API validates this before saving.
+    """
+    __tablename__ = "trust_policy_config"
+
+    config_id: int = Column(Integer, primary_key=True, default=1)
+
+    # ── Module weights (must sum to 1.0) ─────────────────────────────────────
+    device_weight:   float = Column(Float, nullable=False, default=0.40)
+    context_weight:  float = Column(Float, nullable=False, default=0.30)
+    identity_weight: float = Column(Float, nullable=False, default=0.30)
+
+    # ── Default access threshold ──────────────────────────────────────────────
+    default_threshold: int = Column(Integer, nullable=False, default=60)
+
+    # ── Context Analysis rules ────────────────────────────────────────────────
+    allowed_start_hour:       int  = Column(Integer, nullable=False, default=8)
+    allowed_end_hour:         int  = Column(Integer, nullable=False, default=20)
+    max_failed_attempts:      int  = Column(Integer, nullable=False, default=5)
+    block_outside_hours:      bool = Column(Boolean, nullable=False, default=False)
+    require_known_device:     bool = Column(Boolean, nullable=False, default=True)
+    unknown_device_penalty:   int  = Column(Integer, nullable=False, default=20)
+    suspicious_ip_penalty:    int  = Column(Integer, nullable=False, default=15)
+
+    updated_at: datetime = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<TrustPolicyConfig device={self.device_weight} "
+            f"ctx={self.context_weight} id={self.identity_weight} "
+            f"threshold={self.default_threshold}>"
+        )
 
 
 # ============================================================================
