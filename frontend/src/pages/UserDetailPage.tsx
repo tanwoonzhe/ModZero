@@ -27,6 +27,7 @@ interface UserDetails {
     device_id: string | null;
     total_score: number | null;
     reason: string | null;
+    resource_name: string | null;
   }[];
   stats: {
     total_devices: number;
@@ -255,7 +256,7 @@ const UserDetailPage: React.FC = () => {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Result</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trust Score</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason</th>
                   </tr>
@@ -278,8 +279,8 @@ const UserDetailPage: React.FC = () => {
                           {attempt.result.toUpperCase()}
                         </span>
                       </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 font-mono">
-                        {attempt.ip_address || '-'}
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                        {attempt.resource_name || '-'}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         {attempt.total_score !== null ? (

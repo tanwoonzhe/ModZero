@@ -830,6 +830,69 @@ class AzureGraphService:
             logger.error(f"Error getting high privilege apps without owners: {str(e)}")
             return []
 
+    def get_user_auth_methods(self, user_id: str) -> Dict[str, Any]:
+        """Get authentication methods for a specific user.
+
+        Returns:
+            Dict with mfa_registered (bool) and mfa_methods (list of human-readable strings)
+        """
+        access_token = self._get_access_token()
+        if not access_token:
+            return {"mfa_registered": None, "mfa_methods": [], "error": "No access token"}
+
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json',
+        }
+
+        MFA_TYPES = {
+            "microsoftAuthenticatorAuthenticationMethod": "Authenticator App",
+            "phoneAuthenticationMethod": "Phone/SMS",
+            "fido2AuthenticationMethod": "FIDO2 Key",
+            "windowsHelloForBusinessAuthenticationMethod": "Windows Hello",
+            "softwareOathAuthenticationMethod": "TOTP App",
+            "emailAuthenticationMethod": "Email OTP",
+        }
+
+        url = f"{self.graph_endpoint}/users/{user_id}/authentication/methods"
+
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 403:
+                return {"mfa_registered": None, "mfa_methods": [], "error": "Insufficient permissions"}
+            response.raise_for_status()
+
+            methods = response.json().get("value", [])
+            mfa_methods = []
+            for m in methods:
+                odata_type = m.get("@odata.type", "")
+                method_key = odata_type.split(".")[-1] if odata_type else ""
+                if method_key in MFA_TYPES:
+                    mfa_methods.append(MFA_TYPES[method_key])
+
+            return {
+                "mfa_registered": len(mfa_methods) > 0,
+                "mfa_methods": mfa_methods,
+            }
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching auth methods for user {user_id}: {str(e)}")
+            return {"mfa_registered": None, "mfa_methods": [], "error": str(e)}
+
+    def get_users_mfa_status(self, user_ids: List[str]) -> Dict[str, Any]:
+        """Get MFA status for multiple users. Returns a dict keyed by user_id."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        results = {}
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_id = {executor.submit(self.get_user_auth_methods, uid): uid for uid in user_ids}
+            for future in as_completed(future_to_id):
+                uid = future_to_id[future]
+                try:
+                    results[uid] = future.result()
+                except Exception as e:
+                    results[uid] = {"mfa_registered": None, "mfa_methods": [], "error": str(e)}
+        return results
+
 
 # Global instance
 azure_service = AzureGraphService()

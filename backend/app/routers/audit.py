@@ -10,16 +10,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..deps import get_current_admin, get_db
 from ..models import (
-    AccessDecision,
+    AccessRequestLog,
     Connector,
-    RemoteNetwork,
-    Resource,
-    TrustSnapshot,
+    ProtectedResource,
     User,
 )
 
@@ -70,17 +67,17 @@ def list_access_decisions(
     db: Session = Depends(get_db),
     _admin: User = Depends(get_current_admin),
 ) -> list[AccessDecisionOut]:
-    qry = db.query(AccessDecision)
+    qry = db.query(AccessRequestLog)
     if resource_id:
-        qry = qry.filter(AccessDecision.resource_id == resource_id)
+        qry = qry.filter(AccessRequestLog.resource_id == resource_id)
     if user_id:
-        qry = qry.filter(AccessDecision.user_id == user_id)
+        qry = qry.filter(AccessRequestLog.user_id == user_id)
     if decision:
-        qry = qry.filter(AccessDecision.decision == decision)
+        qry = qry.filter(AccessRequestLog.decision == decision)
     if q:
         like = f"%{q}%"
-        qry = qry.filter(or_(AccessDecision.reason.ilike(like), AccessDecision.path.ilike(like)))
-    rows = qry.order_by(AccessDecision.ts.desc()).offset(offset).limit(limit).all()
+        qry = qry.filter(AccessRequestLog.reason.ilike(like))
+    rows = qry.order_by(AccessRequestLog.timestamp.desc()).offset(offset).limit(limit).all()
 
     uids = {r.user_id for r in rows if r.user_id}
     rids = {r.resource_id for r in rows if r.resource_id}
@@ -89,38 +86,20 @@ def list_access_decisions(
         for u in db.query(User).filter(User.user_id.in_(uids)).all()
     } if uids else {}
     resources: dict = {
-        res.resource_id: (res.name, res.slug)
-        for res in db.query(Resource).filter(Resource.resource_id.in_(rids)).all()
+        res.id: (res.name, res.public_name, res.minimum_trust_score)
+        for res in db.query(ProtectedResource).filter(ProtectedResource.id.in_(rids)).all()
     } if rids else {}
-
-    pairs = {(r.user_id, r.resource_id) for r in rows if r.user_id and r.resource_id}
-    snaps: dict = {}
-    if pairs:
-        u_set = {p[0] for p in pairs}
-        r_set = {p[1] for p in pairs}
-        for s in (
-            db.query(TrustSnapshot)
-            .filter(TrustSnapshot.user_id.in_(u_set), TrustSnapshot.resource_id.in_(r_set))
-            .order_by(TrustSnapshot.computed_at.desc())
-            .all()
-        ):
-            key = (s.user_id, s.resource_id)
-            if key not in snaps:
-                snaps[key] = (int(s.score), int(s.threshold))
 
     out: list[AccessDecisionOut] = []
     for r in rows:
         decision_str = getattr(r.decision, "value", str(r.decision))
-        rname, rslug = (None, None)
+        rname, rslug, rthreshold = (None, None, None)
         if r.resource_id and r.resource_id in resources:
-            rname, rslug = resources[r.resource_id]
-        score = threshold = None
-        if r.user_id and r.resource_id:
-            snap = snaps.get((r.user_id, r.resource_id))
-            if snap:
-                score, threshold = snap
+            rname, rslug, rthreshold = resources[r.resource_id]
+        score = int(r.trust_score) if r.trust_score is not None else None
+        threshold = int(rthreshold) if rthreshold is not None else None
         out.append(AccessDecisionOut(
-            decision_id=str(r.decision_id),
+            decision_id=str(r.id),
             user_id=str(r.user_id) if r.user_id else None,
             user_name=users.get(r.user_id) if r.user_id else None,
             device_id=str(r.device_id) if r.device_id else None,
@@ -132,8 +111,8 @@ def list_access_decisions(
             reason=r.reason,
             score=score,
             threshold=threshold,
-            path=r.path,
-            ts=r.ts,
+            path=None,
+            ts=r.timestamp,
         ))
 
     if category:
@@ -182,50 +161,32 @@ def status_overview(
 ) -> StatusOverviewOut:
     now = datetime.now(timezone.utc)
 
-    res_rows = (
-        db.query(Resource, RemoteNetwork)
-        .outerjoin(RemoteNetwork, Resource.network_id == RemoteNetwork.network_id)
-        .all()
-    )
+    res_rows = db.query(ProtectedResource).all()
     latest_decision: dict = {}
     for d in (
-        db.query(AccessDecision)
-        .filter(AccessDecision.resource_id.isnot(None))
-        .order_by(AccessDecision.ts.desc())
+        db.query(AccessRequestLog)
+        .filter(AccessRequestLog.resource_id.isnot(None))
+        .order_by(AccessRequestLog.timestamp.desc())
         .limit(500)
         .all()
     ):
         if d.resource_id not in latest_decision:
             latest_decision[d.resource_id] = d
     latest_snap: dict = {}
-    for s in (
-        db.query(TrustSnapshot)
-        .order_by(TrustSnapshot.computed_at.desc())
-        .limit(500)
-        .all()
-    ):
-        if s.resource_id not in latest_snap:
-            latest_snap[s.resource_id] = s
-
     resources_out: list[ResourceStatusOut] = []
-    for res, net in res_rows:
-        target = None
-        if res.target_host:
-            target = f"{res.target_scheme or 'http'}://{res.target_host}"
-            if res.target_port and int(res.target_port) not in (80, 443):
-                target += f":{int(res.target_port)}"
-        d = latest_decision.get(res.resource_id)
-        s = latest_snap.get(res.resource_id)
+    for res in res_rows:
+        d = latest_decision.get(res.id)
+        s = latest_snap.get(res.id)
         resources_out.append(ResourceStatusOut(
-            resource_id=str(res.resource_id),
+            resource_id=str(res.id),
             name=res.name,
-            slug=res.slug,
-            network_name=net.name if net else None,
-            target=target,
-            last_decision=getattr(d.decision, "value", str(d.decision)) if d else None,
-            last_decision_at=d.ts if d else None,
-            last_score=int(s.score) if s else None,
-            last_threshold=int(s.threshold) if s else None,
+            slug=res.public_name,
+            network_name=None,
+            target=res.internal_address,
+            last_decision=str(d.decision) if d else None,
+            last_decision_at=d.timestamp if d else None,
+            last_score=int(d.trust_score) if d and d.trust_score is not None else None,
+            last_threshold=int(res.minimum_trust_score) if res.minimum_trust_score is not None else None,
         ))
 
     cutoff = now - timedelta(seconds=90)
@@ -244,34 +205,33 @@ def status_overview(
         ))
 
     last_allow = (
-        db.query(AccessDecision)
-        .filter(AccessDecision.decision == "allow")
-        .order_by(AccessDecision.ts.desc())
+        db.query(AccessRequestLog)
+        .filter(AccessRequestLog.decision == "allow")
+        .order_by(AccessRequestLog.timestamp.desc())
         .first()
     )
     last_deny = (
-        db.query(AccessDecision)
-        .filter(AccessDecision.decision == "deny")
-        .order_by(AccessDecision.ts.desc())
+        db.query(AccessRequestLog)
+        .filter(AccessRequestLog.decision == "deny")
+        .order_by(AccessRequestLog.timestamp.desc())
         .first()
     )
 
     since = now - timedelta(hours=24)
     counts = {"allow": 0, "deny": 0, "rate_limit": 0, "proxy_failure": 0, "bootstrap_deny": 0}
     for d in (
-        db.query(AccessDecision)
-        .filter(AccessDecision.ts >= since)
+        db.query(AccessRequestLog)
+        .filter(AccessRequestLog.timestamp >= since)
         .all()
     ):
-        decision_str = getattr(d.decision, "value", str(d.decision))
-        cat = _categorize(decision_str, d.reason)
+        cat = _categorize(str(d.decision), d.reason)
         counts[cat] = counts.get(cat, 0) + 1
 
     return StatusOverviewOut(
         generated_at=now,
         resources=resources_out,
         connectors=connectors_out,
-        last_allow_at=last_allow.ts if last_allow else None,
-        last_deny_at=last_deny.ts if last_deny else None,
+        last_allow_at=last_allow.timestamp if last_allow else None,
+        last_deny_at=last_deny.timestamp if last_deny else None,
         decisions_last_24h=counts,
     )

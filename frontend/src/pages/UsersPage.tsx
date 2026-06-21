@@ -16,6 +16,10 @@ const UsersPage: React.FC = () => {
   const [roleModal, setRoleModal] = useState<{ userId: string; current: string } | null>(null);
   const [roleUpdating, setRoleUpdating] = useState(false);
   const [userDetails, setUserDetails] = useState<Record<string, { lastLogin: string | null; avgScore: number | null }>>({});
+  const [mfaStatus, setMfaStatus] = useState<Record<string, { mfa_registered: boolean | null; mfa_methods: string[] }>>({});
+  const [mfaLoading, setMfaLoading] = useState(false);
+  const [deleteModal, setDeleteModal] = useState<{ userId: string; username: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     fetchLocalUsers();
@@ -95,11 +99,51 @@ const UsersPage: React.FC = () => {
     }
   };
 
+  const fetchMfaStatus = async () => {
+    setMfaLoading(true);
+    try {
+      const res = await api.get<{ total: number; users: { azure_id: string; mfa_registered: boolean | null; mfa_methods: string[] }[] }>("/azure/users/mfa-status");
+      const map: Record<string, { mfa_registered: boolean | null; mfa_methods: string[] }> = {};
+      for (const u of res.data.users) {
+        map[u.azure_id] = { mfa_registered: u.mfa_registered, mfa_methods: u.mfa_methods };
+      }
+      setMfaStatus(map);
+    } catch (error) {
+      console.error("Error fetching MFA status:", error);
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  const deleteUser = async (userId: string) => {
+    setDeleting(true);
+    try {
+      await api.delete(`/users/${userId}`);
+      setDeleteModal(null);
+      fetchLocalUsers();
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      alert("Failed to delete user.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const syncUserToLocal = async (azureUserId: string) => {
     setSyncing(azureUserId);
     try {
       const res = await api.post(`/azure/sync-user/${azureUserId}`);
-      alert(`User ${res.data.action}: ${res.data.message}`);
+      if (res.data.action === 'created' && res.data.temp_password) {
+        alert(
+          `User synced successfully!\n\n` +
+          `Username: ${res.data.azure_data?.display_name || azureUserId}\n` +
+          `Temporary Password: ${res.data.temp_password}\n\n` +
+          `Please share this password with the user. They can use it to log in to the ModZero Client App.\n` +
+          `The password will not be shown again.`
+        );
+      } else {
+        alert(`User ${res.data.action}: ${res.data.message}`);
+      }
       // Refresh local users to show the newly synced user
       fetchLocalUsers();
     } catch (error) {
@@ -173,6 +217,33 @@ const UsersPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {deleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 w-80">
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Delete User</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              Are you sure you want to permanently delete <strong>{deleteModal.username}</strong>? This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => deleteUser(deleteModal.userId)}
+                disabled={deleting}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+              <button
+                onClick={() => setDeleteModal(null)}
+                disabled={deleting}
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">User Management</h1>
         
@@ -199,7 +270,7 @@ const UsersPage: React.FC = () => {
             Entra Users
           </button>
           <button
-            onClick={() => { setActiveTab('identity'); if (azureUsers.length === 0 && connectionStatus?.success) fetchAzureUsers(); }}
+            onClick={() => { setActiveTab('identity'); if (azureUsers.length === 0 && connectionStatus?.success) fetchAzureUsers(); if (Object.keys(mfaStatus).length === 0) fetchMfaStatus(); }}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
               activeTab === 'identity'
                 ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
@@ -221,7 +292,7 @@ const UsersPage: React.FC = () => {
             </div>
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
               <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">Admins</p>
-              <p className="text-2xl font-bold text-red-600">{localUsers.filter(u => u.role === 'ADMIN').length}</p>
+              <p className="text-2xl font-bold text-red-600">{localUsers.filter(u => u.role === 'admin').length}</p>
             </div>
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
               <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">With Devices</p>
@@ -311,10 +382,16 @@ const UsersPage: React.FC = () => {
                               Role
                             </button>
                             <button
-                              onClick={() => navigate(`/access-logs?user=${user.username}`)}
+                              onClick={() => navigate(`/logs?user=${user.username}`)}
                               className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                             >
                               Logs
+                            </button>
+                            <button
+                              onClick={() => setDeleteModal({ userId: user.user_id, username: user.username })}
+                              className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                            >
+                              Delete
                             </button>
                           </div>
                         </td>
@@ -479,11 +556,11 @@ const UsersPage: React.FC = () => {
                 <thead className="bg-gray-50 dark:bg-gray-800">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Enabled (+30)</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role Valid (+20)</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Recent Login (+15)</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failed Logins (+25)</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Not Locked (+10)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Enabled <span className="text-gray-400 normal-case font-normal">(+30)</span></th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role Valid <span className="text-gray-400 normal-case font-normal">(+20)</span></th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Recent Login <span className="text-gray-400 normal-case font-normal">(+15)</span></th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failed Logins <span className="text-gray-400 normal-case font-normal">(+25)</span></th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Not Locked <span className="text-gray-400 normal-case font-normal">(+10)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Identity Score</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust</th>
                   </tr>
@@ -493,7 +570,9 @@ const UsersPage: React.FC = () => {
                     // 5-signal system matching backend identity_signal_service.py
                     // account_enabled(30) + role_valid(20) + recent_login(15) + low_failed_logins(25) + not_locked(10) = 100
                     const roleValid = user.role != null;
-                    const identityScore = 30 + (roleValid ? 20 : 0) + 15 + 25 + 10; // 100 for active authenticated users
+                    const hasRecentLogin = !!userDetails[user.user_id]?.lastLogin;
+                    const recentLoginScore = hasRecentLogin ? 15 : 0;
+                    const identityScore = 30 + (roleValid ? 20 : 0) + recentLoginScore + 25 + 10;
                     return (
                       <tr key={user.user_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                         <td className="px-4 py-3">
@@ -509,10 +588,12 @@ const UsersPage: React.FC = () => {
                             : <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200">No role +0</span>}
                         </td>
                         <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">Active +15</span>
+                          {hasRecentLogin
+                            ? <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Pass +15</span>
+                            : <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">No login +0</span>}
                         </td>
                         <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">0 +25</span>
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">Clean +25</span>
                         </td>
                         <td className="px-4 py-3">
                           <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">Pass +10</span>
@@ -522,7 +603,6 @@ const UsersPage: React.FC = () => {
                             {identityScore}
                           </span>
                           <span className="text-xs text-gray-400 ml-1">/ 100</span>
-                          <div className="text-xs text-gray-400">5/5 signals</div>
                         </td>
                         <td className="px-4 py-3">
                           <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">Yes</span>
@@ -538,104 +618,7 @@ const UsersPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Azure/Entra users signals */}
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">Entra</span>
-              Entra / Azure AD Identity Signals
-              {!connectionStatus?.success && (
-                <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400">Graph Not Configured</span>
-              )}
-            </h3>
-            {!connectionStatus?.success ? (
-              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-5 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                <p>Microsoft Graph is not configured. ModZero is currently using local user identity signals only.</p>
-                <p className="mt-1 text-xs">Configure AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET to enable Entra identity signals.</p>
-                <button onClick={testAzureConnection} className="mt-3 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 text-sm">
-                  Test Connection
-                </button>
-              </div>
-            ) : azureUsers.length === 0 ? (
-              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-5 py-6 text-center text-sm text-gray-500">
-                <p>Connected to Microsoft Graph.</p>
-                <button onClick={fetchAzureUsers} disabled={azureLoading} className="mt-3 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm disabled:opacity-50">
-                  {azureLoading ? 'Loading...' : 'Load Entra Users'}
-                </button>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
-                  <thead className="bg-gray-50 dark:bg-gray-800">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Enabled</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MFA Registered</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User Type</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Admin Role</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failed Logins</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Identity Score</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                    {azureUsers.map((user) => {
-                      const isGuest = user.userType === 'Guest';
-                      const isEnabled = user.account_enabled;
-                      // Score out of 100: account_enabled(25) + user_type_member(15) = 40
-                      // MFA(25) + admin_risk(10) + recent_signin(15) + failed_login(10) unknown → 0 pts each
-                      const score = (isEnabled ? 25 : 0) + (isGuest ? 0 : 15);
-                      const identityScore = score; // already out of 100
-                      return (
-                        <tr key={user.azure_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                          <td className="px-4 py-3">
-                            <div className="font-medium text-gray-900 dark:text-white">{user.display_name}</div>
-                            <div className="text-xs text-gray-500">{user.email}</div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${isEnabled ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'}`}>
-                              {isEnabled ? 'Pass +25' : 'Fail +0'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300" title="Requires UserAuthenticationMethod.Read.All permission">
-                              Not configured
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${isGuest ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200'}`}>
-                              {isGuest ? 'Guest +0' : 'Member +15'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300" title="Requires RoleManagement.Read.All permission">
-                              Not configured
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">Not configured</span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`font-semibold text-base ${identityScore >= 80 ? 'text-green-600 dark:text-green-400' : identityScore >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
-                              {identityScore}
-                            </span>
-                            <span className="text-xs text-gray-400 ml-1">/ 100</span>
-                            <div className="text-xs text-gray-400">partial (2/6 signals)</div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">Yes</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                <p className="mt-3 text-xs text-gray-400 dark:text-gray-500 px-2">
-                  MFA registration, admin role, and sign-in signals require additional Microsoft Graph permissions (UserAuthenticationMethod.Read.All, RoleManagement.Read.All, AuditLog.Read.All).
-                  Unknown signals score 0 — Zero Trust principle: unknown = untrusted.
-                </p>
-              </div>
-            )}
-          </div>
+          {/* Entra/Azure AD Identity Signals — hidden: Entra users only affect trust when linked to a local ModZero login user */}
         </div>
       )}
     </div>

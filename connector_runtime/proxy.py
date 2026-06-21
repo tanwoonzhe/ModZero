@@ -21,6 +21,7 @@ Safety:
 import datetime as _dt
 import html as html_mod
 import secrets as _secrets
+import socketserver
 import threading
 from datetime import timezone as _tz
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -428,6 +429,11 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         info(f"[proxy] {self.command} {path_display} → {status}")
 
 
+class _ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    """HTTPServer that handles each request in its own thread."""
+    daemon_threads = True
+
+
 class ProxyServer:
     """Threaded HTTP proxy. Call start(client) then stop()."""
 
@@ -439,7 +445,7 @@ class ProxyServer:
 
     def start(self, client: ControllerClient) -> None:
         _handler_state["client"] = client
-        self._httpd = HTTPServer((self.host, self.port), _ProxyHandler)
+        self._httpd = _ThreadingHTTPServer((self.host, self.port), _ProxyHandler)
         self._thread = threading.Thread(
             target=self._httpd.serve_forever, daemon=True,
             name="modzero-proxy",

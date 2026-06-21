@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..deps import get_db, get_current_user, get_current_admin
 from ..settings import get_settings
+from ..security import verify_password, get_password_hash
 from ..services.identity_signal_service import (
     score_identity_signals,
     signals_from_local_user,
@@ -19,6 +20,11 @@ from ..services.identity_signal_service import (
 class UserPatch(BaseModel):
     role: Optional[models.RoleEnum] = None
 
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
 router = APIRouter()
 
 
@@ -28,6 +34,22 @@ def get_current_user_profile(
 ) -> Any:
     """Return the current authenticated user's profile."""
     return current_user
+
+
+@router.post("/me/change-password", status_code=200)
+def change_my_password(
+    payload: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> Any:
+    """Change the current user's password."""
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if len(payload.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+    current_user.password_hash = get_password_hash(payload.new_password)
+    db.commit()
+    return {"message": "Password changed successfully"}
 
 
 @router.get("/", response_model=List[schemas.UserOut])
@@ -64,12 +86,31 @@ def get_user_details(
     
     # Get user's devices
     devices = db.query(models.Device).filter(models.Device.user_id == user_id).all()
-    
-    # Get user's recent access attempts (last 20)
-    attempts = db.query(models.AccessAttempt).filter(
-        models.AccessAttempt.user_id == user_id
-    ).order_by(models.AccessAttempt.timestamp.desc()).limit(20).all()
-    
+
+    # Get user's recent access log entries (last 20) from AccessRequestLog
+    # (AccessAttempt is a legacy empty table; real ZTNA decisions land in access_request_logs)
+    import uuid as _uuid
+    try:
+        uid = _uuid.UUID(user_id)
+    except ValueError:
+        uid = None
+    logs = []
+    if uid:
+        logs = (
+            db.query(models.AccessRequestLog)
+            .filter(models.AccessRequestLog.user_id == uid)
+            .order_by(models.AccessRequestLog.timestamp.desc())
+            .limit(20)
+            .all()
+        )
+
+    # Build resource name lookup
+    resource_ids = list({l.resource_id for l in logs if l.resource_id})
+    resources = {}
+    if resource_ids:
+        for r in db.query(models.ProtectedResource).filter(models.ProtectedResource.id.in_(resource_ids)).all():
+            resources[r.id] = r.name
+
     return {
         "user": {
             "user_id": str(user.user_id),
@@ -91,21 +132,22 @@ def get_user_details(
         ],
         "recent_attempts": [
             {
-                "attempt_id": str(a.attempt_id),
-                "timestamp": a.timestamp.isoformat() if a.timestamp else None,
-                "result": a.result.value if hasattr(a.result, 'value') else a.result,
-                "ip_address": a.ip_address,
-                "device_id": str(a.device_id) if a.device_id else None,
-                "total_score": float(a.total_score) if a.total_score else None,
-                "reason": a.reason,
+                "attempt_id": str(l.id),
+                "timestamp": l.timestamp.isoformat() if l.timestamp else None,
+                "result": l.decision,
+                "ip_address": None,
+                "device_id": str(l.device_id) if l.device_id else None,
+                "total_score": float(l.trust_score) if l.trust_score is not None else None,
+                "reason": l.reason,
+                "resource_name": resources.get(l.resource_id, str(l.resource_id) if l.resource_id else None),
             }
-            for a in attempts
+            for l in logs
         ],
         "stats": {
             "total_devices": len(devices),
-            "total_attempts": len(attempts),
-            "allowed_attempts": sum(1 for a in attempts if a.result and (a.result == models.AttemptResultEnum.ALLOW or a.result == 'allow')),
-            "denied_attempts": sum(1 for a in attempts if a.result and (a.result == models.AttemptResultEnum.DENY or a.result == 'deny')),
+            "total_attempts": len(logs),
+            "allowed_attempts": sum(1 for l in logs if l.decision == 'allow'),
+            "denied_attempts": sum(1 for l in logs if l.decision == 'deny'),
         }
     }
 

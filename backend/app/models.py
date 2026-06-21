@@ -510,7 +510,7 @@ class TrustSnapshot(Base):
         UUID(as_uuid=True), ForeignKey("device_enrollments.device_id"), nullable=True, index=True
     )
     resource_id: uuid.UUID = Column(
-        UUID(as_uuid=True), ForeignKey("resources.resource_id"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("protected_resources.id"), nullable=True, index=True
     )
     score: int = Column(Numeric, nullable=False)
     threshold: int = Column(Numeric, nullable=False)
@@ -546,7 +546,7 @@ class AccessDecision(Base):
         UUID(as_uuid=True), ForeignKey("device_enrollments.device_id"), nullable=True, index=True
     )
     resource_id: uuid.UUID = Column(
-        UUID(as_uuid=True), ForeignKey("resources.resource_id"), nullable=True, index=True
+        UUID(as_uuid=True), ForeignKey("protected_resources.id"), nullable=True, index=True
     )
     decision: AccessDecisionEnum = Column(
         PgEnum(AccessDecisionEnum, name="access_decision_enum"),
