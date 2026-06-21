@@ -85,9 +85,18 @@ function detectDiskEncryption(): boolean | null {
 
 function detectScreenLock(): boolean | null {
   if (process.platform !== "win32") return null;
-  // Check if a password-protected screensaver is configured
+  // Method 1: password-protected screensaver (classic Windows)
+  // Method 2: power-plan console lock timeout (modern Windows 10/11 sleep → sign-in)
+  //   GUID 0E796B57-F373-C527-FFE5-3FFFFF4437E1 = console lock display-off timeout
+  //   Any non-zero AC value means the device locks after that many seconds of idle
   const out = runPs(
-    "$a = (Get-ItemProperty 'HKCU:\\Control Panel\\Desktop' -ErrorAction SilentlyContinue).ScreenSaveActive; $s = (Get-ItemProperty 'HKCU:\\Control Panel\\Desktop' -ErrorAction SilentlyContinue).ScreenSaverIsSecure; if ($a -eq '1' -and $s -eq '1') { 'true' } else { 'false' }",
+    "$ss = ((Get-ItemProperty 'HKCU:\\Control Panel\\Desktop' -EA SilentlyContinue).ScreenSaveActive -eq '1') -and " +
+    "((Get-ItemProperty 'HKCU:\\Control Panel\\Desktop' -EA SilentlyContinue).ScreenSaverIsSecure -eq '1'); " +
+    "$q = (powercfg /query SCHEME_CURRENT 2>$null | Out-String); " +
+    "$cl = ($q -match '0E796B57-F373-C527-FFE5-3FFFFF4437E1') -and " +
+    "($q -match 'Current AC Power Setting Index: 0x(?!00000000)[0-9a-fA-F]{8}'); " +
+    "if ($ss -or $cl) { 'true' } else { 'false' }",
+    12000,
   );
   if (out == null) return null;
   return out.trim().toLowerCase() === "true";

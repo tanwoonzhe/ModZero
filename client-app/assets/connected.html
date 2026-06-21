@@ -642,6 +642,12 @@
     tick();
     setInterval(tick, 5000);
 
+    // Auto-run device check on startup so scores appear without manual click
+    setTimeout(() => {
+      const btn = $("btnRunCheck");
+      if (btn && !btn.disabled) btn.click();
+    }, 1500);
+
     // ── Demo Mode ──
     const DEMO_KEY = "modzero_demo_mode";
     const DEMO_OVERRIDE_KEY = "modzero_demo_signals";

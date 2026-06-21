@@ -53,7 +53,8 @@ if (process.platform === "win32" && !isDev) {
       ["-NoProfile", "-Command", `Start-Process -FilePath '${process.execPath}' -Verb RunAs`],
       { detached: true, stdio: "ignore" },
     ).unref();
-    app.quit();
+    // Delay quit so the UAC prompt has time to register before this process exits
+    setTimeout(() => app.quit(), 800);
   }
 }
 
