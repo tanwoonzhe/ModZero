@@ -20,7 +20,9 @@ export interface PostureSignals {
   firewall_enabled: boolean | null;
   antivirus_enabled: boolean | null;
   disk_encryption_enabled: boolean | null;
+  screen_lock_enabled: boolean | null;
   os_supported: boolean | null;
+  client_healthy: boolean | null;
   intune_compliant: boolean | null;
 }
 
@@ -66,13 +68,38 @@ function detectAntivirus(): boolean | null {
 
 function detectDiskEncryption(): boolean | null {
   if (process.platform !== "win32") return null;
-  // BitLocker status — requires admin for full detail, but the protection-status
-  // field is readable in most cases. "1" means protection on.
-  const out = runPs(
+  // Primary: BitLocker PowerShell module (requires admin)
+  const ps = runPs(
     "(Get-BitLockerVolume -MountPoint $env:SystemDrive -ErrorAction SilentlyContinue).ProtectionStatus",
   );
-  if (out == null || out === "") return null;
-  return out.trim() === "1" || out.trim().toLowerCase() === "on";
+  if (ps != null && ps !== "") {
+    return ps.trim() === "1" || ps.trim().toLowerCase() === "on";
+  }
+  // Fallback: manage-bde (available on all Windows editions with admin)
+  const bde = runPs(
+    "$r = (manage-bde -status $env:SystemDrive 2>$null); if ($r -match 'Protection.*On') { 'true' } else { 'false' }",
+  );
+  if (bde != null && bde !== "") return bde.trim().toLowerCase() === "true";
+  return null;
+}
+
+function detectScreenLock(): boolean | null {
+  if (process.platform !== "win32") return null;
+  // Check if a password-protected screensaver is configured
+  const out = runPs(
+    "$a = (Get-ItemProperty 'HKCU:\\Control Panel\\Desktop' -ErrorAction SilentlyContinue).ScreenSaveActive; $s = (Get-ItemProperty 'HKCU:\\Control Panel\\Desktop' -ErrorAction SilentlyContinue).ScreenSaverIsSecure; if ($a -eq '1' -and $s -eq '1') { 'true' } else { 'false' }",
+  );
+  if (out == null) return null;
+  return out.trim().toLowerCase() === "true";
+}
+
+function detectClientHealthy(): boolean {
+  // Client is healthy if it's running and its persisted fingerprint is intact
+  try {
+    return fs.existsSync(fingerprintPath());
+  } catch {
+    return true;
+  }
 }
 
 function detectOsSupported(): boolean {
@@ -123,7 +150,9 @@ export function collectPosture(): PostureSignals {
     firewall_enabled: detectFirewall(),
     antivirus_enabled: detectAntivirus(),
     disk_encryption_enabled: detectDiskEncryption(),
+    screen_lock_enabled: detectScreenLock(),
     os_supported: detectOsSupported(),
+    client_healthy: detectClientHealthy(),
     // No Intune signal from the client; backend may overlay Graph data later.
     intune_compliant: null,
   };

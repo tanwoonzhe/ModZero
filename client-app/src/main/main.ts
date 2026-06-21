@@ -27,6 +27,7 @@ import {
   shell,
   Tray,
 } from "electron";
+import { execSync, spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -35,6 +36,26 @@ import { collectPosture, getOrCreateFingerprint } from "./posture";
 import { detectTunnel } from "./tunnel-detect";
 
 const isDev = !app.isPackaged;
+
+// ── Require administrator on Windows ────────────────────────────────────
+// Posture checks (firewall, BitLocker, screen lock) need elevated access.
+// If not already admin, re-launch via UAC and exit.
+if (process.platform === "win32" && !isDev) {
+  let isAdmin = false;
+  try {
+    execSync("net session", { stdio: "ignore" });
+    isAdmin = true;
+  } catch { /* not admin */ }
+
+  if (!isAdmin) {
+    spawn(
+      "powershell",
+      ["-NoProfile", "-Command", `Start-Process -FilePath '${process.execPath}' -Verb RunAs`],
+      { detached: true, stdio: "ignore" },
+    ).unref();
+    app.quit();
+  }
+}
 
 // ── Types ───────────────────────────────────────────────────────────────
 type ConnectMode = "login" | "token";
