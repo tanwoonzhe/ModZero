@@ -1,17 +1,12 @@
-"""Identity Signal Module — 6-signal scoring.
+"""Identity Signal Module — 5-signal scoring (aligned with web Identity Signals tab).
 
-Scores a user's identity based on:
-
-  Account enabled                 25
-  MFA registered                  25
-  User type member (not guest)    15
-  Not admin risk (no high-risk admin role) 10
-  Recent successful sign-in       15
-  Low failed login count          10
-  Total                          100
-
-In GRAPH_MODE=mock, signals are derived from local User record.
-In GRAPH_MODE=real, signals would come from Microsoft Graph.
+Signals and weights:
+  Account Enabled          30  — user account is active and can authenticate
+  Role Valid               20  — user has a recognised role (employee / admin)
+  Recent Login             15  — user has authenticated recently
+  Low Failed Login Count   25  — no excessive failed login attempts
+  Not Locked               10  — account is not locked out
+  Total                   100
 """
 from __future__ import annotations
 
@@ -24,13 +19,14 @@ if TYPE_CHECKING:
 # ── Signal weights ─────────────────────────────────────────────────────────────
 
 _SIGNALS = [
-    {"signal": "account_enabled",        "max": 25},
-    {"signal": "mfa_registered",         "max": 25},
-    {"signal": "user_type_member",       "max": 15},
-    {"signal": "not_admin_risk",         "max": 10},
-    {"signal": "recent_successful_signin","max": 15},
-    {"signal": "low_failed_login_count", "max": 10},
+    {"signal": "account_enabled",      "max": 30},
+    {"signal": "role_valid",           "max": 20},
+    {"signal": "recent_login",         "max": 15},
+    {"signal": "low_failed_logins",    "max": 25},
+    {"signal": "not_locked",           "max": 10},
 ]
+
+TOTAL_MAX = sum(s["max"] for s in _SIGNALS)  # 100
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -42,49 +38,43 @@ class IdentitySignals:
         self,
         *,
         account_enabled: bool = True,
-        mfa_registered: Optional[bool] = None,
-        user_type: str = "member",
-        is_admin: bool = False,
-        recent_successful_signin: Optional[bool] = None,
+        role_valid: bool = True,
+        recent_login: Optional[bool] = None,
         failed_login_count: int = 0,
+        not_locked: bool = True,
         source: str = "local",
     ) -> None:
         self.account_enabled = account_enabled
-        self.mfa_registered = mfa_registered
-        self.user_type = user_type.lower()
-        self.is_admin = is_admin
-        self.recent_successful_signin = recent_successful_signin
+        self.role_valid = role_valid
+        self.recent_login = recent_login
         self.failed_login_count = failed_login_count
+        self.not_locked = not_locked
         self.source = source
 
 
 def score_identity_signals(signals: IdentitySignals) -> tuple[float, list[dict]]:
     """Compute identity score (0–100) and per-signal breakdown.
 
-    Unknown signals (None) are excluded from denominator so partial data
-    doesn't unfairly penalize. A note is added to the breakdown entry.
+    Unknown signals (None) are treated as 0 per Zero Trust principle:
+    unknown = untrusted = no points.
     """
-    user_type_member = signals.user_type in ("member", "employee", "admin")
-    not_admin_risk   = not signals.is_admin  # Admin role = marginal risk signal
-    low_failed_login = signals.failed_login_count < 5
+    low_failed = signals.failed_login_count < 5
 
     signal_values: dict[str, Optional[bool]] = {
-        "account_enabled":         signals.account_enabled,
-        "mfa_registered":          signals.mfa_registered,
-        "user_type_member":        user_type_member,
-        "not_admin_risk":          not_admin_risk,
-        "recent_successful_signin":signals.recent_successful_signin,
-        "low_failed_login_count":  low_failed_login,
+        "account_enabled":   signals.account_enabled,
+        "role_valid":        signals.role_valid,
+        "recent_login":      signals.recent_login,
+        "low_failed_logins": low_failed,
+        "not_locked":        signals.not_locked,
     }
 
     earned = 0
-    available_max = 0
     breakdown: list[dict] = []
 
     for item in _SIGNALS:
-        sig    = item["signal"]
+        sig     = item["signal"]
         max_pts = item["max"]
-        val    = signal_values.get(sig)
+        val     = signal_values.get(sig)
 
         if val is None:
             breakdown.append({
@@ -93,14 +83,14 @@ def score_identity_signals(signals: IdentitySignals) -> tuple[float, list[dict]]
                 "points": 0,
                 "max":    max_pts,
                 "module": "identity",
-                "note":   "not configured",
+                "source": signals.source,
+                "note":   "unknown",
             })
             continue
 
         passed = bool(val)
         pts    = max_pts if passed else 0
         earned += pts
-        available_max += max_pts
         breakdown.append({
             "signal": sig,
             "passed": passed,
@@ -110,39 +100,30 @@ def score_identity_signals(signals: IdentitySignals) -> tuple[float, list[dict]]
             "source": signals.source,
         })
 
-    # Use fixed 100-pt denominator: unknown signals score 0, not excluded.
-    # Zero Trust principle: unknown MFA / sign-in = not trusted.
-    TOTAL_MAX = sum(item["max"] for item in _SIGNALS)  # 100
     identity_score = round((earned / TOTAL_MAX) * 100, 1)
-
     return identity_score, breakdown
 
 
 def signals_from_local_user(user: "User") -> IdentitySignals:
-    """Build IdentitySignals from a local User record (minimal data)."""
-    from ..models import RoleEnum
-    is_admin = getattr(user, "role", None) == RoleEnum.ADMIN
+    """Build IdentitySignals from a local ModZero User record.
+
+    The user is currently authenticated (they sent a valid JWT), so:
+    - account_enabled = True  (can authenticate → account is active)
+    - role_valid      = True  (has a recognized role in the system)
+    - recent_login    = True  (just sent an authenticated request)
+    - failed_logins   = 0     (no per-user failure tracking in local DB)
+    - not_locked      = True  (no account-lock field in local User model)
+    """
     return IdentitySignals(
-        account_enabled=True,       # local users are considered active
-        mfa_registered=None,        # unknown without Graph
-        user_type="member",
-        is_admin=is_admin,
-        recent_successful_signin=None,  # unknown without Graph
+        account_enabled=True,
+        role_valid=getattr(user, "role", None) is not None,
+        recent_login=True,
         failed_login_count=0,
+        not_locked=True,
         source="local",
     )
 
 
 def get_mock_identity_signals(user: "User") -> IdentitySignals:
-    """Return mock identity signals for demo purposes (GRAPH_MODE=mock)."""
-    from ..models import RoleEnum
-    is_admin = getattr(user, "role", None) == RoleEnum.ADMIN
-    return IdentitySignals(
-        account_enabled=True,
-        mfa_registered=True,      # mock: assume MFA configured
-        user_type="member",
-        is_admin=is_admin,
-        recent_successful_signin=True,
-        failed_login_count=0,
-        source="mock",
-    )
+    """Mock identity signals — same as local since GRAPH_MODE=mock means no Graph."""
+    return signals_from_local_user(user)
