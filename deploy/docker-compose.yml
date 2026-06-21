@@ -44,6 +44,9 @@ services:
       # Set to http://<connector-host>:8443 for cloud/LAN deployment.
       # Leave empty to fall back to modzero://access/{session_id} (Electron deep-link).
       DEMO_CONNECTOR_PROXY_BASE_URL: ${DEMO_CONNECTOR_PROXY_BASE_URL:-}
+      # Server timezone — context score hour check uses this (datetime.now() reads TZ).
+      # Set TIMEZONE in .env to override (e.g. TIMEZONE=UTC).
+      TZ: ${TIMEZONE:-Asia/Kuala_Lumpur}
     depends_on:
       db:
         condition: service_healthy

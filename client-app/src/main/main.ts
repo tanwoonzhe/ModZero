@@ -520,7 +520,7 @@ function authedRequest(
 ipcMain.handle("modzero:collect-posture", () => collectPosture());
 
 ipcMain.handle("modzero:run-device-check", async () => {
-  const signals = collectPosture();
+  const signals = await collectPosture();
   const result = await authedRequest("POST", "/api/posture/report", signals);
   return { signals, result };
 });
