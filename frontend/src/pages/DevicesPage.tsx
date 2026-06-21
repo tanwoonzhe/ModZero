@@ -76,7 +76,7 @@ const DevicesPage: React.FC = () => {
   const [data, setData] = useState<DeviceAssessmentData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<"inventory" | "posture" | "contribution" | "intune">("inventory");
+  const [activeTab, setActiveTab] = useState<"inventory" | "posture" | "intune">("inventory");
 
   // Per-device real posture data: deviceId → posture report from /devices/{id}/posture
   const [localDevices, setLocalDevices] = useState<any[]>([]);
@@ -85,10 +85,6 @@ const DevicesPage: React.FC = () => {
 
   // Live tests state
   const [selectedLiveTest, setSelectedLiveTest] = useState<LiveTestResult | null>(null);
-
-  // Trust score state for Device Trust Contribution tab
-  const [trustScore, setTrustScore] = useState<any>(null);
-  const [trustScoreLoading, setTrustScoreLoading] = useState(false);
 
   // Azure connection state for Intune Data tab
   const [azureStatus, setAzureStatus] = useState<{ success: boolean; message: string } | null>(null);
@@ -138,10 +134,6 @@ const DevicesPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (activeTab === "contribution" && !trustScore && !trustScoreLoading) {
-      setTrustScoreLoading(true);
-      api.get("/trust/latest").then(r => setTrustScore(r.data)).catch(() => setTrustScore(null)).finally(() => setTrustScoreLoading(false));
-    }
     if (activeTab === "intune" && !azureStatus && !azureStatusLoading) {
       setAzureStatusLoading(true);
       api.get("/azure/test-connection").then(r => setAzureStatus(r.data)).catch(() => setAzureStatus({ success: false, message: "Connection failed" })).finally(() => setAzureStatusLoading(false));
@@ -226,16 +218,6 @@ const DevicesPage: React.FC = () => {
             Device Posture Checks
           </button>
           <button
-            onClick={() => setActiveTab("contribution")}
-            className={`py-2 px-4 border-b-2 font-medium text-sm ${
-              activeTab === "contribution"
-                ? "border-indigo-600 text-indigo-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            Device Trust Contribution
-          </button>
-          <button
             onClick={() => setActiveTab("intune")}
             className={`py-2 px-4 border-b-2 font-medium text-sm ${
               activeTab === "intune"
@@ -313,93 +295,7 @@ const DevicesPage: React.FC = () => {
         </div>
       )}
 
-      {activeTab === "contribution" ? (
-        /* Device Trust Contribution Tab */
-        <div className="space-y-4">
-          {trustScoreLoading ? (
-            <div className="flex items-center justify-center h-48">
-              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
-            </div>
-          ) : trustScore ? (
-            <>
-              {/* Score overview */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 text-center">
-                  <div className="text-sm text-gray-500 mb-1">Device Posture Score</div>
-                  <div className={`text-4xl font-bold ${trustScore.posture_score >= 80 ? 'text-green-600' : trustScore.posture_score >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
-                    {Math.round(trustScore.posture_score)}
-                  </div>
-                  <div className="text-xs text-gray-400 mt-1">/ 100</div>
-                </div>
-                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 text-center">
-                  <div className="text-sm text-gray-500 mb-1">Final Trust Contribution</div>
-                  <div className={`text-4xl font-bold ${trustScore.total_score >= 80 ? 'text-green-600' : trustScore.total_score >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
-                    {Math.round(trustScore.posture_score * 0.4 * 10) / 10}
-                  </div>
-                  <div className="text-xs text-gray-400 mt-1">/ 40 (device posture × 40% weight)</div>
-                </div>
-                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 text-center">
-                  <div className="text-sm text-gray-500 mb-1">Total Trust Score</div>
-                  <div className={`text-4xl font-bold ${trustScore.total_score >= 80 ? 'text-green-600' : trustScore.total_score >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
-                    {Math.round(trustScore.total_score)}
-                  </div>
-                  <div className="text-xs text-gray-400 mt-1">/ 100 (all modules)</div>
-                </div>
-              </div>
-              {/* Breakdown */}
-              <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
-                  <h3 className="font-semibold text-gray-900 dark:text-white">Posture Score Breakdown</h3>
-                  <p className="text-xs text-gray-500 mt-0.5">Per-check contribution to Device Posture Score</p>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 dark:bg-gray-900/40">
-                      <tr className="text-left text-xs uppercase text-gray-500">
-                        <th className="px-5 py-3">Check</th>
-                        <th className="px-5 py-3">Status</th>
-                        <th className="px-5 py-3">Points</th>
-                        <th className="px-5 py-3">Max</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(trustScore.breakdown || []).map((item: any, idx: number) => (
-                        <tr key={idx} className="border-t border-gray-100 dark:border-gray-700">
-                          <td className="px-5 py-3 font-medium text-gray-900 dark:text-white capitalize">
-                            {item.factor?.replace(/_/g, ' ') || item.signal?.replace(/_/g, ' ')}
-                          </td>
-                          <td className="px-5 py-3">
-                            <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${item.passed ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>
-                              {item.passed ? 'Pass' : 'Fail'}
-                            </span>
-                          </td>
-                          <td className="px-5 py-3 font-mono text-gray-900 dark:text-white">
-                            +{item.points || 0}
-                          </td>
-                          <td className="px-5 py-3 font-mono text-gray-400">
-                            {item.max || item.points || 20}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="px-5 py-3 bg-gray-50 dark:bg-gray-900/20 border-t border-gray-100 dark:border-gray-700">
-                  <p className="text-xs text-gray-400">
-                    Device Posture Score contributes 40% to the Final Trust Score. Context Analysis contributes 30%, Identity / Policy contributes 30%.
-                  </p>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-10 text-center">
-              <FaShieldAlt className="mx-auto text-gray-300 dark:text-gray-600 mb-3" size={36} />
-              <p className="text-gray-500 dark:text-gray-400 text-sm">No trust score data available.</p>
-              <p className="text-xs text-gray-400 mt-1">Register a device and submit a posture report from the ModZero Client App to see the breakdown.</p>
-            </div>
-          )}
-        </div>
-      ) : activeTab === "posture" ? (
+      {activeTab === "posture" ? (
         /* Device Posture Checks Tab */
         <>
           {/* Summary from Intune */}
