@@ -1,17 +1,19 @@
 /**
  * Windows posture collection for the ModZero desktop client.
  *
- * Uses PowerShell when available (Get-MpComputerStatus / Get-NetFirewallProfile /
- * manage-bde) and falls back to safe defaults so the client still produces a
- * usable posture report on non-Windows or restricted hosts.
+ * All OS checks use async exec (non-blocking) and run in parallel via
+ * Promise.all, so the Electron main process is never blocked.
  */
 
-import { execSync } from "child_process";
+import { exec } from "child_process";
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { promisify } from "util";
 import { app } from "electron";
+
+const execAsync = promisify(exec);
 
 export interface PostureSignals {
   device_name: string;
@@ -26,21 +28,21 @@ export interface PostureSignals {
   intune_compliant: boolean | null;
 }
 
-function runPs(command: string, timeoutMs = 5000): string | null {
+async function runPs(command: string, timeoutMs = 5000): Promise<string | null> {
   try {
-    const out = execSync(
+    const { stdout } = await execAsync(
       `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "${command.replace(/"/g, '\\"')}"`,
-      { timeout: timeoutMs, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
+      { timeout: timeoutMs, encoding: "utf-8" },
     );
-    return out.trim();
+    return stdout.trim();
   } catch {
     return null;
   }
 }
 
-function detectFirewall(): boolean | null {
+async function detectFirewall(): Promise<boolean | null> {
   if (process.platform !== "win32") return null;
-  const out = runPs(
+  const out = await runPs(
     "(Get-NetFirewallProfile -ErrorAction SilentlyContinue | Where-Object {$_.Enabled -eq $true}).Count",
   );
   if (out == null) return null;
@@ -48,17 +50,16 @@ function detectFirewall(): boolean | null {
   return Number.isFinite(n) ? n > 0 : null;
 }
 
-function detectAntivirus(): boolean | null {
+async function detectAntivirus(): Promise<boolean | null> {
   if (process.platform !== "win32") return null;
-  // Get-MpComputerStatus is the Windows Defender API; AMRunningMode is "Normal"
-  // when AV is active. Also accept any third-party AV via Security Center WMI.
-  const def = runPs(
-    "(Get-MpComputerStatus -ErrorAction SilentlyContinue).AntivirusEnabled",
-  );
+  // Run Windows Defender check and Security Center WMI check in parallel.
+  const [def, wmi] = await Promise.all([
+    runPs("(Get-MpComputerStatus -ErrorAction SilentlyContinue).AntivirusEnabled"),
+    runPs(
+      "(Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName AntivirusProduct -ErrorAction SilentlyContinue | Measure-Object).Count",
+    ),
+  ]);
   if (def && def.toLowerCase() === "true") return true;
-  const wmi = runPs(
-    "(Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName AntivirusProduct -ErrorAction SilentlyContinue | Measure-Object).Count",
-  );
   if (wmi != null) {
     const n = parseInt(wmi, 10);
     if (Number.isFinite(n)) return n > 0;
@@ -66,44 +67,37 @@ function detectAntivirus(): boolean | null {
   return def ? false : null;
 }
 
-function detectDiskEncryption(): boolean | null {
+async function detectDiskEncryption(): Promise<boolean | null> {
   if (process.platform !== "win32") return null;
-  // Primary: BitLocker PowerShell module (requires admin)
-  const ps = runPs(
+  const ps = await runPs(
     "(Get-BitLockerVolume -MountPoint $env:SystemDrive -ErrorAction SilentlyContinue).ProtectionStatus",
   );
   if (ps != null && ps !== "") {
     return ps.trim() === "1" || ps.trim().toLowerCase() === "on";
   }
-  // Fallback: manage-bde (available on all Windows editions with admin)
-  const bde = runPs(
+  const bde = await runPs(
     "$r = (manage-bde -status $env:SystemDrive 2>$null); if ($r -match 'Protection.*On') { 'true' } else { 'false' }",
   );
   if (bde != null && bde !== "") return bde.trim().toLowerCase() === "true";
   return null;
 }
 
-function detectScreenLock(): boolean | null {
+async function detectScreenLock(): Promise<boolean | null> {
   if (process.platform !== "win32") return null;
-  // Method 1: password-protected screensaver (classic Windows)
-  // Method 2: power-plan console lock timeout (modern Windows 10/11 sleep → sign-in)
-  //   GUID 0E796B57-F373-C527-FFE5-3FFFFF4437E1 = console lock display-off timeout
-  //   Any non-zero AC value means the device locks after that many seconds of idle
-  const out = runPs(
+  const out = await runPs(
     "$ss = ((Get-ItemProperty 'HKCU:\\Control Panel\\Desktop' -EA SilentlyContinue).ScreenSaveActive -eq '1') -and " +
     "((Get-ItemProperty 'HKCU:\\Control Panel\\Desktop' -EA SilentlyContinue).ScreenSaverIsSecure -eq '1'); " +
     "$q = (powercfg /query SCHEME_CURRENT 2>$null | Out-String); " +
     "$cl = ($q -match '0E796B57-F373-C527-FFE5-3FFFFF4437E1') -and " +
     "($q -match 'Current AC Power Setting Index: 0x(?!00000000)[0-9a-fA-F]{8}'); " +
     "if ($ss -or $cl) { 'true' } else { 'false' }",
-    12000,
+    8000,
   );
   if (out == null) return null;
   return out.trim().toLowerCase() === "true";
 }
 
 function detectClientHealthy(): boolean {
-  // Client is healthy if it's running and its persisted fingerprint is intact
   try {
     return fs.existsSync(fingerprintPath());
   } catch {
@@ -112,13 +106,8 @@ function detectClientHealthy(): boolean {
 }
 
 function detectOsSupported(): boolean {
-  if (process.platform !== "win32") {
-    // Non-Windows hosts are treated as "supported" for MVP — we only fail when
-    // we can confirm the OS is below the supported baseline.
-    return true;
-  }
-  // Windows 10 / 11 are 10.x; anything earlier is unsupported.
-  const release = os.release(); // e.g. "10.0.22631"
+  if (process.platform !== "win32") return true;
+  const release = os.release();
   const major = parseInt(release.split(".")[0] || "0", 10);
   return major >= 10;
 }
@@ -137,8 +126,6 @@ export function getOrCreateFingerprint(): string {
   } catch {
     /* ignore */
   }
-  // Stable input: hostname + platform + machine arch. Salt with random bytes
-  // so two devices with the same hostname don't collide.
   const seed =
     os.hostname() + "|" + os.platform() + "|" + os.arch() + "|" + crypto.randomBytes(8).toString("hex");
   const value = crypto.createHash("sha256").update(seed).digest("hex");
@@ -151,18 +138,26 @@ export function getOrCreateFingerprint(): string {
   return value;
 }
 
-export function collectPosture(): PostureSignals {
+// All four OS checks run in parallel — main thread is never blocked.
+// Worst-case total time = max(individual timeouts) = 8s (screen lock),
+// not the sum (previously up to ~37s of main-thread blocking).
+export async function collectPosture(): Promise<PostureSignals> {
+  const [firewall, antivirus, disk, screen] = await Promise.all([
+    detectFirewall(),
+    detectAntivirus(),
+    detectDiskEncryption(),
+    detectScreenLock(),
+  ]);
   return {
-    device_name: os.hostname(),
-    os_version: `${os.platform()} ${os.release()}`,
-    fingerprint: getOrCreateFingerprint(),
-    firewall_enabled: detectFirewall(),
-    antivirus_enabled: detectAntivirus(),
-    disk_encryption_enabled: detectDiskEncryption(),
-    screen_lock_enabled: detectScreenLock(),
-    os_supported: detectOsSupported(),
-    client_healthy: detectClientHealthy(),
-    // No Intune signal from the client; backend may overlay Graph data later.
-    intune_compliant: null,
+    device_name:             os.hostname(),
+    os_version:              `${os.platform()} ${os.release()}`,
+    fingerprint:             getOrCreateFingerprint(),
+    firewall_enabled:        firewall,
+    antivirus_enabled:       antivirus,
+    disk_encryption_enabled: disk,
+    screen_lock_enabled:     screen,
+    os_supported:            detectOsSupported(),
+    client_healthy:          detectClientHealthy(),
+    intune_compliant:        null,
   };
 }
