@@ -9,8 +9,6 @@ import UsersPage from "./pages/UsersPage";
 import UserDetailPage from "./pages/UserDetailPage";
 import DevicesPage from "./pages/DevicesPage";
 import PoliciesPage from "./pages/PoliciesPage";
-import ResourcesPage from "./pages/ResourcesPage";
-import SessionsPage from "./pages/SessionsPage";
 import TemplatesPage from "./pages/TemplatesPage";
 import SettingsPage from "./pages/SettingsPage";
 import UserProfilePage from "./pages/UserProfilePage";
@@ -91,10 +89,10 @@ function App() {
             <Route path="/users/:userId" element={<UserDetailPage />} />
             <Route path="/policies" element={<PoliciesPage />} />
             <Route path="/zero-trust-policies" element={<ZeroTrustPoliciesPage />} />
-            <Route path="/resources" element={<ResourcesPage />} />
+            <Route path="/resources" element={<Navigate to="/connectors" replace />} />
             <Route path="/connectors" element={<ConnectorsPage />} />
             <Route path="/tunnels" element={<TunnelsPage />} />
-            <Route path="/sessions" element={<SessionsPage />} />
+            <Route path="/sessions" element={<Navigate to="/connectors" replace />} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/profile" element={<UserProfilePage />} />

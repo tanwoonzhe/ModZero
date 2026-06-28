@@ -76,7 +76,7 @@ const DevicesPage: React.FC = () => {
   const [data, setData] = useState<DeviceAssessmentData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<"inventory" | "posture" | "intune">("inventory");
+  const [activeTab, setActiveTab] = useState<"inventory" | "posture">("inventory");
 
   // Per-device real posture data: deviceId → posture report from /devices/{id}/posture
   const [localDevices, setLocalDevices] = useState<any[]>([]);
@@ -134,11 +134,11 @@ const DevicesPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (activeTab === "intune" && !azureStatus && !azureStatusLoading) {
+    if (!azureStatus && !azureStatusLoading) {
       setAzureStatusLoading(true);
       api.get("/azure/test-connection").then(r => setAzureStatus(r.data)).catch(() => setAzureStatus({ success: false, message: "Connection failed" })).finally(() => setAzureStatusLoading(false));
     }
-  }, [activeTab]);
+  }, []);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -216,16 +216,6 @@ const DevicesPage: React.FC = () => {
             }`}
           >
             Device Posture Checks
-          </button>
-          <button
-            onClick={() => setActiveTab("intune")}
-            className={`py-2 px-4 border-b-2 font-medium text-sm ${
-              activeTab === "intune"
-                ? "border-indigo-600 text-indigo-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            Intune Data
           </button>
         </nav>
       </div>
@@ -508,10 +498,11 @@ const DevicesPage: React.FC = () => {
             </div>
           )}
         </div>
-      ) : activeTab === "intune" ? (
-        /* Intune Data Tab */
-        <div className="space-y-4">
-          {/* Graph Status Card */}
+      ) : null}
+
+      {/* Intune Data — shown below posture checks on the posture tab, or always when on inventory */}
+      {(activeTab === "posture" || activeTab === "inventory") && (
+        <div className="space-y-4 mt-2">
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
             <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Microsoft Graph / Intune Status</h3>
             {azureStatusLoading ? (
@@ -539,7 +530,6 @@ const DevicesPage: React.FC = () => {
             )}
           </div>
 
-          {/* Intune Device Table (when connected) */}
           {azureStatus?.success && intuneDevices.length > 0 && (
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
@@ -577,7 +567,7 @@ const DevicesPage: React.FC = () => {
             </div>
           )}
         </div>
-      ) : null}
+      )}
     </div>
   );
 };

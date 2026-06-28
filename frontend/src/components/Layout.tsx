@@ -1,6 +1,6 @@
 import React, { ReactNode, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { FaTachometerAlt, FaHistory, FaUsers, FaGavel, FaNetworkWired, FaCog, FaSignOutAlt, FaUserCircle, FaBars, FaChevronLeft, FaPlug, FaDesktop, FaKey } from "react-icons/fa";
+import { FaTachometerAlt, FaHistory, FaUsers, FaGavel, FaCog, FaSignOutAlt, FaUserCircle, FaBars, FaChevronLeft, FaPlug, FaDesktop } from "react-icons/fa";
 import toast from "react-hot-toast";
 
 interface LayoutProps {
@@ -11,10 +11,8 @@ const navItems = [
   { path: "/", label: "Dashboard", icon: <FaTachometerAlt /> },
   { path: "/users", label: "Users", icon: <FaUsers /> },
   { path: "/devices", label: "Devices", icon: <FaDesktop /> },
-  { path: "/resources", label: "Resources", icon: <FaNetworkWired /> },
   { path: "/zero-trust-policies", label: "Trust Policies", icon: <FaGavel /> },
   { path: "/connectors", label: "Connectors", icon: <FaPlug /> },
-  { path: "/sessions", label: "Sessions", icon: <FaKey /> },
   { path: "/logs", label: "Access Logs", icon: <FaHistory /> },
   { path: "/settings", label: "Settings", icon: <FaCog /> },
 ];
