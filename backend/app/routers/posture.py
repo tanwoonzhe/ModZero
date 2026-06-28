@@ -20,6 +20,7 @@ from ..azure_service import azure_service
 from ..deps import get_db, get_current_user
 from ..models import Device, DeviceTrustScore, PostureReport, RoleEnum, TrustPolicyConfig, User
 from ..routers.trust_policy import get_or_create_policy
+from ..services.azure_signal_service import AzureSignals, collect_azure_signals
 from ..services.context_analysis_service import score_context_default
 from ..services.identity_signal_service import signals_from_local_user, get_mock_identity_signals, score_identity_signals
 from ..services.posture_scoring import score_posture, weighted_total
@@ -27,6 +28,17 @@ from ..settings import get_settings
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _maybe_collect_azure(policy: TrustPolicyConfig, user: User, device: Device) -> Optional[AzureSignals]:
+    """Resolve Entra signals when the admin has enabled the integration.
+
+    Returns None when Entra is disabled, so callers fall back to local-only
+    scoring unchanged. Never raises (collect_azure_signals is best-effort).
+    """
+    if not getattr(policy, "entra_enabled", False):
+        return None
+    return collect_azure_signals(user, device)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -156,8 +168,13 @@ def submit_posture_report(
     db.add(report)
     db.flush()
 
+    # ── Entra overlay (only when admin enabled it) ─────────────────────────────
+    azure = _maybe_collect_azure(policy, current_user, device)
+
     # ── 3. Device Posture Score ────────────────────────────────────────────────
-    posture_score, posture_breakdown = score_posture(report)
+    posture_score, posture_breakdown = score_posture(
+        report, azure.device_overrides() if azure else None,
+    )
 
     # ── 4. Context Score (using DB policy config + request metadata) ───────────
     is_known_device = device.device_id is not None  # device is registered
@@ -168,6 +185,8 @@ def submit_posture_report(
         allowed_start_hour=policy.allowed_start_hour,
         allowed_end_hour=policy.allowed_end_hour,
         max_failed_attempts=policy.max_failed_attempts,
+        include_azure=bool(azure),
+        **(azure.context_kwargs() if azure else {}),
     )
     ctx_source = "backend_realtime"
 
@@ -176,8 +195,11 @@ def submit_posture_report(
         id_signals = signals_from_local_user(current_user)
     else:
         id_signals = get_mock_identity_signals(current_user)
-    identity_score, id_breakdown = score_identity_signals(id_signals)
-    identity_source = f"local_{settings.graph_mode}"
+    if azure:
+        for k, v in azure.identity_kwargs().items():
+            setattr(id_signals, k, v)
+    identity_score, id_breakdown = score_identity_signals(id_signals, include_azure=bool(azure))
+    identity_source = "entra" if azure else f"local_{settings.graph_mode}"
 
     # ── 6. Weighted total using DB-stored weights ──────────────────────────────
     total = weighted_total(
@@ -252,6 +274,7 @@ def submit_posture_report(
         "context_source":   ctx_source,
         "identity_source":  identity_source,
         "graph_mode":       settings.graph_mode,
+        "entra_enabled":    azure is not None,
 
         # ── Report meta ─────────────────────────────────────────────────────
         "report_id":     str(report.report_id),
@@ -355,7 +378,11 @@ def client_posture_report(
     db.add(report)
     db.flush()
 
-    posture_score, posture_breakdown = score_posture(report)
+    azure = _maybe_collect_azure(policy, current_user, device)
+
+    posture_score, posture_breakdown = score_posture(
+        report, azure.device_overrides() if azure else None,
+    )
 
     ctx_score, ctx_breakdown = score_context_default(
         source_ip=source_ip,
@@ -364,13 +391,18 @@ def client_posture_report(
         allowed_start_hour=policy.allowed_start_hour,
         allowed_end_hour=policy.allowed_end_hour,
         max_failed_attempts=policy.max_failed_attempts,
+        include_azure=bool(azure),
+        **(azure.context_kwargs() if azure else {}),
     )
 
     if settings.graph_mode == "real":
         id_signals = signals_from_local_user(current_user)
     else:
         id_signals = get_mock_identity_signals(current_user)
-    identity_score, id_breakdown = score_identity_signals(id_signals)
+    if azure:
+        for k, v in azure.identity_kwargs().items():
+            setattr(id_signals, k, v)
+    identity_score, id_breakdown = score_identity_signals(id_signals, include_azure=bool(azure))
 
     total = weighted_total(
         posture_score, ctx_score, identity_score,
@@ -446,6 +478,7 @@ def client_posture_report(
         "status":    ps_status,
         "message":   message,
         "graph_mode": settings.graph_mode,
+        "entra_enabled": azure is not None,
         "intune_source":   intune_source,
         "identity_source": f"local_{settings.graph_mode}",
 

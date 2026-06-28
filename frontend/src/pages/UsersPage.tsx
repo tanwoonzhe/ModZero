@@ -20,6 +20,13 @@ const UsersPage: React.FC = () => {
   const [mfaLoading, setMfaLoading] = useState(false);
   const [deleteModal, setDeleteModal] = useState<{ userId: string; username: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [entraEnabled, setEntraEnabled] = useState(false);
+
+  useEffect(() => {
+    api.get("/trust-policy/active")
+      .then((r) => setEntraEnabled(!!r.data.entra_enabled))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetchLocalUsers();
@@ -547,7 +554,7 @@ const UsersPage: React.FC = () => {
 
           {/* Local auth explanation banner */}
           <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-sm text-amber-800 dark:text-amber-300">
-            <strong>Local Auth note:</strong> For local users, all five signals are structurally always-pass because holding a valid JWT already proves account_enabled, role_valid, recent_login, not_locked, and no failed-login tracking exists (assumed clean). These signals become meaningful when Azure AD (Entra) is integrated — a disabled Azure account or revoked role will actually fail and reduce the identity score.
+            <strong>Local Auth note:</strong> For local users, all five signals are structurally always-pass because holding a valid JWT already proves account_enabled, role_valid, recent_login, not_locked, and no failed-login tracking exists (assumed clean). These signals become meaningful when Azure AD (Entra) is integrated — a disabled Azure account is denied outright (hard gate), and the extra Entra signals below contribute to the identity score.
           </div>
 
           {/* Local users signals */}
@@ -618,6 +625,52 @@ const UsersPage: React.FC = () => {
                   {localUsers.length === 0 && !loading && (
                     <tr><td colSpan={8} className="px-4 py-6 text-center text-gray-400">No local users found.</td></tr>
                   )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Entra (Microsoft Graph) identity signals — gated by the single Settings toggle */}
+          <div className="mb-6">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">Entra</span>
+              Entra Identity Signals (Microsoft Graph)
+              <span className={`px-2 py-0.5 rounded text-xs ${entraEnabled ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
+                {entraEnabled ? 'Active' : 'Disabled'}
+              </span>
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+              {entraEnabled
+                ? 'These signals are evaluated live per user at scoring time and contribute to the Identity Score. Per-evaluation results appear in the client app Device Check breakdown.'
+                : 'Enable Entra in Settings → Azure AD Integration to activate these signals. While off they are N/A and never affect the score.'}
+            </p>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+                <thead className="bg-gray-50 dark:bg-gray-800">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Signal</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Max Points</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                  {[
+                    { name: 'MFA Registered', pts: 25 },
+                    { name: 'Identity Risk Low', pts: 20 },
+                    { name: 'Conditional Access OK', pts: 15 },
+                  ].map((s) => (
+                    <tr key={s.name} className={entraEnabled ? '' : 'opacity-60'}>
+                      <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{s.name}</td>
+                      <td className="px-4 py-3">+{s.pts}</td>
+                      <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">Microsoft Graph</span></td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${entraEnabled ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
+                          {entraEnabled ? 'Active' : 'N/A'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

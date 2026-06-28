@@ -30,6 +30,13 @@ _SIGNALS = [
     {"signal": "gateway_online",            "max":  5},
 ]
 
+# Optional Entra (Microsoft Graph sign-in) context signals. N/A (None) unless
+# resolved from the latest sign-in log → excluded from earned + denominator.
+_AZURE_SIGNALS = [
+    {"signal": "signin_risk_low",  "max": 15},
+    {"signal": "trusted_location", "max": 10},
+]
+
 _ALLOWED_START_HOUR = 8   # 08:00
 _ALLOWED_END_HOUR   = 20  # 20:00
 _MAX_FAILED_ATTEMPTS = 5
@@ -51,6 +58,9 @@ class ContextSignals:
         known_user_device_pair: Optional[bool] = None,
         resource_pattern_normal: Optional[bool] = None,
         gateway_online: Optional[bool] = None,
+        # Optional Entra sign-in context (None = not collected → N/A)
+        signin_risk_low: Optional[bool] = None,
+        trusted_location: Optional[bool] = None,
     ) -> None:
         self.known_device = known_device
         self.request_time = request_time or datetime.datetime.now()
@@ -60,6 +70,8 @@ class ContextSignals:
         self.known_user_device_pair = known_user_device_pair
         self.resource_pattern_normal = resource_pattern_normal
         self.gateway_online = gateway_online
+        self.signin_risk_low = signin_risk_low
+        self.trusted_location = trusted_location
 
 
 def score_context_signals(
@@ -68,6 +80,7 @@ def score_context_signals(
     allowed_start_hour: int = _ALLOWED_START_HOUR,
     allowed_end_hour: int = _ALLOWED_END_HOUR,
     max_failed_attempts: int = _MAX_FAILED_ATTEMPTS,
+    include_azure: bool = False,
 ) -> tuple[float, list[dict]]:
     """Compute context score (0–100) and per-signal breakdown.
 
@@ -95,14 +108,22 @@ def score_context_signals(
         "gateway_online":           signals.gateway_online if signals.gateway_online is not None else True,
     }
 
+    azure_values: dict[str, Optional[bool]] = {
+        "signin_risk_low":  signals.signin_risk_low,
+        "trusted_location": signals.trusted_location,
+    }
+
     earned = 0
+    denominator = 0
     breakdown: list[dict] = []
+
     for item in _SIGNALS:
         sig = item["signal"]
         max_pts = item["max"]
         passed = bool(signal_values.get(sig, True))
         pts = max_pts if passed else 0
         earned += pts
+        denominator += max_pts
         breakdown.append({
             "signal": sig,
             "passed": passed,
@@ -111,7 +132,31 @@ def score_context_signals(
             "module": "context_analysis",
         })
 
-    return round(earned, 1), breakdown
+    # Optional Entra context signals — only present when the overlay is active.
+    for item in (_AZURE_SIGNALS if include_azure else []):
+        sig = item["signal"]
+        max_pts = item["max"]
+        val = azure_values.get(sig)
+        if val is None:
+            breakdown.append({
+                "signal": sig, "passed": None, "points": 0, "max": max_pts,
+                "module": "context_analysis", "source": "entra", "note": "not collected",
+            })
+            continue
+        passed = bool(val)
+        pts = max_pts if passed else 0
+        earned += pts
+        denominator += max_pts
+        breakdown.append({
+            "signal": sig, "passed": passed, "points": pts, "max": max_pts,
+            "module": "context_analysis", "source": "entra",
+        })
+
+    # Percentage of applicable points → 0–100 regardless of how many Azure
+    # signals applied. Base signals always apply (default pass), so with no Azure
+    # signals this equals the previous raw-earned value.
+    context_score = round((earned / max(denominator, 1)) * 100, 1)
+    return context_score, breakdown
 
 
 def score_context_default(
@@ -122,21 +167,28 @@ def score_context_default(
     allowed_start_hour: int = _ALLOWED_START_HOUR,
     allowed_end_hour: int = _ALLOWED_END_HOUR,
     max_failed_attempts: int = _MAX_FAILED_ATTEMPTS,
+    signin_risk_low: Optional[bool] = None,
+    trusted_location: Optional[bool] = None,
+    include_azure: bool = False,
 ) -> tuple[float, list[dict]]:
     """Compute context score from basic posture-report context.
 
     Called during posture check (not a full resource-access attempt).
     Uses current time + caller-supplied signals; other signals default to pass.
+    Optional Entra sign-in signals are included when supplied.
     Returns (score, breakdown).
     """
     signals = ContextSignals(
         known_device=known_device,
         source_ip=source_ip,
         failed_attempt_count=failed_attempt_count,
+        signin_risk_low=signin_risk_low,
+        trusted_location=trusted_location,
     )
     return score_context_signals(
         signals,
         allowed_start_hour=allowed_start_hour,
         allowed_end_hour=allowed_end_hour,
         max_failed_attempts=max_failed_attempts,
+        include_azure=include_azure,
     )

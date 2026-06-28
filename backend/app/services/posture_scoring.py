@@ -37,12 +37,21 @@ _FACTORS: list[dict] = [
     {"factor": "intune_compliant",        "max": 20},
 ]
 
+# Optional Entra-sourced device factors — only contribute when enabled and the
+# device was matched in Entra/Intune. Each is N/A (None) otherwise, excluded from
+# both earned points and the denominator (never rewards or penalises).
+_AZURE_FACTORS: list[dict] = [
+    {"factor": "entra_registered", "max": 10},
+    {"factor": "intune_managed",   "max": 10},
+    {"factor": "intune_encrypted", "max": 15},
+]
+
 _DEVICE_WEIGHT:   float = 0.40
 _CONTEXT_WEIGHT:  float = 0.30
 _IDENTITY_WEIGHT: float = 0.30
 
 
-def score_posture(report: Any) -> tuple[float, list[dict]]:
+def score_posture(report: Any, azure_factors: dict | None = None) -> tuple[float, list[dict]]:
     """Compute posture score and per-factor breakdown from a PostureReport row.
 
     Returns (posture_score 0–100, breakdown list).
@@ -52,7 +61,11 @@ def score_posture(report: Any) -> tuple[float, list[dict]]:
     - intune_compliant = None means Intune is not configured; excluded entirely.
     - Denominator is the sum of applicable (non-null, non-excluded) factor weights.
       Falls back to 1 if everything is null (avoids division-by-zero).
+    - azure_factors: optional {factor: Optional[bool]} for Entra-sourced device
+      factors. None entries stay N/A (excluded). Only supplied when Entra is on
+      and the device matched in Entra/Intune.
     """
+    azure_factors = azure_factors or {}
     intune_val = getattr(report, "intune_compliant", None)
     intune_configured = intune_val is not None
 
@@ -107,6 +120,29 @@ def score_posture(report: Any) -> tuple[float, list[dict]]:
         breakdown.append({
             "factor": factor, "value": value, "passed": passed,
             "points": pts, "max": max_pts,
+        })
+
+    # Optional Entra device factors — only included when the Entra overlay ran
+    # (azure_factors is a dict, even if its values are None for an unmatched
+    # device). When Entra is off, azure_factors is empty → no extra rows at all,
+    # so the breakdown is identical to before.
+    for item in (_AZURE_FACTORS if azure_factors else []):
+        factor = item["factor"]
+        max_pts = item["max"]
+        value = azure_factors.get(factor)
+        if value is None:
+            breakdown.append({
+                "factor": factor, "value": None, "passed": None,
+                "points": 0, "max": max_pts, "source": "entra", "note": "not collected",
+            })
+            continue
+        passed = bool(value)
+        pts = max_pts if passed else 0
+        earned += pts
+        denominator += max_pts
+        breakdown.append({
+            "factor": factor, "value": value, "passed": passed,
+            "points": pts, "max": max_pts, "source": "entra",
         })
 
     posture_score = round((earned / max(denominator, 1)) * 100, 1)

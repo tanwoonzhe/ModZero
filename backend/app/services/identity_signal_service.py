@@ -26,7 +26,16 @@ _SIGNALS = [
     {"signal": "not_locked",           "max": 10},
 ]
 
-TOTAL_MAX = sum(s["max"] for s in _SIGNALS)  # 100
+# Optional Entra (Microsoft Graph) signals — only contribute when enabled and
+# resolvable. Each is N/A (None) when Graph did not return a usable value, so it
+# is excluded from both earned points and the denominator.
+_AZURE_SIGNALS = [
+    {"signal": "mfa_registered",        "max": 25},
+    {"signal": "identity_risk_low",     "max": 20},
+    {"signal": "conditional_access_ok", "max": 15},
+]
+
+TOTAL_MAX = sum(s["max"] for s in _SIGNALS)  # 100 (base denominator reference)
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -43,6 +52,10 @@ class IdentitySignals:
         failed_login_count: int = 0,
         not_locked: bool = True,
         source: str = "local",
+        # Optional Entra signals (None = not collected → N/A)
+        azure_mfa_registered: Optional[bool] = None,
+        azure_identity_risk_low: Optional[bool] = None,
+        azure_conditional_access_ok: Optional[bool] = None,
     ) -> None:
         self.account_enabled = account_enabled
         self.role_valid = role_valid
@@ -50,9 +63,12 @@ class IdentitySignals:
         self.failed_login_count = failed_login_count
         self.not_locked = not_locked
         self.source = source
+        self.azure_mfa_registered = azure_mfa_registered
+        self.azure_identity_risk_low = azure_identity_risk_low
+        self.azure_conditional_access_ok = azure_conditional_access_ok
 
 
-def score_identity_signals(signals: IdentitySignals) -> tuple[float, list[dict]]:
+def score_identity_signals(signals: IdentitySignals, include_azure: bool = False) -> tuple[float, list[dict]]:
     """Compute identity score (0–100) and per-signal breakdown.
 
     Unknown signals (None) are treated as 0 per Zero Trust principle:
@@ -72,49 +88,55 @@ def score_identity_signals(signals: IdentitySignals) -> tuple[float, list[dict]]
         "low_failed_logins": low_failed,
         "not_locked":        signals.not_locked,
     }
+    azure_values: dict[str, Optional[bool]] = {
+        "mfa_registered":        signals.azure_mfa_registered,
+        "identity_risk_low":     signals.azure_identity_risk_low,
+        "conditional_access_ok": signals.azure_conditional_access_ok,
+    }
 
     # Signals that are structurally always-true for local (non-Azure) auth:
     # holding a valid JWT already proves account_enabled and role_valid.
     _LOCAL_ASSUMED = {"account_enabled", "role_valid", "not_locked"}
 
     earned = 0
+    denominator = 0      # sum of APPLICABLE (non-N/A) factor weights
     breakdown: list[dict] = []
 
-    for item in _SIGNALS:
-        sig     = item["signal"]
-        max_pts = item["max"]
-        val     = signal_values.get(sig)
-
+    def _emit(sig: str, max_pts: int, val: Optional[bool], source: str, note: Optional[str] = None) -> None:
+        nonlocal earned, denominator
         if val is None:
             breakdown.append({
-                "signal": sig,
-                "passed": None,
-                "points": 0,
-                "max":    max_pts,
-                "module": "identity",
-                "source": signals.source,
-                "note":   "unknown",
+                "signal": sig, "passed": None, "points": 0, "max": max_pts,
+                "module": "identity", "source": source, "note": note or "unknown",
             })
-            continue
-
+            return
         passed = bool(val)
-        pts    = max_pts if passed else 0
+        pts = max_pts if passed else 0
         earned += pts
-
+        denominator += max_pts
         entry: dict = {
-            "signal": sig,
-            "passed": passed,
-            "points": pts,
-            "max":    max_pts,
-            "module": "identity",
-            "source": signals.source,
+            "signal": sig, "passed": passed, "points": pts, "max": max_pts,
+            "module": "identity", "source": source,
         }
-        # Add an explanatory note for local-auth signals that are always true
-        if signals.source == "local" and sig in _LOCAL_ASSUMED and passed:
+        if source == "local" and sig in _LOCAL_ASSUMED and passed:
             entry["note"] = "local auth — verified by active JWT"
+        elif note:
+            entry["note"] = note
         breakdown.append(entry)
 
-    identity_score = round((earned / TOTAL_MAX) * 100, 1)
+    # Base (local) signals
+    for item in _SIGNALS:
+        _emit(item["signal"], item["max"], signal_values.get(item["signal"]), signals.source)
+
+    # Optional Entra signals — only present when the Entra overlay is active.
+    # (Each may still be N/A if Graph could not resolve it for this user.)
+    for item in (_AZURE_SIGNALS if include_azure else []):
+        _emit(item["signal"], item["max"], azure_values.get(item["signal"]), "entra")
+
+    # Percentage of applicable points → stays 0–100 regardless of how many Azure
+    # factors were applicable. Falls back to TOTAL_MAX to preserve legacy behaviour
+    # when all base signals somehow ended up N/A.
+    identity_score = round((earned / max(denominator, 1)) * 100, 1) if denominator else 0.0
     return identity_score, breakdown
 
 

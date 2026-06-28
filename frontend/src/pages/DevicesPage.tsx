@@ -326,6 +326,9 @@ const DevicesPage: React.FC = () => {
                 client_healthy:          "Client App Healthy",
                 recent_check:            "Recent Check",
                 intune_compliant:        "Intune Compliant",
+                entra_registered:        "Entra Registered",
+                intune_managed:          "Intune Managed",
+                intune_encrypted:        "Intune Encrypted",
               };
               const FACTOR_SOURCE: Record<string, string> = {
                 firewall_enabled:        "Client App (Windows)",
@@ -336,6 +339,9 @@ const DevicesPage: React.FC = () => {
                 client_healthy:          "Client App",
                 recent_check:            "Client App",
                 intune_compliant:        "Microsoft Graph / Intune",
+                entra_registered:        "Microsoft Graph / Entra",
+                intune_managed:          "Microsoft Graph / Intune",
+                intune_encrypted:        "Microsoft Graph / Intune",
               };
               return (
                 <div key={deviceId}>
@@ -380,7 +386,11 @@ const DevicesPage: React.FC = () => {
                               ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
                               : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200";
                           const noteText = isNA
-                            ? (item.note === "not configured" ? "Not configured (requires Intune)" : "Not collected on this platform")
+                            ? (item.source === "entra"
+                                ? "Device not matched in Entra/Intune"
+                                : item.note === "not configured"
+                                  ? "Not configured (requires Intune)"
+                                  : "Not collected on this platform")
                             : (item.note ?? "");
                           return (
                             <tr key={item.factor} className="hover:bg-gray-50 dark:hover:bg-gray-800">

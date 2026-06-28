@@ -474,6 +474,9 @@ class TrustPolicyConfigOut(BaseModel):
     require_known_device:      bool
     unknown_device_penalty:    int
     suspicious_ip_penalty:     int
+    entra_enabled:             bool = False
+    # Live (not persisted): whether a Microsoft Graph connection is currently usable.
+    azure_connected:           Optional[bool] = None
     updated_at:                Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -492,6 +495,7 @@ class TrustPolicyConfigUpdate(BaseModel):
     require_known_device:      Optional[bool]  = None
     unknown_device_penalty:    Optional[int]   = None
     suspicious_ip_penalty:     Optional[int]   = None
+    entra_enabled:             Optional[bool]  = None
 
 
 ## Protected Resource schemas

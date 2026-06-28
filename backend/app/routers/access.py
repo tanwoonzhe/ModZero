@@ -50,6 +50,18 @@ def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def _entra_hard_gate(db: Session, user: User) -> Optional[str]:
+    """Return a deny reason when Entra is enabled and Graph explicitly reports the
+    account as invalid (e.g. disabled). None otherwise — including when Entra is
+    disabled or Graph is unreachable (never lock everyone out on a transient error).
+    """
+    from ..routers.trust_policy import get_or_create_policy
+    if not getattr(get_or_create_policy(db), "entra_enabled", False):
+        return None
+    from ..services.azure_signal_service import hard_gate_reason
+    return hard_gate_reason(user)
+
+
 def _connector_by_resource(db: Session, cr: ConnectorResource) -> Optional[Connector]:
     """Return the live Connector for a ConnectorResource, or None if not online."""
     if cr.connector_id:
@@ -275,6 +287,27 @@ def request_access(
         raise HTTPException(status_code=404, detail="Resource not found")
 
     resource_out = schemas.ProtectedResourceOut.model_validate(resource)
+
+    # 0a. Entra identity hard gate: when Entra is enabled and Graph EXPLICITLY
+    # reports the account as disabled, deny outright — a high trust score must
+    # never compensate for a disabled account. Unknown/error → no gate.
+    gate_reason = _entra_hard_gate(db, current_user)
+    if gate_reason:
+        _log(
+            db,
+            user_id=current_user.user_id,
+            device_id=payload.device_id,
+            resource_id=resource.id,
+            decision="deny",
+            reason=gate_reason,
+            trust_score=None,
+        )
+        return schemas.AccessDecisionOut(
+            decision="deny",
+            reason="Account is disabled in Entra — access denied",
+            required_score=resource.minimum_trust_score,
+            resource=resource_out,
+        )
 
     # 0. Hard gate: user must have a valid role.
     # A trust score, no matter how high, cannot substitute for an account with no assigned role.
