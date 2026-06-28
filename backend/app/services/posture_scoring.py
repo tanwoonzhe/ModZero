@@ -126,10 +126,16 @@ def weighted_total(
 
     Weights default to the module-level constants but can be overridden
     by passing values read from the TrustPolicyConfig DB row.
+
+    The composite trust score is rounded to a whole number on purpose: it is
+    the single value every surface displays (Overview, Device Check, Last
+    Access Decision, access-log reason strings). Rounding once here — at the
+    source — guarantees they can never disagree by a decimal (the old
+    "Overview 90 vs Last Access 91" bug). Module sub-scores keep one decimal
+    for the breakdown; only the headline total is integral.
     """
-    return round(
+    return float(round(
         posture_score   * device_weight
         + context_score  * context_weight
-        + identity_score * identity_weight,
-        1,
-    )
+        + identity_score * identity_weight
+    ))
