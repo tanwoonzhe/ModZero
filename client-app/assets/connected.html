@@ -450,8 +450,8 @@
     };
 
     const IDENTITY_LABELS = {
-      account_enabled:   "Account Enabled",
-      role_valid:        "Role Valid",
+      account_enabled:   "Account Enabled (IdP)",
+      role_valid:        "Role Valid (IdP)",
       recent_login:      "Recent Login",
       low_failed_logins: "Low Failed Logins",
       not_locked:        "Account Not Locked",
@@ -461,13 +461,16 @@
       const grid = $("factorGrid");
       grid.innerHTML = "";
       (breakdown || []).forEach((b) => {
-        const cls = b.value == null ? "unknown" : b.passed ? "pass" : "fail";
-        const label = b.value == null ? "Unknown" : b.passed ? "Pass ✓" : "Fail ✗";
+        // passed == null means N/A (not collected / not configured)
+        const isNA = b.passed == null;
+        const cls = isNA ? "unknown" : b.passed ? "pass" : "fail";
+        const label = isNA ? "N/A" : b.passed ? "Pass ✓" : "Fail ✗";
         const name = FACTOR_LABELS[b.factor] || b.factor.replace(/_/g, " ");
-        const note = b.note ? ` <span style="color:var(--muted)">(${b.note})</span>` : "";
+        const note = b.note ? ` <span style="color:var(--muted);font-size:10px">(${b.note})</span>` : "";
+        const ptsText = isNA ? `—` : `+${b.points ?? 0} / ${b.max ?? "—"} pts`;
         const el = document.createElement("div");
         el.className = "factor " + cls;
-        el.innerHTML = `<div class="f-name">${name}${note}</div><div class="f-val">${label}</div><div class="f-pts">+${b.points ?? 0} / ${b.max ?? "—"} pts</div>`;
+        el.innerHTML = `<div class="f-name">${name}${note}</div><div class="f-val">${label}</div><div class="f-pts">${ptsText}</div>`;
         grid.appendChild(el);
       });
     }
@@ -476,12 +479,17 @@
       grid.innerHTML = "";
       (breakdown || []).forEach((b) => {
         const cls = b.passed == null ? "unknown" : b.passed ? "pass" : "fail";
-        const label = b.passed == null ? "Unknown" : b.passed ? "Pass ✓" : "Fail ✗";
+        const label = b.passed == null ? "N/A" : b.passed ? "Pass ✓" : "Fail ✗";
         const name = labelMap[b.signal] || b.signal.replace(/_/g, " ");
-        const note = b.note ? ` <span style="color:var(--muted)">(${b.note})</span>` : "";
+        const noteParts = [];
+        if (b.note) noteParts.push(b.note);
+        if (b.source && b.source !== "local") noteParts.push(`via ${b.source}`);
+        const noteHtml = noteParts.length
+          ? ` <span style="color:var(--muted);font-size:10px">(${noteParts.join(", ")})</span>`
+          : "";
         const el = document.createElement("div");
         el.className = "factor " + cls;
-        el.innerHTML = `<div class="f-name">${name}${note}</div><div class="f-val">${label}</div><div class="f-pts">+${b.points ?? 0} / ${b.max ?? "—"} pts</div>`;
+        el.innerHTML = `<div class="f-name">${name}${noteHtml}</div><div class="f-val">${label}</div><div class="f-pts">+${b.points ?? 0} / ${b.max ?? "—"} pts</div>`;
         grid.appendChild(el);
       });
     }
@@ -625,15 +633,23 @@
         const score = d.trust_score == null ? "&mdash;" : Math.round(d.trust_score);
         if (d.decision === "allow") {
           const exp = d.expires_at ? new Date(d.expires_at).toLocaleTimeString() : "&mdash;";
-          const url = d.launch_url || d.access_url || "";
-          const openBtn = url
-            ? `<button class="btn-sm" onclick='openAccessUrl(${JSON.stringify(url)})'>Open Access Session</button>`
+          // launch_url: one-time code, sets HttpOnly cookie in default browser (preferred)
+          // access_url: token-in-URL, works in any browser while session is active (shareable)
+          const launchUrl = d.launch_url || "";
+          const accessUrl = d.access_url || "";
+          const openBtn = launchUrl
+            ? `<button class="btn-sm" onclick='openAccessUrl(${JSON.stringify(launchUrl)})'>Open in Browser</button>`
+            : accessUrl
+              ? `<button class="btn-sm" onclick='openAccessUrl(${JSON.stringify(accessUrl)})'>Open in Browser</button>`
+              : "";
+          const copyBtn = accessUrl
+            ? `<button class="btn-sm" style="margin-left:4px;background:var(--border);color:var(--text)" onclick='copyAccessUrl(${JSON.stringify(accessUrl)})'>&#9645; Copy Link</button>`
             : "";
           target.innerHTML =
             `<span class="badge ok">ALLOW</span> ` +
             `${escapeHtml(d.reason || "")} (score ${score} / required ${d.required_score ?? 0})<br>` +
             `<span class="badge neutral">Session expires ${exp}</span>` +
-            openBtn;
+            openBtn + copyBtn;
           toast("ok", `ALLOW: ${d.reason}`);
           saveLastDecision(resourceName || resourceId, "allow", d.trust_score, d.reason || "Score meets requirement");
         } else {
@@ -656,6 +672,15 @@
         await M.openAccessUrl(url);
       } catch (e) {
         toast("err", String(e?.message || e));
+      }
+    }
+
+    async function copyAccessUrl(url) {
+      try {
+        await navigator.clipboard.writeText(url);
+        toast("ok", "Link copied — paste into any browser while the session is active (15 min)");
+      } catch (e) {
+        toast("err", "Could not copy to clipboard: " + String(e?.message || e));
       }
     }
 

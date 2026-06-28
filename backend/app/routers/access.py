@@ -276,6 +276,28 @@ def request_access(
 
     resource_out = schemas.ProtectedResourceOut.model_validate(resource)
 
+    # 0. Hard gate: user must have a valid role.
+    # A trust score, no matter how high, cannot substitute for an account with no assigned role.
+    # For local auth the role column is non-nullable (always ADMIN or EMPLOYEE), so this guard
+    # exists primarily to cover edge cases such as direct DB manipulation or future nullable roles.
+    # For Azure-synced accounts where the role could be revoked this acts as an enforced barrier.
+    if current_user.role is None:
+        _log(
+            db,
+            user_id=current_user.user_id,
+            device_id=payload.device_id,
+            resource_id=resource.id,
+            decision="deny",
+            reason="no_valid_role",
+            trust_score=None,
+        )
+        return schemas.AccessDecisionOut(
+            decision="deny",
+            reason="Account has no valid role assigned — access denied",
+            required_score=resource.minimum_trust_score,
+            resource=resource_out,
+        )
+
     # 1. Resource disabled
     if not resource.enabled:
         _log(
@@ -560,10 +582,6 @@ def request_access(
         db.refresh(session)
 
         _proxy_base = os.getenv("DEMO_CONNECTOR_PROXY_BASE_URL", "").rstrip("/")
-        if _proxy_base:
-            access_url = f"{_proxy_base}/access/{session.id}?token={token_plain}"
-        else:
-            access_url = f"modzero://access/{session.id}"
 
         # Generate one-time launch code for ZTNA gateway flow (stored as hash only)
         _launch_code = secrets.token_urlsafe(24)
@@ -572,7 +590,15 @@ def request_access(
         session.launch_code_used = False
         db.commit()
 
-        launch_url = f"{_proxy_base}/launch/{_launch_code}" if _proxy_base else None
+        if _proxy_base:
+            # launch_url: one-time code, opens in default browser, sets HttpOnly cookie
+            launch_url = f"{_proxy_base}/launch/{_launch_code}"
+            # access_url: token-in-URL, works in any browser while session is active
+            # The /r/ gateway accepts ?token= as a fallback when no cookie is present.
+            access_url = f"{_proxy_base}/r/{session.id}/?token={token_plain}"
+        else:
+            launch_url = None
+            access_url = f"modzero://access/{session.id}"
 
     # Tunnel-related audit rows (best-effort).
     if fallback_used:

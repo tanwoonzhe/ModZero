@@ -96,8 +96,8 @@ def list_access_decisions(
         rname, rslug, rthreshold = (None, None, None)
         if r.resource_id and r.resource_id in resources:
             rname, rslug, rthreshold = resources[r.resource_id]
-        score = int(r.trust_score) if r.trust_score is not None else None
-        threshold = int(rthreshold) if rthreshold is not None else None
+        score = round(r.trust_score) if r.trust_score is not None else None
+        threshold = round(rthreshold) if rthreshold is not None else None
         out.append(AccessDecisionOut(
             decision_id=str(r.id),
             user_id=str(r.user_id) if r.user_id else None,
@@ -185,8 +185,8 @@ def status_overview(
             target=res.internal_address,
             last_decision=str(d.decision) if d else None,
             last_decision_at=d.timestamp if d else None,
-            last_score=int(d.trust_score) if d and d.trust_score is not None else None,
-            last_threshold=int(res.minimum_trust_score) if res.minimum_trust_score is not None else None,
+            last_score=round(d.trust_score) if d and d.trust_score is not None else None,
+            last_threshold=round(res.minimum_trust_score) if res.minimum_trust_score is not None else None,
         ))
 
     cutoff = now - timedelta(seconds=90)

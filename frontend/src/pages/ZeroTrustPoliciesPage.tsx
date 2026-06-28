@@ -10,117 +10,52 @@
  * RBAC: Only Admin role can edit; others view read-only.
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FaShieldAlt,
   FaShieldAlt as FaShieldAltB,
   FaCog,
-  FaHistory,
-  FaLock,
-  FaCheck,
   FaUndo,
   FaSave,
-  FaSearch,
   FaExclamationTriangle,
-  FaChevronDown,
-  FaChevronRight,
-  FaExternalLinkAlt,
   FaSpinner,
-  FaInfoCircle,
   FaLaptop,
   FaNetworkWired,
 } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import {
-  Pillar,
-  Control,
-  LicenseKey,
-  PILLAR_COLORS,
-  LICENSE_INFO,
-  DEFAULT_PILLAR_WEIGHTS,
-} from '../types/zeroTrust';
-import {
   useZeroTrustStore,
   selectIsAdmin,
   selectWeightConfig,
-  selectControls,
-  selectTenantLicenses,
-  selectAuditEvents,
 } from '../store/zeroTrustStore';
-import {
-  ScoreCard,
-  AuditLogPanel,
-  StatusBadge,
-  LicenseChips,
-} from '../components/ZeroTrustComponents';
-import { getEffectiveWeight, isLicensed, normalizePillarWeights } from '../lib/scoring';
 import api from '../api';
 
 const ZeroTrustPoliciesPage: React.FC = () => {
   const isAdmin = useZeroTrustStore(selectIsAdmin);
   const weightConfig = useZeroTrustStore(selectWeightConfig);
-  const controls = useZeroTrustStore(selectControls);
-  const tenantLicenses = useZeroTrustStore(selectTenantLicenses);
-  const auditEvents = useZeroTrustStore(selectAuditEvents);
-  const getScores = useZeroTrustStore(state => state.getScores);
-  
-  const {
-    updatePillarWeight,
-    updateControlWeight,
-    resetControlWeight,
-    resetAllWeights,
-    toggleLicense,
-    setTenantLicenses,
-  } = useZeroTrustStore();
-  
+
+  const { resetAllWeights } = useZeroTrustStore();
+
   const [activeTab, setActiveTab] = useState<'resource-policies' | 'device-rules' | 'identity-rules' | 'context-rules' | 'weights' | 'simulator'>('resource-policies');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [expandedPillars, setExpandedPillars] = useState<Set<Pillar>>(new Set([Pillar.Identity]));
 
   // Resources state for Resource Policies tab
   const [resources, setResources] = useState<any[]>([]);
   const [resourcesLoading, setResourcesLoading] = useState(false);
 
-  // License detection state (kept but not shown in tab)
-  const [detectedLicenses, setDetectedLicenses] = useState<Record<string, boolean> | null>(null);
-  const [loadingLicenses, setLoadingLicenses] = useState(false);
-  const [licenseError, setLicenseError] = useState<string | null>(null);
-  
-  const scores = getScores();
-  
-  // Normalized pillar weights for display
-  const normalizedWeights = useMemo(
-    () => normalizePillarWeights(weightConfig.pillarWeights),
-    [weightConfig.pillarWeights]
-  );
-  
-  // Filter controls by search
-  const filteredControls = useMemo(() => {
-    if (!searchTerm) return controls;
-    const term = searchTerm.toLowerCase();
-    return controls.filter(c =>
-      c.title.toLowerCase().includes(term) ||
-      c.id.toLowerCase().includes(term) ||
-      c.category?.toLowerCase().includes(term)
-    );
-  }, [controls, searchTerm]);
-  
-  // Group controls by pillar
-  const controlsByPillar = useMemo(() => {
-    return filteredControls.reduce((acc, control) => {
-      if (!acc[control.pillar]) {
-        acc[control.pillar] = [];
-      }
-      acc[control.pillar].push(control);
-      return acc;
-    }, {} as Record<Pillar, Control[]>);
-  }, [filteredControls]);
-  
-  // Weight audit events
-  const weightAuditEvents = useMemo(
-    () => auditEvents.filter(e => e.type === 'WEIGHT_CHANGED'),
-    [auditEvents]
-  );
+  // Live policy summary from backend
+  const [policyConfig, setPolicyConfig] = useState<{
+    device_weight: number; context_weight: number; identity_weight: number;
+    default_threshold: number; updated_at?: string;
+  } | null>(null);
+  const [policyLoading, setPolicyLoading] = useState(true);
+
+
+  useEffect(() => {
+    api.get('/trust-policy/active')
+      .then(r => setPolicyConfig(r.data))
+      .catch(() => {})
+      .finally(() => setPolicyLoading(false));
+  }, []);
   
   // Fetch resources for Resource Policies tab
   useEffect(() => {
@@ -140,155 +75,6 @@ const ZeroTrustPoliciesPage: React.FC = () => {
     }
   }, [activeTab]);
 
-  // Fetch detected licenses from Azure on tab switch
-  useEffect(() => {
-    if (activeTab === 'licenses' && detectedLicenses === null && !loadingLicenses) {
-      detectLicenses();
-    }
-  }, [activeTab]);
-  
-  const detectLicenses = async () => {
-    setLoadingLicenses(true);
-    setLicenseError(null);
-    try {
-      const response = await api.get('/azure/subscribed-skus');
-      const skus = response.data.skus || [];
-      
-      // Comprehensive SKU to license mapping
-      // Reference: https://learn.microsoft.com/en-us/entra/identity/users/licensing-service-plan-reference
-      const skuMapping: Record<string, LicenseKey[]> = {
-        // Entra ID P1 SKUs
-        'AAD_PREMIUM': ['ENTRA_P1'],
-        'AAD_PREMIUM_P1': ['ENTRA_P1'],
-        'EMSPREMIUM': ['ENTRA_P1', 'INTUNE_P1'],  // EMS E5
-        'EMS': ['ENTRA_P1', 'INTUNE_P1'],  // EMS E3
-        'IDENTITY_THREAT_PROTECTION': ['ENTRA_P2'],
-        
-        // Entra ID P2 SKUs
-        'AAD_PREMIUM_P2': ['ENTRA_P2', 'ENTRA_P1'],
-        
-        // Intune SKUs
-        'INTUNE_A': ['INTUNE_P1'],
-        'INTUNE_EDU': ['INTUNE_P1'],
-        
-        // Defender for Endpoint SKUs
-        'WIN_DEF_ATP': ['MDE_P1'],
-        'DEFENDER_ENDPOINT_P1': ['MDE_P1'],
-        'DEFENDER_ENDPOINT_P2': ['MDE_P2', 'MDE_P1'],
-        'MDATP_XPLAT': ['MDE_P1'],
-        'ATP_ENTERPRISE': ['MDE_P1'],
-        'WINDEFATP': ['MDE_P2', 'MDE_P1'],
-        
-        // Governance
-        'AAD_GOVERNANCE': ['ENTRA_GOVERNANCE'],
-        'IDENTITY_GOVERNANCE': ['ENTRA_GOVERNANCE'],
-        
-        // Workload ID
-        'ENTRA_WORKLOAD_IDENTITIES': ['ENTRA_WORKLOAD_ID'],
-        
-        // M365 E3 SKUs (includes Entra P1, Intune)
-        'SPE_E3': ['M365_E3', 'ENTRA_P1', 'INTUNE_P1'],
-        'ENTERPRISEPACK': ['M365_E3', 'ENTRA_P1'],
-        'MICROSOFT_365_E3': ['M365_E3', 'ENTRA_P1', 'INTUNE_P1'],
-        'M365_E3': ['M365_E3', 'ENTRA_P1', 'INTUNE_P1'],
-        'DEVELOPERPACK_E5': ['M365_E5', 'ENTRA_P2', 'INTUNE_P1', 'MDE_P2'],
-        
-        // M365 E5 SKUs (includes Entra P2, Intune, MDE P2)
-        'SPE_E5': ['M365_E5', 'ENTRA_P2', 'ENTRA_P1', 'INTUNE_P1', 'MDE_P2', 'MDE_P1'],
-        'ENTERPRISEPREMIUM': ['M365_E5', 'ENTRA_P2', 'ENTRA_P1', 'INTUNE_P1', 'MDE_P2', 'MDE_P1'],
-        'MICROSOFT_365_E5': ['M365_E5', 'ENTRA_P2', 'ENTRA_P1', 'INTUNE_P1', 'MDE_P2', 'MDE_P1'],
-        'M365_E5': ['M365_E5', 'ENTRA_P2', 'ENTRA_P1', 'INTUNE_P1', 'MDE_P2', 'MDE_P1'],
-        'M365_E5_SUITE_COMPONENTS': ['M365_E5', 'ENTRA_P2', 'ENTRA_P1', 'INTUNE_P1'],
-        
-        // Business Premium (SMB)
-        'SMB_BUSINESS_PREMIUM': ['ENTRA_P1', 'INTUNE_P1', 'MDE_P1'],
-        'O365_BUSINESS_PREMIUM': ['ENTRA_P1'],
-        'SPB': ['ENTRA_P1', 'INTUNE_P1'],
-        'MICROSOFT_365_BUSINESS_PREMIUM': ['ENTRA_P1', 'INTUNE_P1', 'MDE_P1'],
-        
-        // Defender for Cloud
-        'DEFENDER_FOR_CLOUD': ['DEFENDER_CLOUD'],
-        'AZURE_DEFENDER': ['DEFENDER_CLOUD'],
-        'ATA': ['DEFENDER_CLOUD'],
-      };
-      
-      // Service plan mapping (for plans within SKUs)
-      const servicePlanMapping: Record<string, LicenseKey[]> = {
-        'AAD_PREMIUM': ['ENTRA_P1'],
-        'AAD_PREMIUM_P2': ['ENTRA_P2', 'ENTRA_P1'],
-        'INTUNE_A': ['INTUNE_P1'],
-        'WINDEFATP': ['MDE_P2', 'MDE_P1'],
-        'MDE_LITE': ['MDE_P1'],
-        'WIN_DEF_ATP': ['MDE_P1'],
-        'ADALLOM_S_STANDALONE': ['DEFENDER_CLOUD'],
-      };
-      
-      const detected: Record<string, boolean> = {};
-      Object.keys(LICENSE_INFO).forEach(key => {
-        detected[key] = false;
-      });
-      
-      // Check each SKU
-      skus.forEach((sku: any) => {
-        const skuPart = (sku.skuPartNumber || '').toUpperCase();
-
-        // Direct SKU match
-        Object.entries(skuMapping).forEach(([pattern, licenses]) => {
-          if (skuPart === pattern.toUpperCase() || skuPart.includes(pattern.toUpperCase())) {
-            licenses.forEach(lic => { detected[lic] = true; });
-          }
-        });
-
-        // Check service plans within the SKU
-        const servicePlans = sku.servicePlans || [];
-        servicePlans.forEach((plan: any) => {
-          const planName = (plan.servicePlanName || '').toUpperCase();
-          Object.entries(servicePlanMapping).forEach(([pattern, licenses]) => {
-            if (planName === pattern.toUpperCase() || planName.includes(pattern.toUpperCase())) {
-              licenses.forEach(lic => { detected[lic] = true; });
-            }
-          });
-        });
-      });
-
-      const detectedCount = Object.values(detected).filter(Boolean).length;
-      
-      if (detectedCount === 0 && skus.length > 0) {
-        // Show warning with raw SKU names for debugging
-        const skuNames = skus.map((s: any) => s.skuPartNumber).filter(Boolean).join(', ');
-        setLicenseError(`Found ${skus.length} SKUs but couldn't map them: ${skuNames || 'No SKU names available'}. You may need to configure licenses manually.`);
-      }
-      
-      setDetectedLicenses(detected);
-    } catch (error: any) {
-      setLicenseError(error.response?.data?.detail || 'Unable to detect licenses from Azure. Configure them manually.');
-    } finally {
-      setLoadingLicenses(false);
-    }
-  };
-  
-  const applyDetectedLicenses = () => {
-    if (detectedLicenses) {
-      setTenantLicenses({ enabled: detectedLicenses as Record<LicenseKey, boolean> });
-      toast.success('Applied detected licenses');
-    }
-  };
-  
-  // Calculate raw pillar sum (now capped at 100% via UI)
-  const rawPillarSum = Object.values(weightConfig.pillarWeights).reduce((a, b) => a + b, 0);
-  
-  const togglePillar = (pillar: Pillar) => {
-    setExpandedPillars(prev => {
-      const next = new Set(prev);
-      if (next.has(pillar)) {
-        next.delete(pillar);
-      } else {
-        next.add(pillar);
-      }
-      return next;
-    });
-  };
-  
   const handleResetAll = () => {
     if (window.confirm('Reset all weights to defaults? This action will be logged.')) {
       resetAllWeights();
@@ -323,43 +109,52 @@ const ZeroTrustPoliciesPage: React.FC = () => {
         </div>
       </div>
       
-      {/* Score Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <ScoreCard
-          title="Achievable Score"
-          score={scores.achievable.score}
-          max={scores.achievable.max}
-          percent={scores.achievable.percent}
-          subtitle="Based on current licenses"
-          variant="primary"
-        />
-        <ScoreCard
-          title="Full Coverage Score"
-          score={scores.fullCoverage.score}
-          max={scores.fullCoverage.max}
-          percent={scores.fullCoverage.percent}
-          subtitle="All controls included"
-          variant="secondary"
-        />
-        <ScoreCard
-          title="Upgrade Opportunity"
-          score={scores.upgradeOpportunityPoints}
-          max={scores.fullCoverage.max - scores.achievable.max}
-          percent={scores.fullCoverage.max > scores.achievable.max 
-            ? Math.round((scores.upgradeOpportunityPoints / (scores.fullCoverage.max - scores.achievable.max)) * 100)
-            : 0
-          }
-          subtitle={`${scores.unavailableTestCount} tests need licenses`}
-          variant="warning"
-        />
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700">
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Last Modified</p>
-          <p className="text-lg font-semibold text-gray-900 dark:text-white">
-            {new Date(weightConfig.updatedAt).toLocaleDateString()}
-          </p>
-          <p className="text-xs text-gray-400 mt-1">by {weightConfig.updatedBy}</p>
+      {/* Live Policy Summary — fetched from backend TrustPolicyConfig */}
+      {policyLoading ? (
+        <div className="h-24 flex items-center justify-center text-sm text-gray-400">Loading policy config…</div>
+      ) : policyConfig ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700">
+            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium mb-1">Access Threshold</p>
+            <p className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">{policyConfig.default_threshold}</p>
+            <p className="text-xs text-gray-400 mt-1">min trust score to allow access</p>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700">
+            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium mb-2">Module Weights</p>
+            <div className="space-y-1.5">
+              {[
+                { label: "Device", pct: Math.round(policyConfig.device_weight * 100), color: "bg-indigo-500" },
+                { label: "Context", pct: Math.round(policyConfig.context_weight * 100), color: "bg-amber-500" },
+                { label: "Identity", pct: Math.round(policyConfig.identity_weight * 100), color: "bg-emerald-500" },
+              ].map(m => (
+                <div key={m.label} className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 w-14">{m.label}</span>
+                  <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-2">
+                    <div className={`${m.color} h-2 rounded-full`} style={{ width: `${m.pct}%` }} />
+                  </div>
+                  <span className="text-xs font-mono text-gray-700 dark:text-gray-300 w-8 text-right">{m.pct}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700">
+            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium mb-1">Max Possible Score</p>
+            <p className="text-3xl font-bold text-gray-900 dark:text-white">100</p>
+            <p className="text-xs text-gray-400 mt-1">all signals passing, all weights at 100%</p>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700">
+            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium mb-1">Last Modified</p>
+            <p className="text-lg font-semibold text-gray-900 dark:text-white">
+              {policyConfig.updated_at ? new Date(policyConfig.updated_at).toLocaleDateString() : new Date(weightConfig.updatedAt).toLocaleDateString()}
+            </p>
+            <p className="text-xs text-gray-400 mt-1">by {weightConfig.updatedBy}</p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="col-span-4 text-center text-sm text-gray-400 py-4">Could not load policy config from backend.</div>
+        </div>
+      )}
       
       {/* Tab Navigation */}
       <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg w-fit">
@@ -557,102 +352,170 @@ export default ZeroTrustPoliciesPage;
 /*  Identity Rules Tab                                                  */
 /* ------------------------------------------------------------------ */
 
-const IDENTITY_SIGNALS_INFO = [
+const DEFAULT_IDENTITY_RULES = [
   {
     key:         'account_enabled',
     label:       'Account Enabled',
-    source:      'Local Auth',
+    source:      'Local Auth / Azure AD',
     maxPoints:   30,
-    description: 'User account is active and can successfully authenticate to ModZero.',
-    alwaysTrue:  true,
+    enabled:     true,
+    description: 'Account is active. Local auth: always pass (JWT proves it). Azure AD: reflects actual account status — disabled accounts score 0.',
   },
   {
     key:         'role_valid',
     label:       'Role Valid',
-    source:      'Local Auth',
+    source:      'Local Auth / Azure AD',
     maxPoints:   20,
-    description: 'User has a recognised role assigned (ADMIN or EMPLOYEE). No role = no points.',
-    alwaysTrue:  false,
+    enabled:     true,
+    description: 'User has a recognised role (ADMIN or EMPLOYEE). Local auth: non-nullable, always pass. Azure AD: reflects real role assignment.',
   },
   {
     key:         'recent_login',
     label:       'Recent Login',
     source:      'Local Auth',
     maxPoints:   15,
-    description: 'User authenticated recently (implied by the active JWT used to submit this request).',
-    alwaysTrue:  true,
+    enabled:     true,
+    description: 'User authenticated recently. Implied by the active JWT used to submit the posture report — always pass for local auth.',
   },
   {
     key:         'low_failed_logins',
     label:       'Low Failed Login Count',
     source:      'Local Auth',
     maxPoints:   25,
-    description: 'No excessive failed login attempts detected (threshold: 5). No tracking = assumed clean.',
-    alwaysTrue:  true,
+    enabled:     true,
+    description: 'No excessive failed logins (threshold: 5). Local DB has no failed-login tracking — assumed clean (+25). Track real failures via Azure AD sign-in logs.',
   },
   {
     key:         'not_locked',
     label:       'Account Not Locked',
     source:      'Local Auth',
     maxPoints:   10,
-    description: 'Account is not locked out. No lock field in local DB = assumed unlocked.',
-    alwaysTrue:  true,
+    enabled:     true,
+    description: 'Account is not locked out. Local DB has no lock field — assumed unlocked (+10). Azure AD lockout state can override this.',
   },
 ];
 
-const IdentityRulesTab: React.FC = () => (
-  <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-    <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-      <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Identity Rules</h2>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-        Five identity signals evaluated server-side for every access request.
-        Identity Score = sum of passed signal points (max 100). Contributes 30% to the Final Trust Score.
-      </p>
-    </div>
-    <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-        <thead className="bg-gray-50 dark:bg-gray-800">
-          <tr>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Signal</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Max Points</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust Score</th>
-          </tr>
-        </thead>
-        <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-          {IDENTITY_SIGNALS_INFO.map(sig => (
-            <tr key={sig.key}>
-              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{sig.label}</td>
-              <td className="px-4 py-3 text-xs text-gray-500">
-                <span className="inline-flex px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
-                  {sig.source}
-                </span>
-              </td>
-              <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs">{sig.description}</td>
-              <td className="px-4 py-3 text-center">
-                <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">
-                  +{sig.maxPoints}
-                </span>
-              </td>
-              <td className="px-4 py-3">
-                <span className="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
-                  Yes
-                </span>
-              </td>
+const IDENTITY_RULES_KEY = 'modzero-identity-rules';
+
+interface IdentityRule {
+  key: string;
+  label: string;
+  source: string;
+  maxPoints: number;
+  enabled: boolean;
+  description: string;
+}
+
+const IdentityRulesTab: React.FC = () => {
+  const [rules, setRules] = useState<IdentityRule[]>(() => {
+    try {
+      const saved = localStorage.getItem(IDENTITY_RULES_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as IdentityRule[];
+        // Merge saved with defaults to pick up new fields/signals
+        return DEFAULT_IDENTITY_RULES.map(def => {
+          const s = parsed.find(r => r.key === def.key);
+          return s ? { ...def, maxPoints: s.maxPoints, enabled: s.enabled } : def;
+        });
+      }
+    } catch {}
+    return DEFAULT_IDENTITY_RULES;
+  });
+  const [saved, setSaved] = useState(false);
+
+  const toggle = (key: string) =>
+    setRules(r => r.map(rule => rule.key === key ? { ...rule, enabled: !rule.enabled } : rule));
+
+  const setPoints = (key: string, pts: number) =>
+    setRules(r => r.map(rule => rule.key === key ? { ...rule, maxPoints: Math.max(0, Math.min(100, pts)) } : rule));
+
+  const handleSave = () => {
+    localStorage.setItem(IDENTITY_RULES_KEY, JSON.stringify(rules));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const total = rules.filter(r => r.enabled).reduce((s, r) => s + r.maxPoints, 0);
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Identity Rules</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Five identity signals evaluated server-side on every posture report.
+            Identity Score = sum of passed signal points. Contributes 30% to the Final Trust Score.
+          </p>
+        </div>
+        <button
+          onClick={handleSave}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+        >
+          <FaSave size={13} />
+          {saved ? 'Saved!' : 'Save Rules'}
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+          <thead className="bg-gray-50 dark:bg-gray-800">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Signal</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Enabled</th>
+              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Max Points</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust Score</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+            {rules.map(sig => (
+              <tr key={sig.key} className={sig.enabled ? '' : 'opacity-50'}>
+                <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{sig.label}</td>
+                <td className="px-4 py-3 text-xs text-gray-500">
+                  <span className="inline-flex px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                    {sig.source}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs">{sig.description}</td>
+                <td className="px-4 py-3 text-center">
+                  <button
+                    onClick={() => toggle(sig.key)}
+                    className={`w-10 h-5 rounded-full transition-colors flex-shrink-0 ${sig.enabled ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                  >
+                    <span className={`block w-4 h-4 bg-white rounded-full shadow mx-0.5 transition-transform ${sig.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <input
+                    type="number"
+                    min={0} max={100} value={sig.maxPoints}
+                    onChange={e => setPoints(sig.key, Number(e.target.value))}
+                    disabled={!sig.enabled}
+                    className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                </td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${sig.enabled ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
+                    {sig.enabled ? 'Yes' : 'Disabled'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
+        <p className="text-xs text-gray-400">
+          Total enabled points: <strong>{total}</strong> · Identity Score × 30% weight = up to {Math.round(total * 0.3)} pts in Final Trust Score.
+          Source: <code className="font-mono">identity_signal_service.py</code>.
+        </p>
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          Changes saved here are UI display only — backend weights are in <code className="font-mono">identity_signal_service.py</code>.
+        </p>
+      </div>
     </div>
-    <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
-      <p className="text-xs text-gray-400">
-        Total max: 100 pts · Identity Score × 30% weight = up to 30 pts in Final Trust Score.
-        Signal values are evaluated by the backend on every posture report — source: <code className="font-mono">identity_signal_service.py</code>.
-      </p>
-    </div>
-  </div>
-);
+  );
+};
 
 /* ------------------------------------------------------------------ */
 
@@ -777,10 +640,13 @@ const DeviceRulesTab: React.FC = () => {
           </tbody>
         </table>
       </div>
-      <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
+      <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <p className="text-xs text-gray-400">
           Total enabled weight: {rules.filter(r => r.enabled).reduce((s, r) => s + r.weight, 0)}/100 ·
           "Deny immediately" stops evaluation on failure even if other checks pass.
+        </p>
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          Changes saved here are UI display only — actual backend weights are in <code className="font-mono">posture_scoring.py</code>.
         </p>
       </div>
     </div>

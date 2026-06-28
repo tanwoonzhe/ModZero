@@ -57,6 +57,11 @@ def score_identity_signals(signals: IdentitySignals) -> tuple[float, list[dict]]
 
     Unknown signals (None) are treated as 0 per Zero Trust principle:
     unknown = untrusted = no points.
+
+    Signals sourced from "local" auth always pass for active sessions
+    (the JWT proves the account is enabled and has a valid role).
+    A "note" field is added to those entries so the UI can explain why.
+    Azure-sourced signals reflect real IdP state and may actually fail.
     """
     low_failed = signals.failed_login_count < 5
 
@@ -67,6 +72,10 @@ def score_identity_signals(signals: IdentitySignals) -> tuple[float, list[dict]]
         "low_failed_logins": low_failed,
         "not_locked":        signals.not_locked,
     }
+
+    # Signals that are structurally always-true for local (non-Azure) auth:
+    # holding a valid JWT already proves account_enabled and role_valid.
+    _LOCAL_ASSUMED = {"account_enabled", "role_valid", "not_locked"}
 
     earned = 0
     breakdown: list[dict] = []
@@ -91,14 +100,19 @@ def score_identity_signals(signals: IdentitySignals) -> tuple[float, list[dict]]
         passed = bool(val)
         pts    = max_pts if passed else 0
         earned += pts
-        breakdown.append({
+
+        entry: dict = {
             "signal": sig,
             "passed": passed,
             "points": pts,
             "max":    max_pts,
             "module": "identity",
             "source": signals.source,
-        })
+        }
+        # Add an explanatory note for local-auth signals that are always true
+        if signals.source == "local" and sig in _LOCAL_ASSUMED and passed:
+            entry["note"] = "local auth — verified by active JWT"
+        breakdown.append(entry)
 
     identity_score = round((earned / TOTAL_MAX) * 100, 1)
     return identity_score, breakdown
