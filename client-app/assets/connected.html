@@ -633,15 +633,16 @@
         const score = d.trust_score == null ? "&mdash;" : Math.round(d.trust_score);
         if (d.decision === "allow") {
           const exp = d.expires_at ? new Date(d.expires_at).toLocaleTimeString() : "&mdash;";
-          // launch_url: one-time code, sets HttpOnly cookie in default browser (preferred)
-          // access_url: token-in-URL, works in any browser while session is active (shareable)
-          const launchUrl = d.launch_url || "";
+          // access_url carries a reusable token valid for the whole 15-min session.
+          // It works in ANY browser and supports re-opening (multi-open); the connector
+          // strips the token from the address bar via a redirect on first load.
+          // We deliberately do NOT use launch_url: its one-time code rotates the session
+          // token on the backend, which would silently invalidate this shareable link
+          // (the "Chrome works but Edge says no_session" bug). One mechanism = one token.
           const accessUrl = d.access_url || "";
-          const openBtn = launchUrl
-            ? `<button class="btn-sm" onclick='openAccessUrl(${JSON.stringify(launchUrl)})'>Open in Browser</button>`
-            : accessUrl
-              ? `<button class="btn-sm" onclick='openAccessUrl(${JSON.stringify(accessUrl)})'>Open in Browser</button>`
-              : "";
+          const openBtn = accessUrl
+            ? `<button class="btn-sm" onclick='openAccessUrl(${JSON.stringify(accessUrl)})'>Open in Browser</button>`
+            : "";
           const copyBtn = accessUrl
             ? `<button class="btn-sm" style="margin-left:4px;background:var(--border);color:var(--text)" onclick='copyAccessUrl(${JSON.stringify(accessUrl)})'>&#9645; Copy Link</button>`
             : "";
