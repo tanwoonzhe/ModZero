@@ -545,7 +545,12 @@ const UsersPage: React.FC = () => {
             </p>
           </div>
 
-          {/* Local users signals (always available) */}
+          {/* Local auth explanation banner */}
+          <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-sm text-amber-800 dark:text-amber-300">
+            <strong>Local Auth note:</strong> For local users, all five signals are structurally always-pass because holding a valid JWT already proves account_enabled, role_valid, recent_login, not_locked, and no failed-login tracking exists (assumed clean). These signals become meaningful when Azure AD (Entra) is integrated — a disabled Azure account or revoked role will actually fail and reduce the identity score.
+          </div>
+
+          {/* Local users signals */}
           <div className="mb-6">
             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
               <span className="px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">Local</span>
@@ -567,12 +572,14 @@ const UsersPage: React.FC = () => {
                 </thead>
                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                   {localUsers.map((user) => {
-                    // 5-signal system matching backend identity_signal_service.py
-                    // account_enabled(30) + role_valid(20) + recent_login(15) + low_failed_logins(25) + not_locked(10) = 100
+                    // Backend identity_signal_service.py: for local auth all signals are True
+                    // because a valid JWT proves account_enabled + role_valid + recent_login,
+                    // and there is no failed-login or lock tracking (assumed clean).
+                    // role is non-nullable (ADMIN or EMPLOYEE), so role_valid is always True.
                     const roleValid = user.role != null;
-                    const hasRecentLogin = !!userDetails[user.user_id]?.lastLogin;
-                    const recentLoginScore = hasRecentLogin ? 15 : 0;
-                    const identityScore = 30 + (roleValid ? 20 : 0) + recentLoginScore + 25 + 10;
+                    // recent_login: backend always sets True for JWT holders (active session proves it)
+                    // DO NOT use access-log history here — that's a different metric.
+                    const identityScore = 30 + (roleValid ? 20 : 0) + 15 + 25 + 10;
                     return (
                       <tr key={user.user_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                         <td className="px-4 py-3">
@@ -580,7 +587,7 @@ const UsersPage: React.FC = () => {
                           <div className="text-xs text-gray-500">{user.email}</div>
                         </td>
                         <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Pass +30</span>
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" title="Verified by valid JWT">Pass +30</span>
                         </td>
                         <td className="px-4 py-3">
                           {roleValid
@@ -588,15 +595,13 @@ const UsersPage: React.FC = () => {
                             : <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200">No role +0</span>}
                         </td>
                         <td className="px-4 py-3">
-                          {hasRecentLogin
-                            ? <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Pass +15</span>
-                            : <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">No login +0</span>}
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" title="Active JWT proves recent authentication">Pass +15</span>
                         </td>
                         <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">Clean +25</span>
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200" title="No failed-login tracking in local DB — assumed clean">Clean +25</span>
                         </td>
                         <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">Pass +10</span>
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200" title="No account-lock field in local DB — assumed unlocked">Pass +10</span>
                         </td>
                         <td className="px-4 py-3">
                           <span className={`font-semibold text-base ${identityScore >= 80 ? 'text-green-600 dark:text-green-400' : identityScore >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
@@ -617,8 +622,6 @@ const UsersPage: React.FC = () => {
               </table>
             </div>
           </div>
-
-          {/* Entra/Azure AD Identity Signals — hidden: Entra users only affect trust when linked to a local ModZero login user */}
         </div>
       )}
     </div>

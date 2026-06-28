@@ -404,7 +404,7 @@ def client_posture_report(
         ps_status = "critical"
 
     failed = [b["factor"] for b in posture_breakdown
-              if not b.get("passed") and b.get("note") != "not configured"]
+              if b.get("passed") is False]  # strictly False; None = N/A, not a failure
     message = f"Trust score: {total}. Decision: {decision}."
     if failed:
         message += f" Posture check{'s' if len(failed) > 1 else ''} failed: {', '.join(failed)}."

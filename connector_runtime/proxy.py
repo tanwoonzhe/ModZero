@@ -260,40 +260,74 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
 
-    # ── Gateway: cookie-authenticated proxy ──────────────────────────────
+    # ── Gateway: cookie-authenticated proxy (with token-in-URL fallback) ──
     def _handle_gateway(self, session_id: str, forward_path: str, query_string: str):
-        cookie_id = _parse_cookie(self.headers.get("Cookie", ""), COOKIE_NAME)
-        if not cookie_id:
-            self._html(403, _denied_page("no_session"))
-            return
-
-        with _cookie_store_lock:
-            entry = _cookie_store.get(cookie_id)
-        if not entry or entry[0] != session_id:
-            self._html(403, _denied_page("no_session"))
-            return
-        _, access_token = entry
-
         client: ControllerClient = _handler_state["client"]
-        result = client.introspect(session_id, access_token)
-        if result is None:
-            self._html(502, _denied_page("backend_unreachable", "Backend unreachable. Try again shortly."))
-            return
-        if not result.get("active"):
-            reason = result.get("reason", "unknown")
+
+        # ── Primary auth: HttpOnly session cookie ────────────────────────
+        cookie_id = _parse_cookie(self.headers.get("Cookie", ""), COOKIE_NAME)
+        if cookie_id:
             with _cookie_store_lock:
-                _cookie_store.pop(cookie_id, None)
-            self._html(403, _denied_page(reason, REASON_MESSAGES.get(reason, "")))
+                entry = _cookie_store.get(cookie_id)
+            if entry and entry[0] == session_id:
+                access_token = entry[1]
+                result = client.introspect(session_id, access_token)
+                if result is None:
+                    self._html(502, _denied_page("backend_unreachable", "Backend unreachable. Try again shortly."))
+                    return
+                if not result.get("active"):
+                    reason = result.get("reason", "unknown")
+                    with _cookie_store_lock:
+                        _cookie_store.pop(cookie_id, None)
+                    self._html(403, _denied_page(reason, REASON_MESSAGES.get(reason, "")))
+                    return
+                target_host = result.get("target_host")
+                target_port = result.get("target_port")
+                protocol    = (result.get("protocol") or "http").lower()
+                if not target_host or not target_port or protocol not in ("http", "https"):
+                    self._html(502, _denied_page("resource_unavailable"))
+                    return
+                self._do_forward(target_host, target_port, protocol, forward_path, query_string)
+                return
+            # Cookie present but not in store (connector restarted) or wrong session
+            # — fall through to token fallback
+
+        # ── Fallback: token in query string ──────────────────────────────
+        # Allows sharing the access_url to any browser while the session is active.
+        # On success: introspect the token, set an HttpOnly cookie, redirect without
+        # the token in the URL so it never appears in browser history after first load.
+        qs_params = parse_qs(query_string)
+        token_qp = (qs_params.get("token") or [None])[0]
+        if token_qp:
+            result = client.introspect(session_id, token_qp)
+            if result is None:
+                self._html(502, _denied_page("backend_unreachable", "Backend unreachable. Try again shortly."))
+                return
+            if not result.get("active"):
+                reason = result.get("reason", "no_session")
+                self._html(403, _denied_page(reason, REASON_MESSAGES.get(reason, "")))
+                return
+            # Valid — set cookie and redirect to clean URL (no token in address bar)
+            new_cookie_id = _secrets.token_urlsafe(32)
+            with _cookie_store_lock:
+                _cookie_store[new_cookie_id] = (session_id, token_qp)
+            max_age = 900  # 15 min, matches SESSION_TTL_SECONDS on backend
+            cookie_val = (
+                f"{COOKIE_NAME}={new_cookie_id}; HttpOnly; SameSite=Lax; "
+                f"Path=/r/{session_id}; Max-Age={max_age}"
+            )
+            clean_qs = _strip_token_from_qs(query_string)
+            clean_path = f"/r/{session_id}{forward_path}"
+            if clean_qs:
+                clean_path += f"?{clean_qs}"
+            self.send_response(302)
+            self.send_header("Location", clean_path)
+            self.send_header("Set-Cookie", cookie_val)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
             return
 
-        target_host = result.get("target_host")
-        target_port = result.get("target_port")
-        protocol    = (result.get("protocol") or "http").lower()
-        if not target_host or not target_port or protocol not in ("http", "https"):
-            self._html(502, _denied_page("resource_unavailable"))
-            return
-
-        self._do_forward(target_host, target_port, protocol, forward_path, query_string)
+        self._html(403, _denied_page("no_session"))
 
     # ── Legacy: status page ──────────────────────────────────────────────
     def _handle_status_page(self, session_id: str, token: str):

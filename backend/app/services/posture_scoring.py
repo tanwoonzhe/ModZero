@@ -3,20 +3,20 @@
 The client reports raw boolean signals. The backend, not the client,
 computes the final score. Clients cannot set scores directly.
 
-8-factor formula (100 pts total)
----------------------------------
-  firewall_enabled          15
-  antivirus_enabled         15
-  disk_encryption_enabled   15
-  screen_lock_enabled       10
-  os_supported              10
-  client_healthy            10
-  recent_check              10
-  intune_compliant          20  (0 if Intune not configured)
-  Total                    105 → normalized to 100 when Intune absent
+8-factor formula (max 100 pts when all factors applicable)
+-----------------------------------------------------------
+  firewall_enabled          15  — Windows only; null → N/A
+  antivirus_enabled         15  — Windows only; null → N/A
+  disk_encryption_enabled   15  — Windows only; null → N/A
+  screen_lock_enabled       10  — Windows only; null → N/A
+  os_supported              10  — always reported
+  client_healthy            10  — always reported
+  recent_check              10  — derived from reported_at timestamp
+  intune_compliant          20  — excluded when Intune not configured (null)
 
-Without Intune: 85-pt scale → normalized: (pts / 85) * 100
-With Intune:    100-pt scale
+Scoring denominator = sum of applicable factors only.
+N/A factors (null) are excluded from both earned and denominator so they
+neither reward nor penalise — only knowable signals affect the score.
 """
 from __future__ import annotations
 
@@ -46,15 +46,17 @@ def score_posture(report: Any) -> tuple[float, list[dict]]:
     """Compute posture score and per-factor breakdown from a PostureReport row.
 
     Returns (posture_score 0–100, breakdown list).
-    - A None value is treated as False (failing).
-    - If intune_compliant is None, Intune is assumed unconfigured:
-      the max denominator is reduced from 105 to 85 so the scale stays 0–100.
+
+    - None value = signal not collected by client (e.g. Windows-only check on
+      non-Windows). Treated as N/A: excluded from both earned and denominator.
+    - intune_compliant = None means Intune is not configured; excluded entirely.
+    - Denominator is the sum of applicable (non-null, non-excluded) factor weights.
+      Falls back to 1 if everything is null (avoids division-by-zero).
     """
     intune_val = getattr(report, "intune_compliant", None)
     intune_configured = intune_val is not None
-    denominator = 105 if intune_configured else 85
 
-    # recent_check: pass if reported_at exists and is within last 7 days
+    # recent_check: pass if reported_at is within last 7 days
     reported_at = getattr(report, "reported_at", None)
     if reported_at is None:
         recent = False
@@ -73,24 +75,41 @@ def score_posture(report: Any) -> tuple[float, list[dict]]:
     overrides = {"recent_check": recent}
 
     earned = 0
+    denominator = 0
     breakdown: list[dict] = []
+
     for item in _FACTORS:
         factor = item["factor"]
         max_pts = item["max"]
 
+        # Intune: skip entirely when not configured
         if factor == "intune_compliant" and not intune_configured:
-            breakdown.append({"factor": factor, "value": None, "passed": False,
-                               "points": 0, "max": max_pts, "note": "not configured"})
+            breakdown.append({
+                "factor": factor, "value": None, "passed": None,
+                "points": 0, "max": max_pts, "note": "not configured",
+            })
             continue
 
         value = overrides.get(factor, getattr(report, factor, None))
-        passed = bool(value) if value is not None else False
+
+        # None = not collected (OS doesn't support this check) → N/A, skip from scoring
+        if value is None:
+            breakdown.append({
+                "factor": factor, "value": None, "passed": None,
+                "points": 0, "max": max_pts, "note": "not collected",
+            })
+            continue
+
+        passed = bool(value)
         pts = max_pts if passed else 0
         earned += pts
-        breakdown.append({"factor": factor, "value": value, "passed": passed,
-                           "points": pts, "max": max_pts})
+        denominator += max_pts
+        breakdown.append({
+            "factor": factor, "value": value, "passed": passed,
+            "points": pts, "max": max_pts,
+        })
 
-    posture_score = round((earned / denominator) * 100, 1)
+    posture_score = round((earned / max(denominator, 1)) * 100, 1)
     return posture_score, breakdown
 
 

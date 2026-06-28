@@ -296,137 +296,116 @@ const DevicesPage: React.FC = () => {
       )}
 
       {activeTab === "posture" ? (
-        /* Device Posture Checks Tab */
-        <>
-          {/* Summary from Intune */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <SummaryCard icon={<FaCheckCircle />} title="Compliance Rate" value={intuneData ? `${compliance_rate}%` : "—"} subtitle={intuneData ? `${compliance_stats.compliant} compliant` : "Intune not connected"} color={compliance_rate >= 80 ? "green" : compliance_rate >= 60 ? "yellow" : "red"} />
-            <SummaryCard icon={<FaLock />} title="Encryption Rate" value={intuneData ? `${encryption_rate}%` : "—"} subtitle={intuneData ? `${encryption_stats.encrypted} encrypted` : "Intune not connected"} color={encryption_rate >= 80 ? "green" : encryption_rate >= 60 ? "yellow" : "red"} />
-            <SummaryCard icon={<FaDesktop />} title="Total Devices" value={total_devices} color="indigo" />
-            <SummaryCard icon={<FaMobile />} title="Corporate Devices" value={intuneData ? ownership_stats.corporate : "—"} subtitle={intuneData ? `${((ownership_stats.corporate / Math.max(total_devices, 1)) * 100).toFixed(0)}% of total` : ""} color="purple" />
+        /* Device Posture Checks Tab — real-time signals from registered devices */
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">Device Posture Checks</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Per-device signals submitted by the ModZero Client App. Windows-only checks (Firewall, AV, Disk Encryption, Screen Lock) show N/A on non-Windows — they are excluded from the score denominator, not counted as failures.
+            </p>
           </div>
-
-          {/* Per-device posture checks from real posture reports */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">Device Posture Checks</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                Real-time posture data from registered devices. Submitted by the ModZero Client App.
-              </p>
+          {postureLoading ? (
+            <div className="flex items-center justify-center h-32">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
             </div>
-            {postureLoading ? (
-              <div className="flex items-center justify-center h-32">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-              </div>
-            ) : Object.keys(postureByDevice).length === 0 ? (
-              <div className="px-6 py-10 text-center">
-                <FaShieldAlt className="mx-auto text-gray-300 dark:text-gray-600 mb-3" size={36} />
-                <p className="text-gray-500 text-sm font-medium">No posture reports found.</p>
-                <p className="text-xs text-gray-400 mt-1">Install the ModZero Client App and run a device check to see real posture data here.</p>
-              </div>
-            ) : (
-              <>
-                {Object.entries(postureByDevice).map(([deviceId, posture]) => {
-                  const device = localDevices.find(d => d.device_id === deviceId);
-                  const FACTOR_META: Record<string, { source: string; affects: boolean; weight: string }> = {
-                    firewall_enabled:        { source: "Local Client",             affects: true,  weight: "Medium" },
-                    antivirus_enabled:       { source: "Local Client",             affects: true,  weight: "Medium" },
-                    disk_encryption_enabled: { source: "Local Client",             affects: true,  weight: "High"   },
-                    screen_lock_enabled:     { source: "Local Client",             affects: true,  weight: "Medium" },
-                    os_supported:            { source: "Local Client / Microsoft Graph", affects: true, weight: "Medium" },
-                    client_healthy:          { source: "Local Client",             affects: true,  weight: "Medium" },
-                    recent_check:            { source: "Local Client",             affects: false, weight: "Low"    },
-                    intune_compliant:        { source: "Microsoft Graph / Intune", affects: true,  weight: "High"   },
-                  };
-                  return (
-                    <div key={deviceId}>
-                      <div className="px-6 py-2 bg-gray-50 dark:bg-gray-900/40 border-t border-gray-100 dark:border-gray-700 flex items-center gap-2">
-                        <FaDesktop className="text-indigo-500" size={12} />
-                        <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-                          {device?.device_name ?? deviceId} · Posture Score: {Math.round(posture.posture_score)} / 100 · Last checked: {posture.reported_at ? new Date(posture.reported_at).toLocaleString() : "—"}
-                        </span>
-                      </div>
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                          <thead className="bg-gray-50 dark:bg-gray-800">
-                            <tr>
-                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Check</th>
-                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
-                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Result</th>
-                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Points</th>
-                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust Score</th>
-                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Weight</th>
-                            </tr>
-                          </thead>
-                          <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                            {(posture.breakdown || []).map((item: any) => {
-                              const meta = FACTOR_META[item.factor] ?? { source: "Local Client", affects: true, weight: "Medium" };
-                              const label = item.factor?.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
-                              const notConfigured = item.value == null;
-                              return (
-                                <tr key={item.factor} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{label}</td>
-                                  <td className="px-4 py-3 text-xs text-gray-500">{meta.source}</td>
-                                  <td className="px-4 py-3">
-                                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                      notConfigured ? "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400"
-                                      : item.passed ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                                      : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                                    }`}>
-                                      {notConfigured ? "Not configured" : item.passed ? "Pass" : "Fail"}
-                                    </span>
-                                  </td>
-                                  <td className="px-4 py-3 text-xs font-mono text-gray-600 dark:text-gray-300">+{item.points ?? 0} / {item.max ?? "—"}</td>
-                                  <td className="px-4 py-3 text-xs text-gray-500">{meta.affects ? "Yes" : "No"}</td>
-                                  <td className="px-4 py-3 text-xs text-gray-500">{meta.weight}</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
+          ) : Object.keys(postureByDevice).length === 0 ? (
+            <div className="px-6 py-10 text-center">
+              <FaShieldAlt className="mx-auto text-gray-300 dark:text-gray-600 mb-3" size={36} />
+              <p className="text-gray-500 text-sm font-medium">No posture reports found.</p>
+              <p className="text-xs text-gray-400 mt-1">Install the ModZero Client App and run a Device Check to see data here.</p>
+            </div>
+          ) : (
+            Object.entries(postureByDevice).map(([deviceId, posture]) => {
+              const device = localDevices.find(d => d.device_id === deviceId);
+              const FACTOR_LABELS: Record<string, string> = {
+                firewall_enabled:        "Firewall Enabled",
+                antivirus_enabled:       "Antivirus Enabled",
+                disk_encryption_enabled: "Disk Encryption",
+                screen_lock_enabled:     "Screen Lock",
+                os_supported:            "OS Version Supported",
+                client_healthy:          "Client App Healthy",
+                recent_check:            "Recent Check",
+                intune_compliant:        "Intune Compliant",
+              };
+              const FACTOR_SOURCE: Record<string, string> = {
+                firewall_enabled:        "Client App (Windows)",
+                antivirus_enabled:       "Client App (Windows)",
+                disk_encryption_enabled: "Client App (Windows)",
+                screen_lock_enabled:     "Client App (Windows)",
+                os_supported:            "Client App",
+                client_healthy:          "Client App",
+                recent_check:            "Client App",
+                intune_compliant:        "Microsoft Graph / Intune",
+              };
+              return (
+                <div key={deviceId}>
+                  <div className="px-6 py-3 bg-gray-50 dark:bg-gray-900/40 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <FaDesktop className="text-indigo-500" size={13} />
+                      <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                        {device?.device_name ?? deviceId}
+                      </span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        · Last checked: {posture.reported_at ? new Date(posture.reported_at).toLocaleString() : "—"}
+                      </span>
                     </div>
-                  );
-                })}
-
-                {/* Intune aggregate rows (if connected) */}
-                {intuneData && (
-                  <div>
-                    <div className="px-6 py-2 bg-indigo-50 dark:bg-indigo-900/20 border-t border-gray-100 dark:border-gray-700 flex items-center gap-2">
-                      <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">Microsoft Graph / Intune · Aggregate across all managed devices</span>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                        <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                          {[
-                            { check: "Device Compliance Policy", result: compliance_rate >= 80 ? "Pass" : compliance_rate >= 50 ? "Warning" : "Fail", affects: true, weight: "High" },
-                            { check: "Disk Encryption (BitLocker / FileVault)", result: encryption_rate >= 80 ? "Pass" : encryption_rate >= 50 ? "Warning" : "Fail", affects: true, weight: "High" },
-                            { check: "Intune Compliant", result: compliance_stats.compliant > 0 ? "Pass" : "No compliant devices", affects: true, weight: "High" },
-                          ].map((row, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{row.check}</td>
-                              <td className="px-4 py-3 text-xs text-gray-500">Microsoft Graph / Intune</td>
-                              <td className="px-4 py-3">
-                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                  row.result === "Pass" ? "bg-green-100 text-green-800"
-                                  : row.result === "Warning" ? "bg-yellow-100 text-yellow-800"
-                                  : "bg-red-100 text-red-800"
-                                }`}>{row.result}</span>
-                              </td>
-                              <td className="px-4 py-3 text-xs text-gray-500">—</td>
-                              <td className="px-4 py-3 text-xs text-gray-500">{row.affects ? "Yes" : "No"}</td>
-                              <td className="px-4 py-3 text-xs text-gray-500">{row.weight}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <span className={`text-sm font-bold px-3 py-1 rounded-full ${
+                      posture.posture_score >= 80 ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                      : posture.posture_score >= 60 ? "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
+                      : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                    }`}>
+                      Posture Score: {Math.round(posture.posture_score)} / 100
+                    </span>
                   </div>
-                )}
-              </>
-            )}
-          </div>
-        </>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                      <thead className="bg-gray-50 dark:bg-gray-800">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Check</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Result</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Points</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Note</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                        {(posture.breakdown || []).map((item: any) => {
+                          const label = FACTOR_LABELS[item.factor] ?? item.factor?.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+                          const source = FACTOR_SOURCE[item.factor] ?? "Client App";
+                          const isNA = item.passed == null;
+                          const resultLabel = isNA ? "N/A" : item.passed ? "Pass" : "Fail";
+                          const resultClass = isNA
+                            ? "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400"
+                            : item.passed
+                              ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                              : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200";
+                          const noteText = isNA
+                            ? (item.note === "not configured" ? "Not configured (requires Intune)" : "Not collected on this platform")
+                            : (item.note ?? "");
+                          return (
+                            <tr key={item.factor} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{label}</td>
+                              <td className="px-4 py-3 text-xs text-gray-500">{source}</td>
+                              <td className="px-4 py-3">
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${resultClass}`}>
+                                  {resultLabel}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-xs font-mono text-gray-600 dark:text-gray-300">
+                                {isNA ? "—" : `+${item.points ?? 0} / ${item.max ?? "—"}`}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-gray-400 italic">{noteText}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       ) : activeTab === "inventory" ? (
         /* Device Inventory */
         <div className="space-y-4">

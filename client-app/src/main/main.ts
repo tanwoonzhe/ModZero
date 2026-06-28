@@ -297,31 +297,26 @@ async function doHeartbeat(): Promise<void> {
   session.healthy = ok;
   if (ok) {
     session.lastHeartbeat = Date.now();
-    // Best-effort trust-score fetch — derive a number from
-    // /api/audit/status-overview if available; ignore failures.
+    // Fetch the real latest trust score from the backend.
+    // /api/trust/latest returns the most recent DeviceTrustScore for the user.
     if (cfg.accessToken) {
       try {
-        const r = await httpJson(cfg.url + "/api/audit/status-overview", {
+        const r = await httpJson(cfg.url + "/api/trust/latest", {
           headers: { Authorization: `Bearer ${cfg.accessToken}` },
           timeoutMs: 3500,
         });
         if (r.status >= 200 && r.status < 300) {
           const data = JSON.parse(r.body || "{}");
-          // Heuristic: ratio of allow vs total decisions in last hour.
-          const allow = Number(data.allow_count ?? data.allows ?? 0);
-          const deny = Number(data.deny_count ?? data.denies ?? 0);
-          const total = allow + deny;
-          if (total > 0) {
-            session.trustScore = Math.round((allow / total) * 100);
-          } else if (session.trustScore == null) {
-            session.trustScore = 90; // healthy default
+          const raw = Number(data.total_score ?? null);
+          if (!Number.isNaN(raw)) {
+            session.trustScore = Math.round(raw);
           }
         }
+        // 404 = no device registered yet — leave trustScore as-is (null until device check runs)
       } catch {
         /* ignore */
       }
     }
-    if (session.trustScore == null) session.trustScore = 90;
   }
   if (tray) updateTrayMenu();
 }
@@ -522,6 +517,14 @@ ipcMain.handle("modzero:collect-posture", () => collectPosture());
 ipcMain.handle("modzero:run-device-check", async () => {
   const signals = await collectPosture();
   const result = await authedRequest("POST", "/api/posture/report", signals);
+  // Keep session trust score in sync so Overview reflects the new score immediately.
+  if (result.ok && result.data != null) {
+    const raw = Number((result.data as Record<string, unknown>).total_score ?? null);
+    if (!Number.isNaN(raw)) {
+      session.trustScore = Math.round(raw);
+      if (tray) updateTrayMenu();
+    }
+  }
   return { signals, result };
 });
 
