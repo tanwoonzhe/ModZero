@@ -319,6 +319,18 @@
       </div>
 
       <div class="panel">
+        <h2>Entra Integration</h2>
+        <dl class="kv">
+          <dt>Status</dt><dd id="entraStatus"><span class="badge neutral">Unknown</span></dd>
+        </dl>
+        <p style="color:var(--muted);font-size:12px;margin:10px 0 0">
+          Controlled by your administrator in the web console. When active, additional
+          Microsoft Graph identity/device/context signals contribute to your trust score
+          and appear in the Device Check breakdown. Run a Device Check to refresh.
+        </p>
+      </div>
+
+      <div class="panel">
         <h2>Demo Mode</h2>
         <p style="color:var(--muted);font-size:12px;margin:0 0 12px">
           Simulate posture failures for FYP demonstration. When enabled, device check signals
@@ -350,6 +362,20 @@
   <script>
     const $ = (id) => document.getElementById(id);
     const M = window.modzero;
+
+    // Entra integration status, learned from the latest Device Check response.
+    let entraEnabled = null;
+    function renderEntraStatus() {
+      const el = $("entraStatus");
+      if (!el) return;
+      if (entraEnabled === null) {
+        el.innerHTML = '<span class="badge neutral">Unknown — run Device Check</span>';
+      } else if (entraEnabled) {
+        el.innerHTML = '<span class="badge ok">Active (Microsoft Graph)</span>';
+      } else {
+        el.innerHTML = '<span class="badge neutral">Disabled</span>';
+      }
+    }
 
     function fmtRelative(ts) {
       if (!ts) return "never";
@@ -437,6 +463,10 @@
       client_healthy:          "Client Healthy",
       recent_check:            "Recent Check (≤7d)",
       intune_compliant:        "Intune Compliant",
+      // Entra (Microsoft Graph) device factors — appear only when Entra is enabled
+      entra_registered:        "Entra Registered",
+      intune_managed:          "Intune Managed",
+      intune_encrypted:        "Intune Encrypted",
     };
 
     const CONTEXT_LABELS = {
@@ -447,6 +477,9 @@
       known_user_device_pair:    "Known User-Device Pair",
       resource_pattern_normal:   "Resource Pattern Normal",
       gateway_online:            "Gateway Online",
+      // Entra (Microsoft Graph) context signals — appear only when Entra is enabled
+      signin_risk_low:           "Sign-in Risk Low (Entra)",
+      trusted_location:          "Trusted Location (Entra)",
     };
 
     const IDENTITY_LABELS = {
@@ -455,6 +488,10 @@
       recent_login:      "Recent Login",
       low_failed_logins: "Low Failed Logins",
       not_locked:        "Account Not Locked",
+      // Entra (Microsoft Graph) identity signals — appear only when Entra is enabled
+      mfa_registered:        "MFA Registered (Entra)",
+      identity_risk_low:     "Identity Risk Low (Entra)",
+      conditional_access_ok: "Conditional Access OK (Entra)",
     };
 
     function renderFactors(breakdown) {
@@ -496,6 +533,7 @@
 
     function showScore(r) {
       $("postureResultPanel").style.display = "";
+      if (typeof r.entra_enabled === "boolean") { entraEnabled = r.entra_enabled; renderEntraStatus(); }
       const posture  = Math.round(r.posture_score ?? 0);
       const total    = Math.round(r.total_score   ?? 0);
       const context  = Math.round(r.context_score  ?? 100);
@@ -697,6 +735,7 @@
       } catch {
         $("setFingerprint").textContent = "(unavailable)";
       }
+      renderEntraStatus();
     }
 
     $("btnSaveUrl").addEventListener("click", async () => {

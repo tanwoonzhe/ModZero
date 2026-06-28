@@ -30,6 +30,90 @@ import {
 } from '../store/zeroTrustStore';
 import api from '../api';
 
+/* ------------------------------------------------------------------ */
+/*  Entra (Microsoft Graph) signals — READ-ONLY, gated by the single   */
+/*  Settings toggle. No per-signal controls (one global toggle only).  */
+/* ------------------------------------------------------------------ */
+
+const ENTRA_SIGNALS: Record<'identity' | 'device' | 'context', { label: string; pts: number }[]> = {
+  identity: [
+    { label: 'MFA Registered', pts: 25 },
+    { label: 'Identity Risk Low', pts: 20 },
+    { label: 'Conditional Access OK', pts: 15 },
+  ],
+  device: [
+    { label: 'Entra Registered', pts: 10 },
+    { label: 'Intune Managed', pts: 10 },
+    { label: 'Intune Encrypted', pts: 15 },
+  ],
+  context: [
+    { label: 'Sign-in Risk Low', pts: 15 },
+    { label: 'Trusted Location', pts: 10 },
+  ],
+};
+
+const EntraSignalsCard: React.FC<{ module: 'identity' | 'device' | 'context' }> = ({ module }) => {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    api.get('/trust-policy/active')
+      .then(r => setEnabled(!!r.data.entra_enabled))
+      .catch(() => setEnabled(false));
+  }, []);
+  const signals = ENTRA_SIGNALS[module];
+  return (
+    <div className="mt-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+            Entra Signals (Microsoft Graph)
+            <span className={`px-2 py-0.5 rounded text-xs ${enabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
+              {enabled === null ? '…' : enabled ? 'Active' : 'Disabled'}
+            </span>
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            {enabled
+              ? 'Live signals contributing to the score while Entra is enabled. Evaluated per posture report; results show in the client app Device Check breakdown.'
+              : 'Unlocked by the single toggle in Settings → Azure AD Integration. While off they are N/A and never affect the score.'}
+          </p>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+          <thead className="bg-gray-50 dark:bg-gray-800">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Signal</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Max Points</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+            {signals.map(s => (
+              <tr key={s.label} className={enabled ? '' : 'opacity-60'}>
+                <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{s.label}</td>
+                <td className="px-4 py-3 text-xs">
+                  <span className="inline-flex px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">Microsoft Graph</span>
+                </td>
+                <td className="px-4 py-3 text-center text-sm">+{s.pts}</td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${enabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
+                    {enabled ? 'Active' : 'N/A'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          Read-only — controlled solely by the global Entra toggle in Settings. Backend mapping: <code className="font-mono">azure_signal_service.py</code>.
+        </p>
+      </div>
+    </div>
+  );
+};
+
 const ZeroTrustPoliciesPage: React.FC = () => {
   const isAdmin = useZeroTrustStore(selectIsAdmin);
   const weightConfig = useZeroTrustStore(selectWeightConfig);
@@ -316,17 +400,17 @@ const ZeroTrustPoliciesPage: React.FC = () => {
 
       {/* Device Rules Tab */}
       {activeTab === 'device-rules' && (
-        <DeviceRulesTab />
+        <><DeviceRulesTab /><EntraSignalsCard module="device" /></>
       )}
 
       {/* Identity Rules Tab */}
       {activeTab === 'identity-rules' && (
-        <IdentityRulesTab />
+        <><IdentityRulesTab /><EntraSignalsCard module="identity" /></>
       )}
 
       {/* Context Rules Tab */}
       {activeTab === 'context-rules' && (
-        <ContextRulesTab />
+        <><ContextRulesTab /><EntraSignalsCard module="context" /></>
       )}
 
       {/* Trust Score Weights Tab */}

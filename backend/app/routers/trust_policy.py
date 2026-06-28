@@ -16,6 +16,8 @@ These weights are read by every scoring endpoint:
 """
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -26,6 +28,29 @@ from ..models import TrustPolicyConfig, User
 router = APIRouter()
 
 _DEFAULT_CONFIG_ID = 1
+
+# Short-lived cache for the (relatively expensive) live Graph connection probe so
+# repeated GET /trust-policy/active calls don't hammer Microsoft Graph.
+_AZURE_PROBE_TTL = 60  # seconds
+_azure_probe_cache: dict = {"ts": 0.0, "connected": False}
+
+
+def _azure_connected(force: bool = False) -> bool:
+    """Best-effort live check that a Microsoft Graph connection is usable.
+
+    Cached for `_AZURE_PROBE_TTL` seconds. Never raises — any failure → False.
+    """
+    now = time.time()
+    if not force and (now - _azure_probe_cache["ts"]) < _AZURE_PROBE_TTL:
+        return bool(_azure_probe_cache["connected"])
+    connected = False
+    try:
+        from ..azure_service import azure_service
+        connected = bool(azure_service.test_connection().get("success"))
+    except Exception:
+        connected = False
+    _azure_probe_cache.update(ts=now, connected=connected)
+    return connected
 
 
 def get_or_create_policy(db: Session) -> TrustPolicyConfig:
@@ -39,13 +64,20 @@ def get_or_create_policy(db: Session) -> TrustPolicyConfig:
     return cfg
 
 
+def _policy_out(cfg: TrustPolicyConfig, *, force_probe: bool = False) -> schemas.TrustPolicyConfigOut:
+    """Serialize the policy and attach the live azure_connected flag."""
+    out = schemas.TrustPolicyConfigOut.model_validate(cfg)
+    out.azure_connected = _azure_connected(force=force_probe)
+    return out
+
+
 @router.get("/trust-policy/active", response_model=schemas.TrustPolicyConfigOut, tags=["trust-policy"])
 def get_active_policy(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_admin),
-) -> TrustPolicyConfig:
-    """Return the active trust policy weights and context rules."""
-    return get_or_create_policy(db)
+) -> schemas.TrustPolicyConfigOut:
+    """Return the active trust policy weights, context rules, and Entra status."""
+    return _policy_out(get_or_create_policy(db))
 
 
 @router.patch("/trust-policy/active", response_model=schemas.TrustPolicyConfigOut, tags=["trust-policy"])
@@ -53,7 +85,7 @@ def update_active_policy(
     update: schemas.TrustPolicyConfigUpdate,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_admin),
-) -> TrustPolicyConfig:
+) -> schemas.TrustPolicyConfigOut:
     """Update trust policy weights and/or context rules.
 
     Validation:
@@ -61,8 +93,18 @@ def update_active_policy(
       (±0.01 tolerance).
     - default_threshold must be 0–100.
     - allowed_start_hour and allowed_end_hour must be 0–23.
+    - entra_enabled may only be turned ON when a live Graph connection succeeds.
     """
     cfg = get_or_create_policy(db)
+
+    # Entra toggle: enabling requires a working Microsoft Graph connection.
+    if update.entra_enabled is True and not cfg.entra_enabled:
+        if not _azure_connected(force=True):
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot enable Entra signals: Microsoft Graph connection failed. "
+                       "Configure Azure credentials and pass Test Connection first.",
+            )
 
     # Weight validation: if any weight supplied, all must be supplied and sum to 1.0
     weights = {
@@ -98,4 +140,4 @@ def update_active_policy(
 
     db.commit()
     db.refresh(cfg)
-    return cfg
+    return _policy_out(cfg)

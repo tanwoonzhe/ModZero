@@ -1006,6 +1006,12 @@ class TrustPolicyConfig(Base):
     # ── Default access threshold ──────────────────────────────────────────────
     default_threshold: int = Column(Integer, nullable=False, default=60)
 
+    # ── Entra / Azure integration ─────────────────────────────────────────────
+    # When True (and a live Graph connection is available), the scoring engine
+    # overlays additional Entra-sourced identity/device/context signals and
+    # enforces the identity hard gate. Admin-only; toggled from web Settings.
+    entra_enabled: bool = Column(Boolean, nullable=False, default=False)
+
     # ── Context Analysis rules ────────────────────────────────────────────────
     allowed_start_hour:       int  = Column(Integer, nullable=False, default=8)
     allowed_end_hour:         int  = Column(Integer, nullable=False, default=20)

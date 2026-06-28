@@ -24,9 +24,41 @@ const SettingsPage: React.FC = () => {
   const [cacheStatus, setCacheStatus] = useState<any>(null);
   const [cacheUnavailable, setCacheUnavailable] = useState(false);
 
+  // Entra integration toggle (persisted in TrustPolicyConfig)
+  const [entraEnabled, setEntraEnabled] = useState(false);
+  const [azureConnected, setAzureConnected] = useState<boolean | null>(null);
+  const [entraSaving, setEntraSaving] = useState(false);
+
   useEffect(() => {
     fetchCacheStatus();
+    fetchEntraStatus();
   }, []);
+
+  const fetchEntraStatus = async () => {
+    try {
+      const res = await api.get("/trust-policy/active");
+      setEntraEnabled(!!res.data.entra_enabled);
+      setAzureConnected(res.data.azure_connected ?? null);
+    } catch {
+      /* admin-only endpoint; ignore for non-admins */
+    }
+  };
+
+  const toggleEntra = async () => {
+    const next = !entraEnabled;
+    setEntraSaving(true);
+    try {
+      const res = await api.patch("/trust-policy/active", { entra_enabled: next });
+      setEntraEnabled(!!res.data.entra_enabled);
+      setAzureConnected(res.data.azure_connected ?? azureConnected);
+      toast.success(next ? "Entra signals enabled" : "Entra signals disabled");
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail;
+      toast.error(detail || "Could not update Entra setting");
+    } finally {
+      setEntraSaving(false);
+    }
+  };
 
   const fetchCacheStatus = async () => {
     try {
@@ -43,6 +75,7 @@ const SettingsPage: React.FC = () => {
     try {
       const res = await api.get<AzureConnectionTest>("/azure/test-connection");
       setConnectionStatus(res.data);
+      setAzureConnected(res.data.success);
       if (res.data.success) {
         toast.success("Azure connection successful");
       } else {
@@ -195,14 +228,53 @@ const SettingsPage: React.FC = () => {
             </div>
           )}
 
-          {/* Azure Config Info */}
+          {/* Entra signals toggle */}
+          <div className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700">
+            <div className="pr-4">
+              <p className="font-medium">Enable Entra Identity &amp; Device Signals</p>
+              <p className="text-sm text-gray-500">
+                Overlays live Microsoft Graph signals onto the trust score and enforces the
+                identity hard gate. Requires a working connection — run Test Connection first.
+              </p>
+            </div>
+            <button
+              onClick={toggleEntra}
+              disabled={entraSaving || (!entraEnabled && azureConnected === false)}
+              title={!entraEnabled && azureConnected === false ? "Test Connection must succeed first" : ""}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                entraEnabled ? "bg-indigo-600" : "bg-gray-300 dark:bg-gray-600"
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  entraEnabled ? "translate-x-6" : "translate-x-1"
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Unlocked tests */}
           <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-            <p className="text-sm text-blue-800 dark:text-blue-300">
-              <strong>Note:</strong> Azure AD credentials are configured via environment variables.
-              Update <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">AZURE_TENANT_ID</code>,{" "}
-              <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">AZURE_CLIENT_ID</code>, and{" "}
-              <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">AZURE_CLIENT_SECRET</code> in
-              your <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">.env</code> file.
+            <p className="text-sm text-blue-800 dark:text-blue-300 mb-2">
+              {entraEnabled ? (
+                <><strong>Entra signals are active.</strong> These additional tests now contribute to the trust score:</>
+              ) : (
+                <><strong>When enabled,</strong> these additional tests are unlocked (N/A while off, never penalising):</>
+              )}
+            </p>
+            <ul className="text-sm text-blue-800 dark:text-blue-300 grid sm:grid-cols-3 gap-x-6 gap-y-1 list-disc list-inside">
+              <li>Identity: MFA Registered</li>
+              <li>Identity: Identity Risk Low</li>
+              <li>Identity: Conditional Access OK</li>
+              <li>Device: Entra Registered</li>
+              <li>Device: Intune Managed</li>
+              <li>Device: Intune Encrypted</li>
+              <li>Context: Sign-in Risk Low</li>
+              <li>Context: Trusted Location</li>
+            </ul>
+            <p className="text-xs text-blue-700/80 dark:text-blue-300/70 mt-2">
+              Credentials come from <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET</code>.
+              A disabled Entra account is denied outright regardless of score.
             </p>
           </div>
         </div>

@@ -671,6 +671,17 @@ def introspect_access_session(
     if session.connector_id and session.connector_id != connector.connector_id:
         return schemas.AccessIntrospectResponse(active=False, reason="connector_mismatch")
 
+    # Entra identity hard gate (cached): cut a live session if Graph now reports
+    # the account as disabled. Only fires when Entra is enabled; unknown/error → no gate.
+    from ..routers.trust_policy import get_or_create_policy
+    if getattr(get_or_create_policy(db), "entra_enabled", False):
+        gate_user = db.query(User).filter(User.user_id == session.user_id).first()
+        if gate_user is not None:
+            from ..services.azure_signal_service import hard_gate_reason
+            gate = hard_gate_reason(gate_user)
+            if gate:
+                return schemas.AccessIntrospectResponse(active=False, reason=gate)
+
     # Resource must still be enabled
     resource = (
         db.query(ProtectedResource).filter(ProtectedResource.id == session.resource_id).first()
