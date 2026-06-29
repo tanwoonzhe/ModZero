@@ -42,12 +42,26 @@ async function runPs(command: string, timeoutMs = 5000): Promise<string | null> 
 
 async function detectFirewall(): Promise<boolean | null> {
   if (process.platform !== "win32") return null;
+  // Primary: PowerShell cmdlet
   const out = await runPs(
     "(Get-NetFirewallProfile -ErrorAction SilentlyContinue | Where-Object {$_.Enabled -eq $true}).Count",
   );
-  if (out == null) return null;
-  const n = parseInt(out, 10);
-  return Number.isFinite(n) ? n > 0 : null;
+  if (out != null && out !== "") {
+    const n = parseInt(out, 10);
+    if (Number.isFinite(n)) return n > 0;
+  }
+  // Fallback: registry — always readable without elevation, even on VMs
+  const reg = await runPs(
+    "$k='HKLM:\\SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy'; " +
+    "($('DomainProfile','StandardProfile','PublicProfile') | " +
+    "ForEach-Object { (Get-ItemProperty \"$k\\$_\" -EA SilentlyContinue).EnableFirewall } | " +
+    "Where-Object { $_ -eq 1 }).Count",
+  );
+  if (reg != null && reg !== "") {
+    const n = parseInt(reg, 10);
+    if (Number.isFinite(n)) return n > 0;
+  }
+  return null;
 }
 
 async function detectAntivirus(): Promise<boolean | null> {
@@ -60,23 +74,33 @@ async function detectAntivirus(): Promise<boolean | null> {
     ),
   ]);
   if (def && def.toLowerCase() === "true") return true;
-  if (wmi != null) {
+  if (wmi != null && wmi !== "") {
     const n = parseInt(wmi, 10);
     if (Number.isFinite(n)) return n > 0;
   }
-  return def ? false : null;
+  // Fallback: check if WinDefend service is running (works on VMs where WMI SecurityCenter is limited)
+  const svc = await runPs("(Get-Service -Name WinDefend -EA SilentlyContinue).Status");
+  if (svc && svc.trim().toLowerCase() === "running") return true;
+  return def != null ? false : null;
 }
 
 async function detectDiskEncryption(): Promise<boolean | null> {
   if (process.platform !== "win32") return null;
+  // Require BOTH ProtectionStatus=On AND VolumeStatus=FullyEncrypted to avoid
+  // false positives on VMs where ProtectionStatus may be On without real encryption.
   const ps = await runPs(
-    "(Get-BitLockerVolume -MountPoint $env:SystemDrive -ErrorAction SilentlyContinue).ProtectionStatus",
+    "$v = Get-BitLockerVolume -MountPoint $env:SystemDrive -EA SilentlyContinue; " +
+    "if ($v -ne $null) { " +
+    "  if ($v.ProtectionStatus -eq 'On' -and $v.VolumeStatus -eq 'FullyEncrypted') { '1' } else { '0' } " +
+    "} else { '' }",
   );
   if (ps != null && ps !== "") {
-    return ps.trim() === "1" || ps.trim().toLowerCase() === "on";
+    return ps.trim() === "1";
   }
+  // Fallback: manage-bde — check both conversion status and protection status
   const bde = await runPs(
-    "$r = (manage-bde -status $env:SystemDrive 2>$null); if ($r -match 'Protection.*On') { 'true' } else { 'false' }",
+    "$r = (manage-bde -status $env:SystemDrive 2>$null); " +
+    "if ($r -match 'Conversion Status.*Fully Encrypted' -and $r -match 'Protection Status.*Protection On') { 'true' } else { 'false' }",
   );
   if (bde != null && bde !== "") return bde.trim().toLowerCase() === "true";
   return null;
