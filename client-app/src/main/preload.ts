@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld("modzero", {
   // Settings
   setBackendUrl: (url: string): Promise<unknown> =>
     ipcRenderer.invoke("modzero:set-backend-url", url),
+  changePassword: (currentPassword: string, newPassword: string): Promise<unknown> =>
+    ipcRenderer.invoke("modzero:change-password", { current_password: currentPassword, new_password: newPassword }),
 
   // Tunnel readiness + enrollment
   tunnelDetect: (): Promise<unknown> => ipcRenderer.invoke("modzero:tunnel-detect"),

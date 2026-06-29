@@ -206,6 +206,7 @@ function createWindow(): void {
     minHeight: 600,
     title: "ModZero Dashboard",
     icon: iconPath,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -572,6 +573,12 @@ ipcMain.handle("modzero:set-backend-url", (_evt, url: string) => {
 
 ipcMain.handle("modzero:get-fingerprint", () => getOrCreateFingerprint());
 
+ipcMain.handle(
+  "modzero:change-password",
+  (_evt, args: { current_password: string; new_password: string }) =>
+    authedRequest("POST", "/api/users/me/change-password", args),
+);
+
 // ── Tunnel readiness + enrollment ───────────────────────────────────────
 ipcMain.handle("modzero:tunnel-detect", () => detectTunnel());
 
@@ -590,6 +597,7 @@ ipcMain.handle(
 
 // ── App lifecycle ───────────────────────────────────────────────────────
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   createTray();
   createWindow();
 });
