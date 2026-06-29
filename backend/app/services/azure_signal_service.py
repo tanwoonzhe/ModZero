@@ -24,6 +24,7 @@ HTTP/permission handling lives in one place.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional, TYPE_CHECKING
@@ -39,38 +40,54 @@ log = logging.getLogger(__name__)
 # latest sign-in record per UPN so a slow/timed-out fetch falls back to the last
 # good one instead of dropping the context/identity sign-in signals to N/A.
 _SIGNIN_TTL = 900  # seconds (15 min)
-_signin_cache: dict = {}  # upn(lower) -> (fetched_at, latest_record|None)
+_signin_cache: dict = {}   # upn(lower) -> (fetched_at, latest_record|None)
+_signin_fetching: set = set()  # UPNs currently being fetched in background
+
+
+def _trigger_signin_fetch(upn: str) -> None:
+    """Fire-and-forget: fetch sign-in log in a daemon thread and warm the cache.
+
+    The signIns beta endpoint has high, variable latency on some tenants
+    (often 10-20s). Fetching it synchronously blocks the entire posture-report
+    response. Instead we kick off a background thread the first time a cache
+    miss is detected. The posture report returns immediately with N/A for
+    sign-in signals; by the time the user runs the next device check (~30s
+    later from the heartbeat) the cache is warm and real values appear.
+    """
+    key = upn.lower()
+    if key in _signin_fetching:
+        return  # already in flight
+    _signin_fetching.add(key)
+
+    def _run() -> None:
+        try:
+            logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=20)
+            if logs:
+                _signin_cache[key] = (time.time(), logs[0])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Background sign-in fetch failed for %s: %s", upn, exc)
+        finally:
+            _signin_fetching.discard(key)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _latest_signin(upn: str) -> Optional[dict]:
-    """Return this user's most recent sign-in record, best-effort with caching.
+    """Return cached sign-in record, or None (triggering a background fetch).
 
-    Filters server-side by UPN (top=1) for speed. On a Graph timeout/empty
-    response, returns the last cached record (if still fresh) so transient
-    Graph latency doesn't flap the sign-in signals to N/A.
+    On a cache hit the record is returned instantly (no Graph call).
+    On a cache miss the caller receives None immediately while a daemon thread
+    fetches the data and populates the cache for the next call.
     """
     key = upn.lower()
     now = time.time()
-    # Serve a still-fresh cached record first so we never re-pay the Graph
-    # latency within the TTL window (the signIns beta endpoint is slow on some
-    # tenants). The cache is populated by the first successful fetch.
     hit = _signin_cache.get(key)
     if hit is not None and (now - hit[0]) < _SIGNIN_TTL:
         return hit[1]
-    try:
-        # Timeout is generous (8s) because this only runs on a cache miss
-        # (once per 15 min per user); a longer wait here lets the first fetch
-        # actually succeed and warm the cache instead of perpetually timing out.
-        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=8)
-    except Exception as exc:  # noqa: BLE001 — get_sign_in_logs is best-effort
-        log.warning("Sign-in fetch failed for %s: %s", upn, exc)
-        logs = []
-    if logs:
-        latest = logs[0]
-        _signin_cache[key] = (now, latest)
-        return latest
-    # Graph returned nothing and no fresh cache existed (checked above) → N/A.
+    _trigger_signin_fetch(upn)
     return None
+
+
 
 
 @dataclass
@@ -105,14 +122,9 @@ class AzureSignals:
     na_reasons:             dict = field(default_factory=dict)
 
     def identity_kwargs(self) -> dict:
-        """Scored identity signals for IdentitySignals(...).
-        account_enabled is now included in the score (moved to Entra-only scoring).
-        It still also feeds the hard gate separately — but here it contributes +30 pts
-        when Graph explicitly returns accountEnabled=True.
-        role_valid remains None (reserved for future Graph role mapping).
-        """
         return {
             "account_enabled":             self.account_enabled,
+            "role_valid":                  self.role_valid,
             "azure_mfa_registered":        self.mfa_registered,
             "azure_identity_risk_low":     self.identity_risk_low,
             "azure_conditional_access_ok": self.conditional_access_ok,
@@ -175,6 +187,27 @@ def _user_principal(user: "User") -> Optional[str]:
     return getattr(user, "username", None)
 
 
+def _get_user_memberships(user_id: str) -> Optional[list]:
+    """Cached fetch of a user's group/directory-role memberships.
+
+    Returns None on Graph error (permission issue, network) so callers treat
+    role_valid as N/A rather than Fail. Returns [] when Graph is reachable but
+    the user genuinely has no group or role memberships.
+    """
+    key = f"memberships:{user_id}"
+    now = time.time()
+    hit = _bulk_cache.get(key)
+    if hit is not None and (now - hit[0]) < _BULK_TTL:
+        return hit[1]
+    try:
+        value = azure_service.get_user_member_of(user_id)
+        _bulk_cache[key] = (now, value)
+        return value
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Membership fetch failed for %s: %s", user_id, exc)
+        return hit[1] if hit is not None else None  # stale or None on error
+
+
 def _match_azure_user(user: "User") -> Optional[dict]:
     """Find the Entra user record matching this local user. None on miss/error."""
     principal = _user_principal(user)
@@ -230,10 +263,18 @@ def collect_azure_signals(user: "User", device: Optional["Device"]) -> AzureSign
     azure_user = _match_azure_user(user)
     if azure_user is not None:
         sig.account_enabled = _explicit_bool(azure_user.get("accountEnabled"))
-        # role_valid is reserved — Graph role→policy mapping isn't implemented yet,
-        # so it's an intentional "not configured", not a collection failure.
-        sig.na_reasons["role_valid"] = "not_configured"
         uid = azure_user.get("id")
+
+        # Role valid: user belongs to at least one Entra group or directory role.
+        # Legitimate employees always have at least one group membership.
+        # None on Graph error (permission issue) → N/A rather than Fail.
+        try:
+            if uid:
+                memberships = _get_user_memberships(uid)
+                if memberships is not None:
+                    sig.role_valid = len(memberships) > 0
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Role-valid lookup failed: %s", exc)
 
         # MFA registration
         try:

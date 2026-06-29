@@ -888,6 +888,32 @@ class AzureGraphService:
             logger.error(f"Error fetching auth methods for user {user_id}: {str(e)}")
             return {"mfa_registered": None, "mfa_methods": [], "error": str(e)}
 
+    def get_user_member_of(self, user_id: str) -> List[Dict]:
+        """Get groups and directory roles the user belongs to.
+
+        Returns list of membership objects (groups + directory roles).
+        Empty list means no memberships found; raises on permission error so
+        callers can distinguish "no groups" from "can't check".
+        Requires GroupMember.Read.All or Directory.Read.All permission.
+        """
+        access_token = self._get_access_token()
+        if not access_token:
+            raise Exception("Failed to acquire Azure access token")
+
+        headers = {'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'}
+        url = f"{self.graph_endpoint}/users/{user_id}/memberOf"
+        params = {'$select': 'id,displayName', '$top': 100}
+
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=5)
+            if response.status_code == 403:
+                raise Exception("Missing GroupMember.Read.All permission")
+            response.raise_for_status()
+            return response.json().get('value', [])
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Error fetching memberOf for user {user_id}: {str(e)}")
+            raise Exception(f"Failed to fetch memberOf: {str(e)}")
+
     def get_users_mfa_status(self, user_ids: List[str]) -> Dict[str, Any]:
         """Get MFA status for multiple users. Returns a dict keyed by user_id."""
         from concurrent.futures import ThreadPoolExecutor, as_completed
