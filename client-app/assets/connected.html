@@ -249,16 +249,20 @@
 
       <div class="panel" id="postureResultPanel" style="display:none">
         <h2>Latest Score</h2>
-        <div class="grid" style="grid-template-columns: repeat(2, 1fr)">
+        <!-- Total trust score on its own full-width row -->
+        <div class="grid" style="grid-template-columns: 1fr; margin-bottom: 14px">
+          <div class="tile" style="background: #0b1220">
+            <div class="label">Total Trust Score</div>
+            <div class="score"><span class="big" style="font-size:36px" id="resTotal">—</span><span class="max">/ 100</span></div>
+            <div class="bar"><div id="resTotalBar" style="width:0%"></div></div>
+          </div>
+        </div>
+        <!-- The three contributing module scores in a row below -->
+        <div class="grid" style="grid-template-columns: repeat(3, 1fr)">
           <div class="tile">
             <div class="label">Device Posture Score</div>
             <div class="score"><span class="big" id="resPosture">—</span><span class="max">/ 100</span></div>
             <div class="bar"><div id="resPostureBar" style="width:0%"></div></div>
-          </div>
-          <div class="tile">
-            <div class="label">Total Trust Score</div>
-            <div class="score"><span class="big" id="resTotal">—</span><span class="max">/ 100</span></div>
-            <div class="bar"><div id="resTotalBar" style="width:0%"></div></div>
           </div>
           <div class="tile">
             <div class="label">Context Score</div>
@@ -515,8 +519,9 @@
       (breakdown || []).forEach((b) => {
         // passed == null means N/A (not collected / not configured)
         const isNA = b.passed == null;
+        const notConfigured = isNA && (b.status === "not_configured" || b.note === "not configured");
         const cls = isNA ? "unknown" : b.passed ? "pass" : "fail";
-        const label = isNA ? "N/A" : b.passed ? "Pass ✓" : "Fail ✗";
+        const label = isNA ? (notConfigured ? "Not Configured" : "N/A") : b.passed ? "Pass ✓" : "Fail ✗";
         const name = FACTOR_LABELS[b.factor] || b.factor.replace(/_/g, " ");
         const note = b.note ? ` <span style="color:var(--muted);font-size:10px">(${b.note})</span>` : "";
         const ptsText = isNA ? `—` : `+${b.points ?? 0} / ${b.max ?? "—"} pts`;
@@ -527,11 +532,17 @@
       });
     }
 
+    // null result label: "Not Configured" when the backend says the signal has no
+    // tenant policy (benign), otherwise "N/A" (could not collect / transient).
+    function naLabel(b) {
+      return b.status === "not_configured" ? "Not Configured" : "N/A";
+    }
+
     function renderSignalGrid(breakdown, grid, labelMap) {
       grid.innerHTML = "";
       (breakdown || []).forEach((b) => {
         const cls = b.passed == null ? "unknown" : b.passed ? "pass" : "fail";
-        const label = b.passed == null ? "N/A" : b.passed ? "Pass ✓" : "Fail ✗";
+        const label = b.passed == null ? naLabel(b) : b.passed ? "Pass ✓" : "Fail ✗";
         const name = labelMap[b.signal] || b.signal.replace(/_/g, " ");
         const noteParts = [];
         if (b.note) noteParts.push(b.note);
