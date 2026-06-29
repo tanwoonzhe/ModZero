@@ -81,6 +81,23 @@ def get_user_by_id(
     return user
 
 
+def _avg_device_trust_score(db: Session, user_id: str) -> Optional[float]:
+    """Return the average trust score across all of a user's device check history."""
+    import uuid as _uuid
+    try:
+        uid = _uuid.UUID(user_id)
+    except ValueError:
+        return None
+    rows = (
+        db.query(models.DeviceTrustScore.total_score)
+        .join(models.Device, models.Device.device_id == models.DeviceTrustScore.device_id)
+        .filter(models.Device.user_id == uid)
+        .all()
+    )
+    scores = [r.total_score for r in rows if r.total_score is not None]
+    return round(sum(scores) / len(scores), 1) if scores else None
+
+
 @router.get("/{user_id}/details", response_model=Dict[str, Any])
 def get_user_details(
     user_id: str,
@@ -159,6 +176,7 @@ def get_user_details(
             "total_attempts": len(logs),
             "allowed_attempts": sum(1 for l in logs if l.decision == 'allow'),
             "denied_attempts": sum(1 for l in logs if l.decision == 'deny'),
+            "avg_device_trust_score": _avg_device_trust_score(db, user_id),
         }
     }
 

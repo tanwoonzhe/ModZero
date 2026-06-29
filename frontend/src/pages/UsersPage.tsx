@@ -65,9 +65,11 @@ const UsersPage: React.FC = () => {
             const attempts: any[] = d.data.recent_attempts ?? [];
             const lastAttempt = attempts.find(a => a.result === "allow" || a.result === "ALLOW");
             const scores = attempts.map(a => a.total_score).filter(s => s != null);
+            const accessLogAvg = scores.length > 0 ? Math.round(scores.reduce((a: number, b: number) => a + b, 0) / scores.length) : null;
+            const deviceCheckAvg = d.data.stats?.avg_device_trust_score ?? null;
             details[u.user_id] = {
               lastLogin: lastAttempt?.timestamp ?? (attempts[0]?.timestamp ?? null),
-              avgScore: scores.length > 0 ? Math.round(scores.reduce((a: number, b: number) => a + b, 0) / scores.length) : null,
+              avgScore: accessLogAvg ?? (deviceCheckAvg != null ? Math.round(deviceCheckAvg) : null),
             };
           } catch {
             details[u.user_id] = { lastLogin: null, avgScore: null };
