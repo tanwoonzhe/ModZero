@@ -30,52 +30,100 @@ import {
 } from '../store/zeroTrustStore';
 import api from '../api';
 
+type FailureAction = 'reduce_score' | 'deny_immediately';
+
 /* ------------------------------------------------------------------ */
-/*  Entra (Microsoft Graph) signals — READ-ONLY, gated by the single   */
-/*  Settings toggle. No per-signal controls (one global toggle only).  */
+/*  Entra (Microsoft Graph) signals — editable per-module card          */
 /* ------------------------------------------------------------------ */
 
-const ENTRA_SIGNALS: Record<'identity' | 'device' | 'context', { label: string; pts: number }[]> = {
+interface EntraSignalRule {
+  key: string;
+  label: string;
+  pts: number;
+  enabled: boolean;
+  failureAction: FailureAction;
+}
+
+type EntraModule = 'identity' | 'device' | 'context';
+
+const DEFAULT_ENTRA_SIGNALS: Record<EntraModule, EntraSignalRule[]> = {
   identity: [
-    { label: 'MFA Registered', pts: 25 },
-    { label: 'Identity Risk Low', pts: 20 },
-    { label: 'Conditional Access OK', pts: 15 },
+    { key: 'mfa_registered',        label: 'MFA Registered',         pts: 25, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'identity_risk_low',     label: 'Identity Risk Low',       pts: 20, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'conditional_access_ok', label: 'Conditional Access OK',   pts: 15, enabled: true,  failureAction: 'reduce_score' },
   ],
   device: [
-    { label: 'Entra Registered', pts: 10 },
-    { label: 'Intune Managed', pts: 10 },
-    { label: 'Intune Encrypted', pts: 15 },
+    { key: 'entra_registered',  label: 'Entra Registered',   pts: 10, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'intune_managed',    label: 'Intune Managed',      pts: 10, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'intune_encrypted',  label: 'Intune Encrypted',    pts: 15, enabled: true,  failureAction: 'reduce_score' },
   ],
   context: [
-    { label: 'Sign-in Risk Low', pts: 15 },
-    { label: 'Trusted Location', pts: 10 },
+    { key: 'signin_risk_low',   label: 'Sign-in Risk Low',    pts: 15, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'trusted_location',  label: 'Trusted Location',    pts: 10, enabled: true,  failureAction: 'reduce_score' },
   ],
 };
 
-const EntraSignalsCard: React.FC<{ module: 'identity' | 'device' | 'context' }> = ({ module }) => {
-  const [enabled, setEnabled] = useState<boolean | null>(null);
+const ENTRA_RULES_KEY = (module: EntraModule) => `modzero-entra-signals-${module}`;
+
+const EntraSignalsCard: React.FC<{ module: EntraModule }> = ({ module }) => {
+  const [globalEnabled, setGlobalEnabled] = useState<boolean | null>(null);
+  const [rules, setRules] = useState<EntraSignalRule[]>(() => {
+    try {
+      const saved = localStorage.getItem(ENTRA_RULES_KEY(module));
+      if (saved) {
+        const parsed = JSON.parse(saved) as EntraSignalRule[];
+        return DEFAULT_ENTRA_SIGNALS[module].map(def => {
+          const s = parsed.find(r => r.key === def.key);
+          return s ? { ...def, pts: s.pts, enabled: s.enabled, failureAction: s.failureAction } : def;
+        });
+      }
+    } catch {}
+    return DEFAULT_ENTRA_SIGNALS[module];
+  });
+  const [saved, setSaved] = useState(false);
+
   useEffect(() => {
     api.get('/trust-policy/active')
-      .then(r => setEnabled(!!r.data.entra_enabled))
-      .catch(() => setEnabled(false));
+      .then(r => setGlobalEnabled(!!r.data.entra_enabled))
+      .catch(() => setGlobalEnabled(false));
   }, []);
-  const signals = ENTRA_SIGNALS[module];
+
+  const toggle = (key: string) =>
+    setRules(r => r.map(rule => rule.key === key ? { ...rule, enabled: !rule.enabled } : rule));
+  const setPts = (key: string, pts: number) =>
+    setRules(r => r.map(rule => rule.key === key ? { ...rule, pts: Math.max(0, Math.min(100, pts)) } : rule));
+  const setFailureAction = (key: string, action: FailureAction) =>
+    setRules(r => r.map(rule => rule.key === key ? { ...rule, failureAction: action } : rule));
+
+  const handleSave = () => {
+    localStorage.setItem(ENTRA_RULES_KEY(module), JSON.stringify(rules));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
   return (
     <div className="mt-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-            Entra Signals (Microsoft Graph)
-            <span className={`px-2 py-0.5 rounded text-xs ${enabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
-              {enabled === null ? '…' : enabled ? 'Active' : 'Disabled'}
+            Entra Identity Signals (Microsoft Graph)
+            <span className={`px-2 py-0.5 rounded text-xs ${globalEnabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
+              {globalEnabled === null ? '…' : globalEnabled ? 'Active' : 'Disabled'}
             </span>
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {enabled
+            {globalEnabled
               ? 'Live signals contributing to the score while Entra is enabled. Evaluated per posture report; results show in the client app Device Check breakdown.'
-              : 'Unlocked by the single toggle in Settings → Azure AD Integration. While off they are N/A and never affect the score.'}
+              : 'Unlocked by the global toggle in Settings → Azure AD Integration. While off, all signals are N/A and never affect the score.'}
           </p>
         </div>
+        <button
+          onClick={handleSave}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+        >
+          <FaSave size={13} />
+          {saved ? 'Saved!' : 'Save'}
+        </button>
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -83,21 +131,50 @@ const EntraSignalsCard: React.FC<{ module: 'identity' | 'device' | 'context' }> 
             <tr>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Signal</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Enabled</th>
               <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Max Points</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failure Action</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
             </tr>
           </thead>
           <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-            {signals.map(s => (
-              <tr key={s.label} className={enabled ? '' : 'opacity-60'}>
+            {rules.map(s => (
+              <tr key={s.key} className={(!globalEnabled || !s.enabled) ? 'opacity-50' : ''}>
                 <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{s.label}</td>
                 <td className="px-4 py-3 text-xs">
                   <span className="inline-flex px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">Microsoft Graph</span>
                 </td>
-                <td className="px-4 py-3 text-center text-sm">+{s.pts}</td>
+                <td className="px-4 py-3 text-center">
+                  <button
+                    onClick={() => toggle(s.key)}
+                    className={`w-10 h-5 rounded-full transition-colors flex-shrink-0 ${s.enabled ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                  >
+                    <span className={`block w-4 h-4 bg-white rounded-full shadow mx-0.5 transition-transform ${s.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <input
+                    type="number"
+                    min={0} max={100} value={s.pts}
+                    onChange={e => setPts(s.key, Number(e.target.value))}
+                    disabled={!s.enabled}
+                    className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                </td>
                 <td className="px-4 py-3">
-                  <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${enabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
-                    {enabled ? 'Active' : 'N/A'}
+                  <select
+                    value={s.failureAction}
+                    onChange={e => setFailureAction(s.key, e.target.value as FailureAction)}
+                    disabled={!s.enabled}
+                    className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
+                    <option value="reduce_score">Reduce score only</option>
+                    <option value="deny_immediately">Deny immediately</option>
+                  </select>
+                </td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${globalEnabled && s.enabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
+                    {globalEnabled && s.enabled ? 'Active' : 'N/A'}
                   </span>
                 </td>
               </tr>
@@ -106,8 +183,8 @@ const EntraSignalsCard: React.FC<{ module: 'identity' | 'device' | 'context' }> 
         </table>
       </div>
       <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
-        <p className="text-xs text-amber-600 dark:text-amber-400">
-          Read-only — controlled solely by the global Entra toggle in Settings. Backend mapping: <code className="font-mono">azure_signal_service.py</code>.
+        <p className="text-xs text-gray-400">
+          Changes saved here are UI display only — actual backend weights are in <code className="font-mono">azure_signal_service.py</code>.
         </p>
       </div>
     </div>
@@ -438,44 +515,49 @@ export default ZeroTrustPoliciesPage;
 
 const DEFAULT_IDENTITY_RULES = [
   {
-    key:         'account_enabled',
-    label:       'Account Enabled',
-    source:      'Local Auth / Azure AD',
-    maxPoints:   30,
-    enabled:     true,
-    description: 'Account is active. Local auth: always pass (JWT proves it). Azure AD: reflects actual account status — disabled accounts score 0.',
+    key:           'recent_login',
+    label:         'Recent Login',
+    source:        'Local Auth',
+    maxPoints:     15,
+    enabled:       true,
+    failureAction: 'reduce_score' as const,
+    description:   'User authenticated recently. Implied by the active JWT — always pass for local auth.',
   },
   {
-    key:         'role_valid',
-    label:       'Role Valid',
-    source:      'Local Auth / Azure AD',
-    maxPoints:   20,
-    enabled:     true,
-    description: 'User has a recognised role (ADMIN or EMPLOYEE). Local auth: non-nullable, always pass. Azure AD: reflects real role assignment.',
+    key:           'low_failed_logins',
+    label:         'Low Failed Login Count',
+    source:        'Local Auth',
+    maxPoints:     25,
+    enabled:       true,
+    failureAction: 'reduce_score' as const,
+    description:   'No excessive failed logins (threshold: 5). Local DB has no failed-login tracking — assumed clean. Real failures tracked via Entra sign-in logs.',
   },
   {
-    key:         'recent_login',
-    label:       'Recent Login',
-    source:      'Local Auth',
-    maxPoints:   15,
-    enabled:     true,
-    description: 'User authenticated recently. Implied by the active JWT used to submit the posture report — always pass for local auth.',
+    key:           'not_locked',
+    label:         'Account Not Locked',
+    source:        'Local Auth',
+    maxPoints:     10,
+    enabled:       true,
+    failureAction: 'deny_immediately' as const,
+    description:   'Account is not locked out. Local DB has no lock field — assumed unlocked. Azure AD lockout state evaluated via Entra when enabled.',
   },
   {
-    key:         'low_failed_logins',
-    label:       'Low Failed Login Count',
-    source:      'Local Auth',
-    maxPoints:   25,
-    enabled:     true,
-    description: 'No excessive failed logins (threshold: 5). Local DB has no failed-login tracking — assumed clean (+25). Track real failures via Azure AD sign-in logs.',
+    key:           'account_enabled',
+    label:         'Account Enabled',
+    source:        'Microsoft Graph',
+    maxPoints:     30,
+    enabled:       true,
+    failureAction: 'deny_immediately' as const,
+    description:   'Account is active in Azure AD (accountEnabled field). N/A for local-only users — only scored when Entra is connected. Disabled accounts are also hard-gated.',
   },
   {
-    key:         'not_locked',
-    label:       'Account Not Locked',
-    source:      'Local Auth',
-    maxPoints:   10,
-    enabled:     true,
-    description: 'Account is not locked out. Local DB has no lock field — assumed unlocked (+10). Azure AD lockout state can override this.',
+    key:           'role_valid',
+    label:         'Role Valid',
+    source:        'Microsoft Graph',
+    maxPoints:     20,
+    enabled:       true,
+    failureAction: 'deny_immediately' as const,
+    description:   'User has a recognised Entra role. N/A for local-only users — only scored when Entra is connected (currently reserved).',
   },
 ];
 
@@ -487,6 +569,7 @@ interface IdentityRule {
   source: string;
   maxPoints: number;
   enabled: boolean;
+  failureAction: FailureAction;
   description: string;
 }
 
@@ -496,10 +579,9 @@ const IdentityRulesTab: React.FC = () => {
       const saved = localStorage.getItem(IDENTITY_RULES_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as IdentityRule[];
-        // Merge saved with defaults to pick up new fields/signals
         return DEFAULT_IDENTITY_RULES.map(def => {
           const s = parsed.find(r => r.key === def.key);
-          return s ? { ...def, maxPoints: s.maxPoints, enabled: s.enabled } : def;
+          return s ? { ...def, maxPoints: s.maxPoints, enabled: s.enabled, failureAction: s.failureAction ?? def.failureAction } : def;
         });
       }
     } catch {}
@@ -512,6 +594,9 @@ const IdentityRulesTab: React.FC = () => {
 
   const setPoints = (key: string, pts: number) =>
     setRules(r => r.map(rule => rule.key === key ? { ...rule, maxPoints: Math.max(0, Math.min(100, pts)) } : rule));
+
+  const setFailureActionIdentity = (key: string, action: FailureAction) =>
+    setRules(r => r.map(rule => rule.key === key ? { ...rule, failureAction: action } : rule));
 
   const handleSave = () => {
     localStorage.setItem(IDENTITY_RULES_KEY, JSON.stringify(rules));
@@ -527,8 +612,9 @@ const IdentityRulesTab: React.FC = () => {
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Identity Rules</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Five identity signals evaluated server-side on every posture report.
-            Identity Score = sum of passed signal points. Contributes 30% to the Final Trust Score.
+            Identity signals evaluated server-side on every posture report. Fixed denominator = 100.
+            Local-only users score up to 50/100 (50%). Entra-linked users can reach 100/100.
+            Account Enabled and Role Valid are Entra-only — N/A for local auth, scored when Graph confirms them.
           </p>
         </div>
         <button
@@ -548,7 +634,8 @@ const IdentityRulesTab: React.FC = () => {
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
               <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Enabled</th>
               <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Max Points</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust Score</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failure Action</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust</th>
             </tr>
           </thead>
           <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
@@ -579,6 +666,17 @@ const IdentityRulesTab: React.FC = () => {
                   />
                 </td>
                 <td className="px-4 py-3">
+                  <select
+                    value={sig.failureAction}
+                    onChange={e => setFailureActionIdentity(sig.key, e.target.value as FailureAction)}
+                    disabled={!sig.enabled}
+                    className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
+                    <option value="reduce_score">Reduce score only</option>
+                    <option value="deny_immediately">Deny immediately</option>
+                  </select>
+                </td>
+                <td className="px-4 py-3">
                   <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${sig.enabled ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
                     {sig.enabled ? 'Yes' : 'Disabled'}
                   </span>
@@ -590,7 +688,7 @@ const IdentityRulesTab: React.FC = () => {
       </div>
       <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <p className="text-xs text-gray-400">
-          Total enabled points: <strong>{total}</strong> · Identity Score × 30% weight = up to {Math.round(total * 0.3)} pts in Final Trust Score.
+          Total enabled points: <strong>{total}</strong>/100 · Local-only users score up to 50 (Account Enabled + Role Valid require Entra).
           Source: <code className="font-mono">identity_signal_service.py</code>.
         </p>
         <p className="text-xs text-amber-600 dark:text-amber-400">
@@ -613,8 +711,6 @@ const DEFAULT_DEVICE_RULES = [
   { key: 'recent_posture_check',    label: 'Recent Posture Check',     source: 'Client App', weight: 10, enabled: true,  failureAction: 'reduce_score' as const },
   { key: 'intune_compliant',        label: 'Intune Compliant',         source: 'Microsoft Graph / Intune', weight: 20, enabled: true, failureAction: 'deny_immediately' as const },
 ];
-
-type FailureAction = 'reduce_score' | 'deny_immediately';
 
 interface DeviceRule {
   key: string;

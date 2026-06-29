@@ -62,9 +62,14 @@ class AzureSignals:
     notes:                  list[str] = field(default_factory=list)
 
     def identity_kwargs(self) -> dict:
-        """Scored identity signals for IdentitySignals(...). account_enabled is
-        intentionally excluded — it feeds the hard gate, not the score."""
+        """Scored identity signals for IdentitySignals(...).
+        account_enabled is now included in the score (moved to Entra-only scoring).
+        It still also feeds the hard gate separately — but here it contributes +30 pts
+        when Graph explicitly returns accountEnabled=True.
+        role_valid remains None (reserved for future Graph role mapping).
+        """
         return {
+            "account_enabled":             self.account_enabled,
             "azure_mfa_registered":        self.mfa_registered,
             "azure_identity_risk_low":     self.identity_risk_low,
             "azure_conditional_access_ok": self.conditional_access_ok,
