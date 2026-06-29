@@ -9,6 +9,9 @@ interface UserDetails {
     username: string;
     email: string;
     role: string;
+    auth_provider: string;
+    client_access_enabled: boolean;
+    linked_entra_upn: string | null;
     created_at: string | null;
     updated_at: string | null;
   };
@@ -170,6 +173,38 @@ const UserDetailPage: React.FC = () => {
             <div>
               <dt className="text-sm text-gray-500 dark:text-gray-400">Role</dt>
               <dd className="text-sm text-gray-900 dark:text-white capitalize">{user.role}</dd>
+            </div>
+            <div>
+              <dt className="text-sm text-gray-500 dark:text-gray-400">Auth Provider</dt>
+              <dd className="text-sm">
+                <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${
+                  user.auth_provider === 'hybrid'
+                    ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                }`}>
+                  {user.auth_provider || 'local'}
+                </span>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-sm text-gray-500 dark:text-gray-400">Client App Access</dt>
+              <dd className="text-sm">
+                <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${
+                  (user.client_access_enabled ?? true)
+                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                    : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                }`}>
+                  {(user.client_access_enabled ?? true) ? 'Enabled' : 'Disabled (Web Only)'}
+                </span>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-sm text-gray-500 dark:text-gray-400">Linked Entra Account</dt>
+              <dd className="text-sm text-gray-900 dark:text-white">
+                {user.linked_entra_upn
+                  ? <span className="font-mono text-purple-700 dark:text-purple-300">{user.linked_entra_upn}</span>
+                  : <span className="text-gray-400">Not linked</span>}
+              </dd>
             </div>
             <div>
               <dt className="text-sm text-gray-500 dark:text-gray-400">Created At</dt>

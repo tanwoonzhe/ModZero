@@ -89,6 +89,9 @@ class AzureSignals:
 
 def _user_principal(user: "User") -> Optional[str]:
     """Best identifier to match a local user against Entra (UPN / email)."""
+    linked = getattr(user, "linked_entra_upn", None)
+    if linked:
+        return linked.lower()
     for attr in ("email", "username"):
         val = getattr(user, attr, None)
         if val and "@" in str(val):

@@ -19,6 +19,14 @@ from ..services.identity_signal_service import (
 
 class UserPatch(BaseModel):
     role: Optional[models.RoleEnum] = None
+    client_access_enabled: Optional[bool] = None
+    auth_provider: Optional[str] = None
+    linked_entra_upn: Optional[str] = None
+    linked_entra_user_id: Optional[str] = None
+
+
+class LinkEntraRequest(BaseModel):
+    entra_upn: str
 
 
 class ChangePasswordRequest(BaseModel):
@@ -117,6 +125,9 @@ def get_user_details(
             "username": user.username,
             "email": user.email,
             "role": user.role.value if hasattr(user.role, 'value') else user.role,
+            "auth_provider": getattr(user, "auth_provider", "local"),
+            "client_access_enabled": getattr(user, "client_access_enabled", True),
+            "linked_entra_upn": getattr(user, "linked_entra_upn", None),
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "updated_at": user.updated_at.isoformat() if user.updated_at else None,
         },
@@ -165,6 +176,60 @@ def patch_user(
         raise HTTPException(status_code=404, detail="User not found")
     if payload.role is not None:
         user.role = payload.role
+    if payload.client_access_enabled is not None:
+        user.client_access_enabled = payload.client_access_enabled
+    if payload.auth_provider is not None:
+        user.auth_provider = payload.auth_provider
+    if payload.linked_entra_upn is not None:
+        user.linked_entra_upn = payload.linked_entra_upn
+    if payload.linked_entra_user_id is not None:
+        user.linked_entra_user_id = payload.linked_entra_user_id
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.post("/{user_id}/link-entra", response_model=schemas.UserOut)
+def link_entra(
+    user_id: str,
+    payload: LinkEntraRequest,
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(get_current_admin),
+) -> Any:
+    """Link a local user to an Entra UPN (admin only)."""
+    user = db.query(models.User).filter(models.User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    entra_upn = payload.entra_upn.strip().lower()
+    if not entra_upn or "@" not in entra_upn:
+        raise HTTPException(status_code=400, detail="entra_upn must be a valid UPN (user@domain)")
+    conflict = (
+        db.query(models.User)
+        .filter(models.User.linked_entra_upn == entra_upn, models.User.user_id != user_id)
+        .first()
+    )
+    if conflict:
+        raise HTTPException(status_code=409, detail="This Entra UPN is already linked to another user")
+    user.linked_entra_upn = entra_upn
+    user.auth_provider = "hybrid"
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.delete("/{user_id}/link-entra", response_model=schemas.UserOut)
+def unlink_entra(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(get_current_admin),
+) -> Any:
+    """Remove Entra link from a user (admin only)."""
+    user = db.query(models.User).filter(models.User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.linked_entra_upn = None
+    user.linked_entra_user_id = None
+    user.auth_provider = "local"
     db.commit()
     db.refresh(user)
     return user

@@ -187,9 +187,15 @@
       });
       const r = await fetch(baseUrl + "/api/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-ModZero-Source": "client",
+        },
         body,
       });
+      if (r.status === 403) {
+        throw new Error("This account is not enabled for client app access. Please use an employee account.");
+      }
       if (!r.ok) {
         const txt = await r.text().catch(() => "");
         throw new Error(`Login failed (HTTP ${r.status}) ${txt}`);

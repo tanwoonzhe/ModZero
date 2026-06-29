@@ -94,6 +94,10 @@ class User(Base):
     email: str = Column(String(128), unique=True, nullable=False)
     password_hash: str = Column(String(255), nullable=False)
     role: RoleEnum = Column(PgEnum(RoleEnum), nullable=False, default=RoleEnum.EMPLOYEE)
+    auth_provider: str = Column(String(16), nullable=False, default="local")
+    client_access_enabled: bool = Column(Boolean, nullable=False, default=True)
+    linked_entra_user_id: Optional[str] = Column(String(128), nullable=True, unique=True)
+    linked_entra_upn: Optional[str] = Column(String(256), nullable=True, unique=True)
     created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -1380,6 +1384,7 @@ class ProtectedResource(Base):
     required_group: str = Column(String(128), nullable=True)
     minimum_trust_score: float = Column(Float, nullable=False, default=0.0)
     require_intune_compliant: bool = Column(Boolean, nullable=False, default=False)
+    require_entra_linked: bool = Column(Boolean, nullable=False, default=False)
     enabled: bool = Column(Boolean, nullable=False, default=True)
     # Optional link to a ConnectorResource — when set, access requires the connector to be online
     connector_resource_id: uuid.UUID = Column(

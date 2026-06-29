@@ -29,6 +29,9 @@ class UserCreate(BaseModel):
 
 class UserOut(UserBase):
     user_id: UUID
+    auth_provider: str = "local"
+    client_access_enabled: bool = True
+    linked_entra_upn: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -511,6 +514,7 @@ class ProtectedResourceBase(BaseModel):
     required_group: Optional[str] = None
     minimum_trust_score: float = 0.0
     require_intune_compliant: bool = False
+    require_entra_linked: bool = False
     enabled: bool = True
     connector_resource_id: Optional[UUID] = None
     preferred_access_mode: str = "auto"
@@ -549,6 +553,7 @@ class ProtectedResourceUpdate(BaseModel):
     required_group: Optional[str] = None
     minimum_trust_score: Optional[float] = None
     require_intune_compliant: Optional[bool] = None
+    require_entra_linked: Optional[bool] = None
     enabled: Optional[bool] = None
     connector_resource_id: Optional[UUID] = None
     preferred_access_mode: Optional[str] = None

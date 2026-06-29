@@ -21,6 +21,10 @@ const UsersPage: React.FC = () => {
   const [deleteModal, setDeleteModal] = useState<{ userId: string; username: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [entraEnabled, setEntraEnabled] = useState(false);
+  const [linkModal, setLinkModal] = useState<{ userId: string; username: string; currentUpn: string | null } | null>(null);
+  const [linkUpn, setLinkUpn] = useState("");
+  const [linking, setLinking] = useState(false);
+  const [togglingAccess, setTogglingAccess] = useState<string | null>(null);
 
   useEffect(() => {
     api.get("/trust-policy/active")
@@ -192,6 +196,43 @@ const UsersPage: React.FC = () => {
     }
   };
 
+  const toggleClientAccess = async (userId: string, current: boolean) => {
+    setTogglingAccess(userId);
+    try {
+      await api.patch(`/users/${userId}`, { client_access_enabled: !current });
+      fetchLocalUsers();
+    } catch {
+      alert("Failed to update client access");
+    } finally {
+      setTogglingAccess(null);
+    }
+  };
+
+  const linkEntra = async () => {
+    if (!linkModal) return;
+    setLinking(true);
+    try {
+      await api.post(`/users/${linkModal.userId}/link-entra`, { entra_upn: linkUpn.trim() });
+      setLinkModal(null);
+      setLinkUpn("");
+      fetchLocalUsers();
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || "Failed to link Entra account");
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const unlinkEntra = async (userId: string, username: string) => {
+    if (!confirm(`Remove Entra link from ${username}? This will remove Entra signals for this user.`)) return;
+    try {
+      await api.delete(`/users/${userId}/link-entra`);
+      fetchLocalUsers();
+    } catch {
+      alert("Failed to unlink Entra account");
+    }
+  };
+
   const deviceCountFor = (userId: string) =>
     devices.filter(d => d.user_id === userId).length;
 
@@ -251,6 +292,43 @@ const UsersPage: React.FC = () => {
           </div>
         </div>
       )}
+      {linkModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 w-96">
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-1">
+              {linkModal.currentUpn ? "Update Entra Link" : "Link Entra Account"}
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">User: <strong>{linkModal.username}</strong></p>
+            {linkModal.currentUpn && (
+              <p className="text-xs text-gray-400 mb-3">Current: {linkModal.currentUpn}</p>
+            )}
+            <input
+              type="email"
+              value={linkUpn}
+              onChange={e => setLinkUpn(e.target.value)}
+              placeholder="user@yourdomain.com"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={linkEntra}
+                disabled={linking || !linkUpn.trim()}
+                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {linking ? "Linking…" : "Link"}
+              </button>
+              <button
+                onClick={() => { setLinkModal(null); setLinkUpn(""); }}
+                disabled={linking}
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">User Management</h1>
         
@@ -333,6 +411,8 @@ const UsersPage: React.FC = () => {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Access</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Entra</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Linked Devices</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Login</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Avg Trust Score</th>
@@ -358,6 +438,41 @@ const UsersPage: React.FC = () => {
                           }`}>
                             {user.role}
                           </span>
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm">
+                          <button
+                            onClick={() => toggleClientAccess(user.user_id, user.client_access_enabled ?? true)}
+                            disabled={togglingAccess === user.user_id}
+                            title="Toggle client app access"
+                            className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full cursor-pointer transition-opacity hover:opacity-80 disabled:opacity-50 ${
+                              (user.client_access_enabled ?? true)
+                                ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
+                                : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                            }`}
+                          >
+                            {(user.client_access_enabled ?? true) ? 'Client ✓' : 'Web Only'}
+                          </button>
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm">
+                          {user.linked_entra_upn ? (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              <span className="inline-flex px-2 py-0.5 text-xs bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 rounded-full max-w-[130px] truncate" title={user.linked_entra_upn}>
+                                {user.linked_entra_upn}
+                              </span>
+                              <button
+                                onClick={() => unlinkEntra(user.user_id, user.username)}
+                                className="text-xs text-red-500 hover:text-red-700"
+                                title="Unlink Entra"
+                              >✕</button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { setLinkModal({ userId: user.user_id, username: user.username, currentUpn: null }); setLinkUpn(""); }}
+                              className="text-xs text-indigo-500 hover:text-indigo-700 dark:text-indigo-400"
+                            >
+                              + Link
+                            </button>
+                          )}
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap text-sm">
                           {devCount > 0

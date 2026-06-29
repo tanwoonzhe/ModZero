@@ -3,7 +3,7 @@
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -17,7 +17,7 @@ router = APIRouter()
 
 
 @router.post("/login", response_model=schemas.Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)) -> Any:
+def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)) -> Any:
     """Authenticate a user and return a JWT access token.
 
     Uses OAuth2PasswordRequestForm which expects fields `username` and `password`.
@@ -35,6 +35,9 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    source = request.headers.get("X-ModZero-Source", "web")
+    if source == "client" and not getattr(user, "client_access_enabled", True):
+        raise HTTPException(status_code=403, detail="client_access_disabled")
     access_token = create_access_token(str(user.user_id))
     return schemas.Token(access_token=access_token)
 

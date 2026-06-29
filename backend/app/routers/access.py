@@ -331,6 +331,42 @@ def request_access(
             resource=resource_out,
         )
 
+    # 0b. Defence-in-depth: re-check client_access_enabled (valid JWT may survive a later flag change)
+    if not getattr(current_user, "client_access_enabled", True):
+        _log(
+            db,
+            user_id=current_user.user_id,
+            device_id=payload.device_id,
+            resource_id=resource.id,
+            decision="deny",
+            reason="client_access_disabled",
+            trust_score=None,
+        )
+        return schemas.AccessDecisionOut(
+            decision="deny",
+            reason="Client app access is disabled for this account",
+            required_score=resource.minimum_trust_score,
+            resource=resource_out,
+        )
+
+    # 0c. Per-resource Entra link requirement
+    if getattr(resource, "require_entra_linked", False) and not getattr(current_user, "linked_entra_upn", None):
+        _log(
+            db,
+            user_id=current_user.user_id,
+            device_id=payload.device_id,
+            resource_id=resource.id,
+            decision="deny",
+            reason="entra_user_required",
+            trust_score=None,
+        )
+        return schemas.AccessDecisionOut(
+            decision="deny",
+            reason="This resource requires an Entra-linked identity",
+            required_score=resource.minimum_trust_score,
+            resource=resource_out,
+        )
+
     # 1. Resource disabled
     if not resource.enabled:
         _log(
