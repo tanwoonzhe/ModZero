@@ -665,13 +665,15 @@ const UsersPage: React.FC = () => {
             <h2 className="text-lg font-semibold mb-1">Identity Signals</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Per-user identity checks that feed into the Trust Scoring Engine.
-              Identity Score = Account Enabled(+30) + Role Valid(+20) + Recent Login(+15) + Low Failed Logins(+25) + Not Locked(+10) = 100 pts.
+              Local signals (max 50): Recent Login(+15) + Low Failed Logins(+25) + Not Locked(+10).
+              Entra signals (Entra only): Account Enabled(+30) + Role Valid(+20) + MFA Registered(+25) + Identity Risk Low(+20) + CA OK(+15).
+              Score = min(earned, 100) — local-only users cap at 50/100.
             </p>
           </div>
 
           {/* Local auth explanation banner */}
           <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-sm text-amber-800 dark:text-amber-300">
-            <strong>Local Auth note:</strong> For local users, all five signals are structurally always-pass because holding a valid JWT already proves account_enabled, role_valid, recent_login, not_locked, and no failed-login tracking exists (assumed clean). These signals become meaningful when Azure AD (Entra) is integrated — a disabled Azure account is denied outright (hard gate), and the extra Entra signals below contribute to the identity score.
+            <strong>Local Auth note:</strong> Account Enabled and Role Valid are <strong>Entra-only</strong> — local auth cannot verify these without Graph. Local users earn at most 50/100 (Recent Login + Low Failed Logins + Not Locked). Linking an Entra account unlocks the remaining 50 pts. A disabled Entra account triggers a hard gate regardless of score.
           </div>
 
           {/* Local users signals */}
@@ -685,38 +687,25 @@ const UsersPage: React.FC = () => {
                 <thead className="bg-gray-50 dark:bg-gray-800">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Recent Login <span className="text-gray-400 normal-case font-normal">(+15)</span></th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Low Failed Logins <span className="text-gray-400 normal-case font-normal">(+25)</span></th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Not Locked <span className="text-gray-400 normal-case font-normal">(+10)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Enabled <span className="text-gray-400 normal-case font-normal">(+30)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role Valid <span className="text-gray-400 normal-case font-normal">(+20)</span></th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Recent Login <span className="text-gray-400 normal-case font-normal">(+15)</span></th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failed Logins <span className="text-gray-400 normal-case font-normal">(+25)</span></th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Not Locked <span className="text-gray-400 normal-case font-normal">(+10)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Identity Score</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                   {localUsers.map((user) => {
-                    // Backend identity_signal_service.py: for local auth all signals are True
-                    // because a valid JWT proves account_enabled + role_valid + recent_login,
-                    // and there is no failed-login or lock tracking (assumed clean).
-                    // role is non-nullable (ADMIN or EMPLOYEE), so role_valid is always True.
-                    const roleValid = user.role != null;
-                    // recent_login: backend always sets True for JWT holders (active session proves it)
-                    // DO NOT use access-log history here — that's a different metric.
-                    const identityScore = 30 + (roleValid ? 20 : 0) + 15 + 25 + 10;
+                    // Local signals only — Account Enabled and Role Valid are Entra-only.
+                    // Local max = 15 + 25 + 10 = 50 pts (capped denominator stays 100).
+                    const identityScore = 50;
                     return (
                       <tr key={user.user_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                         <td className="px-4 py-3">
                           <div className="font-medium text-gray-900 dark:text-white">{user.username}</div>
                           <div className="text-xs text-gray-500">{user.email}</div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" title="Verified by valid JWT">Pass +30</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          {roleValid
-                            ? <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">{user.role} +20</span>
-                            : <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200">No role +0</span>}
                         </td>
                         <td className="px-4 py-3">
                           <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" title="Active JWT proves recent authentication">Pass +15</span>
@@ -728,9 +717,13 @@ const UsersPage: React.FC = () => {
                           <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200" title="No account-lock field in local DB — assumed unlocked">Pass +10</span>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`font-semibold text-base ${identityScore >= 80 ? 'text-green-600 dark:text-green-400' : identityScore >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
-                            {identityScore}
-                          </span>
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400" title="Entra only — requires Microsoft Graph">Entra only</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400" title="Entra only — requires Microsoft Graph">Entra only</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="font-semibold text-base text-amber-600 dark:text-amber-400">{identityScore}</span>
                           <span className="text-xs text-gray-400 ml-1">/ 100</span>
                         </td>
                         <td className="px-4 py-3">
@@ -773,12 +766,17 @@ const UsersPage: React.FC = () => {
                 </thead>
                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                   {[
-                    { name: 'MFA Registered', pts: 25 },
-                    { name: 'Identity Risk Low', pts: 20 },
-                    { name: 'Conditional Access OK', pts: 15 },
+                    { name: 'Account Enabled', pts: 30, note: 'Hard gate — disabled account is always denied' },
+                    { name: 'Role Valid', pts: 20, note: 'User has at least one Entra group/role membership' },
+                    { name: 'MFA Registered', pts: 25, note: '' },
+                    { name: 'Identity Risk Low', pts: 20, note: '' },
+                    { name: 'Conditional Access OK', pts: 15, note: '' },
                   ].map((s) => (
                     <tr key={s.name} className={entraEnabled ? '' : 'opacity-60'}>
-                      <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{s.name}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900 dark:text-white">{s.name}</div>
+                        {s.note && <div className="text-xs text-gray-400 mt-0.5">{s.note}</div>}
+                      </td>
                       <td className="px-4 py-3">+{s.pts}</td>
                       <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">Microsoft Graph</span></td>
                       <td className="px-4 py-3">

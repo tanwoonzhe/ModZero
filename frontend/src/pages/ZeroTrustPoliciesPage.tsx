@@ -48,7 +48,9 @@ type EntraModule = 'identity' | 'device' | 'context';
 
 const DEFAULT_ENTRA_SIGNALS: Record<EntraModule, EntraSignalRule[]> = {
   identity: [
-    { key: 'mfa_registered',        label: 'MFA Registered',         pts: 25, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'account_enabled',       label: 'Account Enabled',         pts: 30, enabled: true,  failureAction: 'deny_access' },
+    { key: 'role_valid',            label: 'Role Valid',              pts: 20, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'mfa_registered',        label: 'MFA Registered',          pts: 25, enabled: true,  failureAction: 'reduce_score' },
     { key: 'identity_risk_low',     label: 'Identity Risk Low',       pts: 20, enabled: true,  failureAction: 'reduce_score' },
     { key: 'conditional_access_ok', label: 'Conditional Access OK',   pts: 15, enabled: true,  failureAction: 'reduce_score' },
   ],
