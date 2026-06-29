@@ -81,12 +81,16 @@ def score_context_signals(
     allowed_end_hour: int = _ALLOWED_END_HOUR,
     max_failed_attempts: int = _MAX_FAILED_ATTEMPTS,
     include_azure: bool = False,
+    na_reasons: Optional[dict] = None,
 ) -> tuple[float, list[dict]]:
     """Compute context score (0–100) and per-signal breakdown.
 
     Returns (context_score, breakdown).
     Optional keyword overrides let the posture endpoint pass DB-stored rules.
+    na_reasons: optional {signal: "not_configured"} from the Entra overlay so the UI
+    can tell a benign "not configured in Entra" apart from a transient collection miss.
     """
+    na_reasons = na_reasons or {}
     # Derive boolean results
     hour = signals.request_time.hour
     normal_time = allowed_start_hour <= hour < allowed_end_hour
@@ -138,9 +142,12 @@ def score_context_signals(
         max_pts = item["max"]
         val = azure_values.get(sig)
         if val is None:
+            reason = na_reasons.get(sig, "not_collected")
+            note = "not configured in Entra" if reason == "not_configured" else "not collected"
             breakdown.append({
                 "signal": sig, "passed": None, "points": 0, "max": max_pts,
-                "module": "context_analysis", "source": "entra", "note": "not collected",
+                "module": "context_analysis", "source": "entra",
+                "status": reason, "note": note,
             })
             continue
         passed = bool(val)
@@ -170,6 +177,7 @@ def score_context_default(
     signin_risk_low: Optional[bool] = None,
     trusted_location: Optional[bool] = None,
     include_azure: bool = False,
+    na_reasons: Optional[dict] = None,
 ) -> tuple[float, list[dict]]:
     """Compute context score from basic posture-report context.
 
@@ -191,4 +199,5 @@ def score_context_default(
         allowed_end_hour=allowed_end_hour,
         max_failed_attempts=max_failed_attempts,
         include_azure=include_azure,
+        na_reasons=na_reasons,
     )

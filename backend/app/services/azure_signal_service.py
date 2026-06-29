@@ -51,8 +51,17 @@ def _latest_signin(upn: str) -> Optional[dict]:
     """
     key = upn.lower()
     now = time.time()
+    # Serve a still-fresh cached record first so we never re-pay the Graph
+    # latency within the TTL window (the signIns beta endpoint is slow on some
+    # tenants). The cache is populated by the first successful fetch.
+    hit = _signin_cache.get(key)
+    if hit is not None and (now - hit[0]) < _SIGNIN_TTL:
+        return hit[1]
     try:
-        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=2)
+        # Timeout is generous (8s) because this only runs on a cache miss
+        # (once per 15 min per user); a longer wait here lets the first fetch
+        # actually succeed and warm the cache instead of perpetually timing out.
+        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=8)
     except Exception as exc:  # noqa: BLE001 — get_sign_in_logs is best-effort
         log.warning("Sign-in fetch failed for %s: %s", upn, exc)
         logs = []
@@ -60,11 +69,7 @@ def _latest_signin(upn: str) -> Optional[dict]:
         latest = logs[0]
         _signin_cache[key] = (now, latest)
         return latest
-    # No fresh data — fall back to cache if still within TTL.
-    hit = _signin_cache.get(key)
-    if hit is not None and (now - hit[0]) < _SIGNIN_TTL:
-        log.info("Using cached sign-in for %s (Graph slow/empty)", upn)
-        return hit[1]
+    # Graph returned nothing and no fresh cache existed (checked above) → N/A.
     return None
 
 
@@ -92,6 +97,12 @@ class AzureSignals:
     matched_entra_device:   Optional[str] = None
     matched_intune_device:  Optional[str] = None
     notes:                  list[str] = field(default_factory=list)
+
+    # Per-signal reason a value is None, so the UI can distinguish
+    # "not_configured" (tenant policy absent — expected, benign) from
+    # "not_collected" (transient/Graph error). Keyed by scored signal name;
+    # an absent key defaults to "not_collected" downstream.
+    na_reasons:             dict = field(default_factory=dict)
 
     def identity_kwargs(self) -> dict:
         """Scored identity signals for IdentitySignals(...).
@@ -219,6 +230,9 @@ def collect_azure_signals(user: "User", device: Optional["Device"]) -> AzureSign
     azure_user = _match_azure_user(user)
     if azure_user is not None:
         sig.account_enabled = _explicit_bool(azure_user.get("accountEnabled"))
+        # role_valid is reserved — Graph role→policy mapping isn't implemented yet,
+        # so it's an intentional "not configured", not a collection failure.
+        sig.na_reasons["role_valid"] = "not_configured"
         uid = azure_user.get("id")
 
         # MFA registration
@@ -256,7 +270,9 @@ def collect_azure_signals(user: "User", device: Optional["Device"]) -> AzureSign
                     sig.conditional_access_ok = True
                 elif ca == "failure":
                     sig.conditional_access_ok = False
-                # "notApplied"/unknown → leave None
+                else:
+                    # "notApplied"/unknown → no CA policy applies to this sign-in.
+                    sig.na_reasons["conditional_access_ok"] = "not_configured"
 
                 risk = (latest.get("riskLevelDuringSignIn") or "").lower()
                 if risk in ("none", "low", "hidden", ""):
@@ -270,7 +286,11 @@ def collect_azure_signals(user: "User", device: Optional["Device"]) -> AzureSign
                     types = {t for d in loc for t in (d.get("networkType") or "").split(",") if t}
                     if types:
                         sig.trusted_location = "trustedNamedLocation" in types
-                # else: no named-location data → N/A (never a fail)
+                    else:
+                        sig.na_reasons["trusted_location"] = "not_configured"
+                else:
+                    # No named-location data → no Named Locations configured in Entra.
+                    sig.na_reasons["trusted_location"] = "not_configured"
         except Exception as exc:  # noqa: BLE001
             log.warning("Sign-in log lookup failed: %s", exc)
     else:

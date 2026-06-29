@@ -84,7 +84,11 @@ class IdentitySignals:
         self.azure_conditional_access_ok = azure_conditional_access_ok
 
 
-def score_identity_signals(signals: IdentitySignals, include_azure: bool = False) -> tuple[float, list[dict]]:
+def score_identity_signals(
+    signals: IdentitySignals,
+    include_azure: bool = False,
+    na_reasons: Optional[dict] = None,
+) -> tuple[float, list[dict]]:
     """Compute identity score (0–100) and per-signal breakdown.
 
     Uses a fixed denominator of TOTAL_MAX (100) so local-only users score 50/100 = 50%
@@ -92,7 +96,11 @@ def score_identity_signals(signals: IdentitySignals, include_azure: bool = False
     Entra-linked users can reach 100% once account_enabled and role_valid are confirmed
     by Graph. Extra Entra bonus signals (mfa, risk, ca) allow recovery of points if
     some signals fail, but the score is capped at 100.
+
+    na_reasons: optional {signal: "not_configured"} from the Entra overlay so the UI
+    can tell a benign "not configured in Entra" apart from a transient collection miss.
     """
+    na_reasons = na_reasons or {}
     low_failed = signals.failed_login_count < 5
 
     signal_values: dict[str, Optional[bool]] = {
@@ -114,9 +122,12 @@ def score_identity_signals(signals: IdentitySignals, include_azure: bool = False
     def _emit(sig: str, max_pts: int, val: Optional[bool], source: str) -> None:
         nonlocal earned
         if val is None:
+            reason = na_reasons.get(sig, "not_collected" if source == "entra" else "not_applicable")
+            note = "not configured in Entra" if reason == "not_configured" else "N/A — requires Entra"
             breakdown.append({
                 "signal": sig, "passed": None, "points": 0, "max": max_pts,
-                "module": "identity", "source": source, "note": "N/A — requires Entra",
+                "module": "identity", "source": source,
+                "status": reason, "note": note,
             })
             return
         passed = bool(val)

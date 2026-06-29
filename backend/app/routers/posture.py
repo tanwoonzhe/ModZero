@@ -186,6 +186,7 @@ def submit_posture_report(
         allowed_end_hour=policy.allowed_end_hour,
         max_failed_attempts=policy.max_failed_attempts,
         include_azure=bool(azure),
+        na_reasons=azure.na_reasons if azure else None,
         **(azure.context_kwargs() if azure else {}),
     )
     ctx_source = "backend_realtime"
@@ -198,7 +199,10 @@ def submit_posture_report(
     if azure:
         for k, v in azure.identity_kwargs().items():
             setattr(id_signals, k, v)
-    identity_score, id_breakdown = score_identity_signals(id_signals, include_azure=bool(azure))
+    identity_score, id_breakdown = score_identity_signals(
+        id_signals, include_azure=bool(azure),
+        na_reasons=azure.na_reasons if azure else None,
+    )
     identity_source = "entra" if azure else f"local_{settings.graph_mode}"
 
     # ── 6. Weighted total using DB-stored weights ──────────────────────────────
@@ -392,6 +396,7 @@ def client_posture_report(
         allowed_end_hour=policy.allowed_end_hour,
         max_failed_attempts=policy.max_failed_attempts,
         include_azure=bool(azure),
+        na_reasons=azure.na_reasons if azure else None,
         **(azure.context_kwargs() if azure else {}),
     )
 
@@ -402,7 +407,10 @@ def client_posture_report(
     if azure:
         for k, v in azure.identity_kwargs().items():
             setattr(id_signals, k, v)
-    identity_score, id_breakdown = score_identity_signals(id_signals, include_azure=bool(azure))
+    identity_score, id_breakdown = score_identity_signals(
+        id_signals, include_azure=bool(azure),
+        na_reasons=azure.na_reasons if azure else None,
+    )
 
     total = weighted_total(
         posture_score, ctx_score, identity_score,
