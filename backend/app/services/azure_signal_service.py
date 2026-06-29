@@ -24,7 +24,6 @@ HTTP/permission handling lives in one place.
 from __future__ import annotations
 
 import logging
-import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional, TYPE_CHECKING
@@ -40,51 +39,30 @@ log = logging.getLogger(__name__)
 # latest sign-in record per UPN so a slow/timed-out fetch falls back to the last
 # good one instead of dropping the context/identity sign-in signals to N/A.
 _SIGNIN_TTL = 900  # seconds (15 min)
-_signin_cache: dict = {}   # upn(lower) -> (fetched_at, latest_record|None)
-_signin_fetching: set = set()  # UPNs currently being fetched in background
-
-
-def _trigger_signin_fetch(upn: str) -> None:
-    """Fire-and-forget: fetch sign-in log in a daemon thread and warm the cache.
-
-    The signIns beta endpoint has high, variable latency on some tenants
-    (often 10-20s). Fetching it synchronously blocks the entire posture-report
-    response. Instead we kick off a background thread the first time a cache
-    miss is detected. The posture report returns immediately with N/A for
-    sign-in signals; by the time the user runs the next device check (~30s
-    later from the heartbeat) the cache is warm and real values appear.
-    """
-    key = upn.lower()
-    if key in _signin_fetching:
-        return  # already in flight
-    _signin_fetching.add(key)
-
-    def _run() -> None:
-        try:
-            logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=20)
-            if logs:
-                _signin_cache[key] = (time.time(), logs[0])
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Background sign-in fetch failed for %s: %s", upn, exc)
-        finally:
-            _signin_fetching.discard(key)
-
-    threading.Thread(target=_run, daemon=True).start()
+_signin_cache: dict = {}  # upn(lower) -> (fetched_at, latest_record|None)
 
 
 def _latest_signin(upn: str) -> Optional[dict]:
-    """Return cached sign-in record, or None (triggering a background fetch).
+    """Return this user's most recent sign-in record, best-effort with caching.
 
-    On a cache hit the record is returned instantly (no Graph call).
-    On a cache miss the caller receives None immediately while a daemon thread
-    fetches the data and populates the cache for the next call.
+    Cache is checked first; on a miss, Graph is fetched synchronously with a
+    15s timeout. The client-app device-check HTTP timeout is 45s so waiting up
+    to 15s here is safe. Once fetched the record is cached for 15 min so every
+    subsequent device check within that window is instant.
     """
     key = upn.lower()
     now = time.time()
     hit = _signin_cache.get(key)
     if hit is not None and (now - hit[0]) < _SIGNIN_TTL:
         return hit[1]
-    _trigger_signin_fetch(upn)
+    try:
+        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=15)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Sign-in fetch failed for %s: %s", upn, exc)
+        logs = []
+    if logs:
+        _signin_cache[key] = (now, logs[0])
+        return logs[0]
     return None
 
 
