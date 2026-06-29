@@ -185,17 +185,22 @@ def sync_azure_user_to_local(
         temp_password = secrets.token_urlsafe(32)
         
         from ..security import get_password_hash
+        entra_id = azure_user.get("id", "")
+        upn = azure_user.get("userPrincipalName", "")
         new_user = models.User(
             username=username,
             email=email,
             password_hash=get_password_hash(temp_password),
-            role=models.RoleEnum.EMPLOYEE  # Default to employee role
+            role=models.RoleEnum.EMPLOYEE,
+            auth_provider="entra",
+            linked_entra_user_id=entra_id,
+            linked_entra_upn=upn,
         )
-        
+
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
-        
+
         return {
             "success": True,
             "message": "User synced successfully",
@@ -272,7 +277,10 @@ def sync_all_azure_users(
                     username=username,
                     email=email,
                     password_hash=get_password_hash(temp_password),
-                    role=models.RoleEnum.EMPLOYEE
+                    role=models.RoleEnum.EMPLOYEE,
+                    auth_provider="entra",
+                    linked_entra_user_id=azure_user.get("id", ""),
+                    linked_entra_upn=azure_user.get("userPrincipalName", ""),
                 )
                 
                 db.add(new_user)

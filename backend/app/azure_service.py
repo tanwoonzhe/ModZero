@@ -74,7 +74,7 @@ class AzureGraphService:
         }
         
         try:
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, params=params, timeout=5)
             response.raise_for_status()
             
             data = response.json()
@@ -111,7 +111,7 @@ class AzureGraphService:
         }
         
         try:
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, params=params, timeout=5)
             if response.status_code == 404:
                 return None
             response.raise_for_status()
@@ -148,7 +148,7 @@ class AzureGraphService:
             url = f"{self.graph_endpoint}/users"
             params = {'$top': 1}
             
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, params=params, timeout=5)
             response.raise_for_status()
             
             return {
@@ -187,7 +187,7 @@ class AzureGraphService:
         url = f"{self.graph_endpoint}/subscribedSkus"
         
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=5)
             response.raise_for_status()
             
             data = response.json()
@@ -236,7 +236,7 @@ class AzureGraphService:
         }
         
         try:
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, params=params, timeout=5)
             response.raise_for_status()
             
             data = response.json()
@@ -280,7 +280,7 @@ class AzureGraphService:
         }
         
         try:
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, params=params, timeout=5)
             response.raise_for_status()
             
             data = response.json()
@@ -298,50 +298,59 @@ class AzureGraphService:
                     return []
             raise Exception(f"Failed to fetch managed devices: {str(e)}")
     
-    def get_sign_in_logs(self, top: int = 100) -> List[Dict]:
+    def get_sign_in_logs(self, top: int = 100, upn: Optional[str] = None,
+                         timeout: int = 3) -> List[Dict]:
         """Fetch sign-in logs from Azure AD via Microsoft Graph API.
-        
+
         Requires AuditLog.Read.All permission.
-        
+
+        The signIns endpoint has high, variable latency on some tenants, so this
+        is best-effort: a timeout or transient failure returns [] rather than
+        raising, letting the caller fall back to N/A for Entra sign-in signals
+        instead of blocking the whole posture report.
+
         Args:
             top: Maximum number of logs to fetch
-            
+            upn: When set, filter server-side to this user's sign-ins (much
+                 faster — avoids fetching + sorting the whole tenant log)
+            timeout: Per-request read timeout in seconds (kept short so a slow
+                 Graph response can't blow the client-app device-check budget)
+
         Returns:
-            List of sign-in log dictionaries
+            List of sign-in log dictionaries (empty on timeout/error)
         """
         access_token = self._get_access_token()
         if not access_token:
             raise Exception("Failed to acquire Azure access token")
-        
+
         headers = {
             'Authorization': f'Bearer {access_token}',
             'Content-Type': 'application/json'
         }
-        
-        url = f"{self.graph_endpoint}/auditLogs/signIns"
+
+        # Use beta endpoint: networkLocationDetails is not in v1.0 signIn schema
+        url = "https://graph.microsoft.com/beta/auditLogs/signIns"
         params = {
             '$top': top,
-            '$select': 'id,createdDateTime,userDisplayName,userPrincipalName,appDisplayName,ipAddress,clientAppUsed,conditionalAccessStatus,isInteractive,riskDetail,riskLevelAggregated,riskLevelDuringSignIn,riskState,deviceDetail,location,mfaDetail,status',
+            '$select': 'id,createdDateTime,userDisplayName,userPrincipalName,appDisplayName,ipAddress,clientAppUsed,conditionalAccessStatus,isInteractive,riskDetail,riskLevelAggregated,riskLevelDuringSignIn,riskState,deviceDetail,location,status,networkLocationDetails',
             '$orderby': 'createdDateTime desc'
         }
-        
+        if upn:
+            params['$filter'] = f"userPrincipalName eq '{upn}'"
+
         try:
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, params=params, timeout=timeout)
             response.raise_for_status()
-            
+
             data = response.json()
             logs = data.get('value', [])
-            
+
             logger.info(f"Successfully fetched {len(logs)} sign-in logs")
             return logs
-            
+
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching sign-in logs: {str(e)}")
-            if hasattr(e, 'response') and e.response is not None:
-                if e.response.status_code == 403:
-                    logger.warning("Missing AuditLog.Read.All permission")
-                    return []
-            raise Exception(f"Failed to fetch sign-in logs: {str(e)}")
+            logger.warning(f"Sign-in logs unavailable (best-effort): {str(e)}")
+            return []
     
     def get_risky_users(self) -> List[Dict]:
         """Fetch risky users from Azure AD Identity Protection.
@@ -366,7 +375,7 @@ class AzureGraphService:
         }
         
         try:
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, params=params, timeout=5)
             response.raise_for_status()
             
             data = response.json()
@@ -403,7 +412,7 @@ class AzureGraphService:
         url = f"{self.graph_endpoint}/identity/conditionalAccess/policies"
         
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=5)
             response.raise_for_status()
             
             data = response.json()
@@ -438,7 +447,7 @@ class AzureGraphService:
         url = f"{self.graph_endpoint}/organization"
         
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=5)
             response.raise_for_status()
             
             data = response.json()
@@ -473,7 +482,7 @@ class AzureGraphService:
         url = f"{self.graph_endpoint}/users/$count"
         
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=5)
             response.raise_for_status()
             return int(response.text)
         except:
@@ -495,7 +504,7 @@ class AzureGraphService:
         url = f"{self.graph_endpoint}/devices/$count"
         
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=5)
             response.raise_for_status()
             return int(response.text)
         except:
@@ -516,7 +525,7 @@ class AzureGraphService:
         url = f"{self.graph_endpoint}/deviceManagement/managedDevices/$count"
         
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=5)
             response.raise_for_status()
             return int(response.text)
         except:
@@ -537,7 +546,7 @@ class AzureGraphService:
         url = f"{self.graph_endpoint}/groups/$count"
         
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=5)
             response.raise_for_status()
             return int(response.text)
         except:
@@ -558,7 +567,7 @@ class AzureGraphService:
         url = f"{self.graph_endpoint}/applications/$count"
         
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=5)
             response.raise_for_status()
             return int(response.text)
         except:
@@ -580,7 +589,7 @@ class AzureGraphService:
         params = {'$filter': "userType eq 'Guest'"}
         
         try:
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, params=params, timeout=5)
             response.raise_for_status()
             return int(response.text)
         except:
@@ -684,7 +693,7 @@ class AzureGraphService:
         }
         
         try:
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, params=params, timeout=5)
             response.raise_for_status()
             
             data = response.json()
@@ -722,7 +731,7 @@ class AzureGraphService:
         url = f"{self.graph_endpoint}/servicePrincipals/{sp_id}/owners"
         
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=5)
             response.raise_for_status()
             
             data = response.json()
@@ -755,7 +764,7 @@ class AzureGraphService:
         url = f"{self.graph_endpoint}/servicePrincipals/{sp_id}/appRoleAssignments"
         
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=5)
             response.raise_for_status()
             
             data = response.json()
@@ -857,7 +866,7 @@ class AzureGraphService:
         url = f"{self.graph_endpoint}/users/{user_id}/authentication/methods"
 
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=5)
             if response.status_code == 403:
                 return {"mfa_registered": None, "mfa_methods": [], "error": "Insufficient permissions"}
             response.raise_for_status()
