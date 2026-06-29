@@ -77,6 +77,7 @@ interface ProtectedResource {
   required_group: string | null;
   minimum_trust_score: number;
   require_intune_compliant: boolean;
+  require_entra_linked: boolean;
   enabled: boolean;
   connector_resource_id: string | null;
   connector_status: "online" | "degraded" | "offline" | null;
@@ -188,7 +189,7 @@ const BLANK_RESOURCE = {
   name: "", description: "", resource_type: "web",
   internal_address: "", public_name: "",
   required_group: "", minimum_trust_score: 0,
-  require_intune_compliant: false, enabled: true,
+  require_intune_compliant: false, require_entra_linked: false, enabled: true,
   connector_resource_id: "",
 };
 
@@ -224,6 +225,7 @@ const ResourceFormModal: React.FC<{
       required_group: form.required_group || null,
       minimum_trust_score: Number(form.minimum_trust_score),
       require_intune_compliant: form.require_intune_compliant,
+      require_entra_linked: form.require_entra_linked,
       enabled: form.enabled,
       connector_resource_id: form.connector_resource_id || null,
     };
@@ -338,6 +340,14 @@ const ResourceFormModal: React.FC<{
                 className="w-4 h-4 text-indigo-600 rounded"
               />
               <span className="text-sm text-gray-700 dark:text-gray-300">Require Intune</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer select-none" title="Deny access if the requesting user has no linked Entra account">
+              <input
+                type="checkbox" checked={form.require_entra_linked}
+                onChange={(e) => set("require_entra_linked", e.target.checked)}
+                className="w-4 h-4 text-indigo-600 rounded"
+              />
+              <span className="text-sm text-gray-700 dark:text-gray-300">Require Entra Identity</span>
             </label>
           </div>
           {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
@@ -931,11 +941,17 @@ const ConnectorsPage: React.FC = () => {
                           <span className="font-semibold text-gray-900 dark:text-white">{r.minimum_trust_score}</span>
                         </td>
                         <td className="px-5 py-4">
-                          {r.require_intune_compliant ? (
-                            <FaLock className="text-amber-500" size={14} title="Intune compliance required" />
-                          ) : (
-                            <span className="text-gray-400 text-xs">No</span>
-                          )}
+                          <div className="flex items-center gap-1.5">
+                            {r.require_intune_compliant ? (
+                              <FaLock className="text-amber-500" size={13} title="Intune compliance required" />
+                            ) : null}
+                            {r.require_entra_linked ? (
+                              <span className="inline-flex px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 rounded font-medium" title="Entra-linked identity required">Entra</span>
+                            ) : null}
+                            {!r.require_intune_compliant && !r.require_entra_linked && (
+                              <span className="text-gray-400 text-xs">None</span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-5 py-4">
                           {r.connector_resource_id ? (

@@ -3,6 +3,9 @@ export interface User {
   username: string;
   email: string;
   role: string;
+  auth_provider: string;
+  client_access_enabled: boolean;
+  linked_entra_upn: string | null;
   created_at: string;
   updated_at: string;
 }
