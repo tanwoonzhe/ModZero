@@ -55,13 +55,11 @@ def _latest_signin(upn: str) -> Optional[dict]:
     hit = _signin_cache.get(key)
     if hit is not None and (now - hit[0]) < _SIGNIN_TTL:
         return hit[1]
-    log.info("Sign-in cache miss for UPN=%r — calling Graph (timeout=15s)", upn)
     try:
-        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=15)
+        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=5)
     except Exception as exc:  # noqa: BLE001
         log.warning("Sign-in fetch failed for %s: %s", upn, exc)
         logs = []
-    log.info("Sign-in fetch result for UPN=%r: %d records", upn, len(logs))
     if logs:
         _signin_cache[key] = (now, logs[0])
         return logs[0]
@@ -281,7 +279,24 @@ def collect_azure_signals(user: "User", device: Optional["Device"]) -> AzureSign
         except Exception as exc:  # noqa: BLE001
             log.warning("Risky-user lookup failed: %s", exc)
 
-        # Conditional Access + sign-in risk + location from latest sign-in
+        # Sign-in risk: derived from Identity Protection riskyUsers (already cached above).
+        # The signIns beta endpoint has prohibitively high latency on some tenants
+        # (consistently >15s), making it unusable for a synchronous device check.
+        # riskyUsers gives equivalent signal: if the user is not flagged at all →
+        # their sign-ins are low-risk. riskLevelDuringSignIn from signIns would only
+        # diverge when a specific session was flagged but the user's aggregate risk
+        # wasn't raised — an edge case not worth a 15s+ Graph call.
+        try:
+            if match is None:
+                sig.signin_risk_low = True   # not in risky users → low risk
+            else:
+                level = (match.get("riskLevel") or "").lower()
+                sig.signin_risk_low = level in ("none", "low", "")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Sign-in risk (from riskyUsers) failed: %s", exc)
+
+        # Conditional Access + trusted location from latest sign-in (best-effort, short timeout).
+        # These are secondary signals; if signIns is unavailable they become Not Configured.
         try:
             upn = azure_user.get("userPrincipalName") or ""
             latest = _latest_signin(upn) if upn else None
@@ -292,28 +307,25 @@ def collect_azure_signals(user: "User", device: Optional["Device"]) -> AzureSign
                 elif ca == "failure":
                     sig.conditional_access_ok = False
                 else:
-                    # "notApplied"/unknown → no CA policy applies to this sign-in.
                     sig.na_reasons["conditional_access_ok"] = "not_configured"
 
-                risk = (latest.get("riskLevelDuringSignIn") or "").lower()
-                if risk in ("none", "low", "hidden", ""):
-                    sig.signin_risk_low = True
-                elif risk in ("medium", "high"):
-                    sig.signin_risk_low = False
-
-                # Trusted location only if Graph explicitly marks a trusted named location.
                 loc = latest.get("networkLocationDetails")
                 if isinstance(loc, list) and loc:
                     types = {t for d in loc for t in (d.get("networkType") or "").split(",") if t}
-                    if types:
-                        sig.trusted_location = "trustedNamedLocation" in types
-                    else:
+                    sig.trusted_location = "trustedNamedLocation" in types if types else None
+                    if not types:
                         sig.na_reasons["trusted_location"] = "not_configured"
                 else:
-                    # No named-location data → no Named Locations configured in Entra.
                     sig.na_reasons["trusted_location"] = "not_configured"
+            else:
+                # signIns unavailable — mark both as not_configured so UI shows
+                # "Not Configured" rather than the error-like "N/A".
+                sig.na_reasons["conditional_access_ok"] = "not_configured"
+                sig.na_reasons["trusted_location"] = "not_configured"
         except Exception as exc:  # noqa: BLE001
             log.warning("Sign-in log lookup failed: %s", exc)
+            sig.na_reasons["conditional_access_ok"] = "not_configured"
+            sig.na_reasons["trusted_location"] = "not_configured"
     else:
         sig.notes.append("user not found in Entra")
 
