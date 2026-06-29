@@ -477,6 +477,7 @@ function authedRequest(
   method: string,
   apiPath: string,
   body?: unknown,
+  timeoutMs = 8000,
 ): Promise<{ ok: boolean; status: number; data: unknown; error?: string }> {
   const cfg = readConfig();
   if (!cfg.url || !cfg.accessToken) {
@@ -491,7 +492,7 @@ function authedRequest(
     raw = JSON.stringify(body);
     headers["Content-Type"] = "application/json";
   }
-  return httpJson(url, { method, headers, body: raw, timeoutMs: 8000 })
+  return httpJson(url, { method, headers, body: raw, timeoutMs })
     .then((r) => {
       let parsed: unknown = null;
       try { parsed = r.body ? JSON.parse(r.body) : null; } catch { parsed = r.body; }
@@ -517,7 +518,8 @@ ipcMain.handle("modzero:collect-posture", () => collectPosture());
 
 ipcMain.handle("modzero:run-device-check", async () => {
   const signals = await collectPosture();
-  const result = await authedRequest("POST", "/api/posture/report", signals);
+  // Device check: PS script + Azure Graph on backend can take up to ~30s total
+  const result = await authedRequest("POST", "/api/posture/report", signals, 45000);
   // Keep session trust score in sync so Overview reflects the new score immediately.
   if (result.ok && result.data != null) {
     const raw = Number((result.data as Record<string, unknown>).total_score ?? null);
