@@ -768,9 +768,9 @@ const UsersPage: React.FC = () => {
                   {[
                     { name: 'Account Enabled', pts: 30, note: 'Hard gate — disabled account is always denied' },
                     { name: 'Role Valid', pts: 20, note: 'User has at least one Entra group/role membership' },
-                    { name: 'MFA Registered', pts: 25, note: '' },
-                    { name: 'Identity Risk Low', pts: 20, note: '' },
-                    { name: 'Conditional Access OK', pts: 15, note: '' },
+                    { name: 'MFA Registered', pts: 25, note: 'Multi-factor authentication method registered in Entra (Authenticator App, FIDO2, etc.)' },
+                    { name: 'Identity Risk Low', pts: 20, note: 'Entra Identity Protection risk level is none or low for this user' },
+                    { name: 'Conditional Access OK', pts: 15, note: 'Sign-in passed all applicable Conditional Access policies' },
                   ].map((s) => (
                     <tr key={s.name} className={entraEnabled ? '' : 'opacity-60'}>
                       <td className="px-4 py-3">

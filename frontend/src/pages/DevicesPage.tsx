@@ -320,6 +320,19 @@ const DevicesPage: React.FC = () => {
                 intune_managed:          "Intune Managed",
                 intune_encrypted:        "Intune Encrypted",
               };
+              const FACTOR_DESCRIPTIONS: Record<string, string> = {
+                firewall_enabled:        "Windows Firewall is enabled on at least one network profile",
+                antivirus_enabled:       "Windows Defender or registered antivirus is active and up to date",
+                disk_encryption_enabled: "BitLocker system drive is fully encrypted with protection on",
+                screen_lock_enabled:     "Secure screensaver or console-lock timeout is configured",
+                os_supported:            "Windows major version is 10 or later",
+                client_healthy:          "Client fingerprint file exists and is readable",
+                recent_check:            "Last posture report was submitted within 7 days",
+                intune_compliant:        "Device is marked compliant by Intune",
+                entra_registered:        "Device is registered in Entra ID directory",
+                intune_managed:          "Device is enrolled and managed by Intune MDM",
+                intune_encrypted:        "Intune reports the device disk as encrypted",
+              };
               const FACTOR_SOURCE: Record<string, string> = {
                 firewall_enabled:        "Client App (Windows)",
                 antivirus_enabled:       "Client App (Windows)",
@@ -367,6 +380,7 @@ const DevicesPage: React.FC = () => {
                       <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                         {(posture.breakdown || []).map((item: any) => {
                           const label = FACTOR_LABELS[item.factor] ?? item.factor?.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+                          const description = FACTOR_DESCRIPTIONS[item.factor];
                           const source = FACTOR_SOURCE[item.factor] ?? "Client App";
                           const isNA = item.passed == null;
                           const resultLabel = isNA ? "N/A" : item.passed ? "Pass" : "Fail";
@@ -384,7 +398,10 @@ const DevicesPage: React.FC = () => {
                             : (item.note ?? "");
                           return (
                             <tr key={item.factor} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{label}</td>
+                              <td className="px-4 py-3">
+                                <div className="text-sm font-medium text-gray-900 dark:text-white">{label}</div>
+                                {description && <div className="text-xs text-gray-400 mt-0.5">{description}</div>}
+                              </td>
                               <td className="px-4 py-3 text-xs text-gray-500">{source}</td>
                               <td className="px-4 py-3">
                                 <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${resultClass}`}>

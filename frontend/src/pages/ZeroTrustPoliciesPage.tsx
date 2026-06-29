@@ -39,6 +39,7 @@ type FailureAction = 'reduce_score' | 'deny_immediately';
 interface EntraSignalRule {
   key: string;
   label: string;
+  description?: string;
   pts: number;
   enabled: boolean;
   failureAction: FailureAction;
@@ -48,20 +49,20 @@ type EntraModule = 'identity' | 'device' | 'context';
 
 const DEFAULT_ENTRA_SIGNALS: Record<EntraModule, EntraSignalRule[]> = {
   identity: [
-    { key: 'account_enabled',       label: 'Account Enabled',         pts: 30, enabled: true,  failureAction: 'deny_access' },
-    { key: 'role_valid',            label: 'Role Valid',              pts: 20, enabled: true,  failureAction: 'reduce_score' },
-    { key: 'mfa_registered',        label: 'MFA Registered',          pts: 25, enabled: true,  failureAction: 'reduce_score' },
-    { key: 'identity_risk_low',     label: 'Identity Risk Low',       pts: 20, enabled: true,  failureAction: 'reduce_score' },
-    { key: 'conditional_access_ok', label: 'Conditional Access OK',   pts: 15, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'account_enabled',       label: 'Account Enabled',         description: 'Entra account is active — a disabled account is always denied access regardless of score', pts: 30, enabled: true,  failureAction: 'deny_access' },
+    { key: 'role_valid',            label: 'Role Valid',              description: 'User belongs to at least one Entra group or directory role (legitimate employees always do)', pts: 20, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'mfa_registered',        label: 'MFA Registered',          description: 'Multi-factor authentication method registered in Entra (Authenticator App, FIDO2, etc.)', pts: 25, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'identity_risk_low',     label: 'Identity Risk Low',       description: 'Entra Identity Protection risk level is none or low for this user', pts: 20, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'conditional_access_ok', label: 'Conditional Access OK',   description: 'Sign-in passed all applicable Conditional Access policies in this tenant', pts: 15, enabled: true,  failureAction: 'reduce_score' },
   ],
   device: [
-    { key: 'entra_registered',  label: 'Entra Registered',   pts: 10, enabled: true,  failureAction: 'reduce_score' },
-    { key: 'intune_managed',    label: 'Intune Managed',      pts: 10, enabled: true,  failureAction: 'reduce_score' },
-    { key: 'intune_encrypted',  label: 'Intune Encrypted',    pts: 15, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'entra_registered',  label: 'Entra Registered',   description: 'Device is registered in the Entra ID directory', pts: 10, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'intune_managed',    label: 'Intune Managed',      description: 'Device is enrolled and actively managed by Intune MDM', pts: 10, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'intune_encrypted',  label: 'Intune Encrypted',    description: 'Intune reports the device disk as encrypted', pts: 15, enabled: true,  failureAction: 'reduce_score' },
   ],
   context: [
-    { key: 'signin_risk_low',   label: 'Sign-in Risk Low',    pts: 15, enabled: true,  failureAction: 'reduce_score' },
-    { key: 'trusted_location',  label: 'Trusted Location',    pts: 10, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'signin_risk_low',   label: 'Sign-in Risk Low',    description: 'User is not flagged by Entra Identity Protection as a risky sign-in', pts: 15, enabled: true,  failureAction: 'reduce_score' },
+    { key: 'trusted_location',  label: 'Trusted Location',    description: 'Sign-in originated from a Named Location configured as trusted in this tenant', pts: 10, enabled: true,  failureAction: 'reduce_score' },
   ],
 };
 
@@ -142,7 +143,10 @@ const EntraSignalsCard: React.FC<{ module: EntraModule }> = ({ module }) => {
           <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
             {rules.map(s => (
               <tr key={s.key} className={(!globalEnabled || !s.enabled) ? 'opacity-50' : ''}>
-                <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{s.label}</td>
+                <td className="px-4 py-3">
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">{s.label}</div>
+                  {s.description && <div className="text-xs text-gray-400 mt-0.5">{s.description}</div>}
+                </td>
                 <td className="px-4 py-3 text-xs">
                   <span className="inline-flex px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">Microsoft Graph</span>
                 </td>
@@ -704,19 +708,20 @@ const IdentityRulesTab: React.FC = () => {
 /* ------------------------------------------------------------------ */
 
 const DEFAULT_DEVICE_RULES = [
-  { key: 'firewall_enabled',        label: 'Firewall Enabled',         source: 'Client App', weight: 15, enabled: true,  failureAction: 'reduce_score' as const },
-  { key: 'antivirus_enabled',       label: 'Antivirus Enabled',        source: 'Client App', weight: 15, enabled: true,  failureAction: 'reduce_score' as const },
-  { key: 'disk_encryption_enabled', label: 'Disk Encryption Enabled',  source: 'Client App', weight: 15, enabled: true,  failureAction: 'reduce_score' as const },
-  { key: 'screen_lock_enabled',     label: 'Screen Lock Enabled',      source: 'Client App', weight: 10, enabled: true,  failureAction: 'reduce_score' as const },
-  { key: 'os_supported',            label: 'OS Version Supported',     source: 'Client App', weight: 10, enabled: true,  failureAction: 'reduce_score' as const },
-  { key: 'client_healthy',          label: 'Client App Healthy',       source: 'Client App', weight: 10, enabled: true,  failureAction: 'reduce_score' as const },
-  { key: 'recent_posture_check',    label: 'Recent Posture Check',     source: 'Client App', weight: 10, enabled: true,  failureAction: 'reduce_score' as const },
-  { key: 'intune_compliant',        label: 'Intune Compliant',         source: 'Microsoft Graph / Intune', weight: 20, enabled: true, failureAction: 'deny_immediately' as const },
+  { key: 'firewall_enabled',        label: 'Firewall Enabled',         description: 'Windows Firewall is enabled on at least one network profile',            source: 'Client App',               weight: 15, enabled: true,  failureAction: 'reduce_score'    as const },
+  { key: 'antivirus_enabled',       label: 'Antivirus Enabled',        description: 'Windows Defender or registered antivirus is active and up to date',      source: 'Client App',               weight: 15, enabled: true,  failureAction: 'reduce_score'    as const },
+  { key: 'disk_encryption_enabled', label: 'Disk Encryption Enabled',  description: 'BitLocker system drive is fully encrypted with protection on',           source: 'Client App',               weight: 15, enabled: true,  failureAction: 'reduce_score'    as const },
+  { key: 'screen_lock_enabled',     label: 'Screen Lock Enabled',      description: 'Secure screensaver or console-lock timeout is configured',               source: 'Client App',               weight: 10, enabled: true,  failureAction: 'reduce_score'    as const },
+  { key: 'os_supported',            label: 'OS Version Supported',     description: 'Windows major version is 10 or later',                                   source: 'Client App',               weight: 10, enabled: true,  failureAction: 'reduce_score'    as const },
+  { key: 'client_healthy',          label: 'Client App Healthy',       description: 'Client fingerprint file exists and is readable',                         source: 'Client App',               weight: 10, enabled: true,  failureAction: 'reduce_score'    as const },
+  { key: 'recent_posture_check',    label: 'Recent Posture Check',     description: 'Last posture report was submitted within 7 days',                        source: 'Client App',               weight: 10, enabled: true,  failureAction: 'reduce_score'    as const },
+  { key: 'intune_compliant',        label: 'Intune Compliant',         description: 'Device is marked compliant by Intune — non-compliance triggers immediate denial', source: 'Microsoft Graph / Intune', weight: 20, enabled: true,  failureAction: 'deny_immediately' as const },
 ];
 
 interface DeviceRule {
   key: string;
   label: string;
+  description?: string;
   source: string;
   weight: number;
   enabled: boolean;
@@ -782,7 +787,10 @@ const DeviceRulesTab: React.FC = () => {
           <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
             {rules.map(rule => (
               <tr key={rule.key} className={rule.enabled ? '' : 'opacity-50'}>
-                <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{rule.label}</td>
+                <td className="px-4 py-3">
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">{rule.label}</div>
+                  {rule.description && <div className="text-xs text-gray-400 mt-0.5">{rule.description}</div>}
+                </td>
                 <td className="px-4 py-3 text-xs text-gray-500">{rule.source}</td>
                 <td className="px-4 py-3 text-center">
                   <button
