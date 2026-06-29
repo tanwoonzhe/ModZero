@@ -156,11 +156,6 @@
     .toggle input:checked + .toggle-track { background: var(--accent); }
     .toggle input:checked + .toggle-track::before { transform: translateX(16px); }
 
-    .sim-banner {
-      display: none; padding: 3px 10px; border-radius: 999px; margin-left: 8px;
-      background: rgba(245,158,11,.18); border: 1px solid rgba(245,158,11,.4);
-      color: #fcd34d; font-size: 11px; font-weight: 700;
-    }
   </style>
 </head>
 <body>
@@ -172,7 +167,6 @@
         <div class="sub" id="serverHint">Connected</div>
       </div>
       <div id="statusPill" class="status-pill"><span class="dot"></span> <span id="statusText">Connected</span></div>
-      <span id="simBanner" class="sim-banner">⚠ Simulation only</span>
     </div>
 
     <div class="tabs" role="tablist">
@@ -243,7 +237,6 @@
         </p>
         <div class="row">
           <button class="primary" id="btnRunCheck">Run Device Check</button>
-          <button class="ghost" id="btnPreviewPosture">Preview Signals Only</button>
         </div>
       </div>
 
@@ -349,30 +342,6 @@
         </p>
       </div>
 
-      <div class="panel">
-        <h2>Demo Mode</h2>
-        <p style="color:var(--muted);font-size:12px;margin:0 0 12px">
-          Simulate posture failures for FYP demonstration. When enabled, device check signals
-          can be overridden without requiring real OS checks.
-        </p>
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-          <label style="font-size:13px">Enable Demo Mode</label>
-          <label class="toggle">
-            <input type="checkbox" id="demoModeToggle">
-            <span class="toggle-track"></span>
-          </label>
-          <span id="demoBadgeSettings" class="badge warn" style="display:none">Simulation only</span>
-        </div>
-        <div id="demoScenarios" style="display:none">
-          <p style="color:var(--muted);font-size:12px;margin:0 0 8px">Preset failure scenarios:</p>
-          <div class="row" style="flex-wrap:wrap">
-            <button class="ghost" id="demoScenarioPass" style="font-size:12px">✓ All Checks Pass</button>
-            <button class="ghost" id="demoScenarioFirewall" style="font-size:12px">✕ Firewall Off</button>
-            <button class="ghost" id="demoScenarioAV" style="font-size:12px">✕ Antivirus Off</button>
-            <button class="ghost" id="demoScenarioFail" style="font-size:12px">✕ Multiple Failures</button>
-          </div>
-        </div>
-      </div>
     </section>
   </div>
 
@@ -624,11 +593,6 @@
       }
     });
 
-    $("btnPreviewPosture").addEventListener("click", async () => {
-      const sig = await M.collectPosture();
-      toast("info", JSON.stringify(sig, null, 2), 8000);
-    });
-
     // ── Resources ──
     async function loadResources() {
       $("resList").innerHTML = '<div style="color:var(--muted);font-size:13px">Loading…</div>';
@@ -834,54 +798,6 @@
       if (btn && !btn.disabled) btn.click();
     }, 1500);
 
-    // ── Demo Mode ──
-    const DEMO_KEY = "modzero_demo_mode";
-    const DEMO_OVERRIDE_KEY = "modzero_demo_signals";
-
-    function isDemoMode() {
-      return localStorage.getItem(DEMO_KEY) === "true";
-    }
-    function applyDemoModeUI(enabled) {
-      $("simBanner").style.display = enabled ? "inline-block" : "none";
-      $("demoBadgeSettings").style.display = enabled ? "inline-block" : "none";
-      $("demoScenarios").style.display = enabled ? "" : "none";
-      if (!enabled) localStorage.removeItem(DEMO_OVERRIDE_KEY);
-    }
-    function initDemoMode() {
-      const enabled = isDemoMode();
-      $("demoModeToggle").checked = enabled;
-      applyDemoModeUI(enabled);
-    }
-    $("demoModeToggle").addEventListener("change", (e) => {
-      const enabled = e.target.checked;
-      localStorage.setItem(DEMO_KEY, enabled ? "true" : "false");
-      applyDemoModeUI(enabled);
-      toast(enabled ? "warn" : "info", enabled ? "Demo Mode ON — Simulation only" : "Demo Mode OFF");
-    });
-
-    const DEMO_SCENARIOS = {
-      pass:     { firewall_enabled: true,  antivirus_enabled: true,  disk_encryption_enabled: true,  screen_lock_enabled: true,  os_supported: true,  client_healthy: true,  intune_compliant: true },
-      firewall: { firewall_enabled: false, antivirus_enabled: true,  disk_encryption_enabled: true,  screen_lock_enabled: true,  os_supported: true,  client_healthy: true,  intune_compliant: true },
-      av:       { firewall_enabled: true,  antivirus_enabled: false, disk_encryption_enabled: true,  screen_lock_enabled: true,  os_supported: true,  client_healthy: true,  intune_compliant: true },
-      fail:     { firewall_enabled: false, antivirus_enabled: false, disk_encryption_enabled: false, screen_lock_enabled: false, os_supported: true,  client_healthy: true,  intune_compliant: false },
-    };
-    $("demoScenarioPass").addEventListener("click", () => {
-      localStorage.setItem(DEMO_OVERRIDE_KEY, JSON.stringify(DEMO_SCENARIOS.pass));
-      toast("ok", "Demo: All checks pass loaded");
-    });
-    $("demoScenarioFirewall").addEventListener("click", () => {
-      localStorage.setItem(DEMO_OVERRIDE_KEY, JSON.stringify(DEMO_SCENARIOS.firewall));
-      toast("warn", "Demo: Firewall disabled scenario loaded");
-    });
-    $("demoScenarioAV").addEventListener("click", () => {
-      localStorage.setItem(DEMO_OVERRIDE_KEY, JSON.stringify(DEMO_SCENARIOS.av));
-      toast("warn", "Demo: Antivirus disabled scenario loaded");
-    });
-    $("demoScenarioFail").addEventListener("click", () => {
-      localStorage.setItem(DEMO_OVERRIDE_KEY, JSON.stringify(DEMO_SCENARIOS.fail));
-      toast("err", "Demo: Multiple failures scenario loaded");
-    });
-
     // ── Last Access Decision ──
     const LAST_DECISION_KEY = "modzero_last_decision";
 
@@ -907,7 +823,6 @@
     }
 
     renderLastDecision();
-    initDemoMode();
   </script>
 </body>
 </html>
