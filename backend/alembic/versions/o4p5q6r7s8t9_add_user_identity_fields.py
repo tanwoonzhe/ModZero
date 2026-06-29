@@ -23,7 +23,7 @@ def upgrade() -> None:
     op.create_unique_constraint('uq_users_linked_entra_upn', 'users', ['linked_entra_upn'])
     op.add_column('protected_resources', sa.Column('require_entra_linked', sa.Boolean(), nullable=False, server_default='false'))
 
-    op.execute("UPDATE users SET client_access_enabled = false WHERE role = 'admin'")
+    op.execute("UPDATE users SET client_access_enabled = false WHERE role = 'ADMIN'")
 
 
 def downgrade() -> None:
