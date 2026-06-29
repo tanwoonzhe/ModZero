@@ -121,12 +121,12 @@
     .decision-banner.deny  .big-d { color: #fca5a5; }
     .decision-banner .detail { flex: 1; color: var(--muted); }
 
-    input[type="text"] {
+    input[type="text"], input[type="password"] {
       width: 100%; padding: 9px 12px; font-size: 13px;
       background: #0b1220; color: var(--text);
       border: 1px solid var(--border); border-radius: 8px; outline: none;
     }
-    input[type="text"]:focus { border-color: var(--accent); }
+    input[type="text"]:focus, input[type="password"]:focus { border-color: var(--accent); }
 
     .toast {
       position: fixed; bottom: 20px; right: 20px; padding: 10px 14px;
@@ -249,7 +249,7 @@
 
       <div class="panel" id="postureResultPanel" style="display:none">
         <h2>Latest Score</h2>
-        <div class="grid">
+        <div class="grid" style="grid-template-columns: repeat(2, 1fr)">
           <div class="tile">
             <div class="label">Device Posture Score</div>
             <div class="score"><span class="big" id="resPosture">—</span><span class="max">/ 100</span></div>
@@ -262,11 +262,13 @@
           </div>
           <div class="tile">
             <div class="label">Context Score</div>
-            <div class="value" id="resContext">—</div>
+            <div class="score"><span class="big" id="resContext">—</span><span class="max">/ 100</span></div>
+            <div class="bar"><div id="resContextBar" style="width:0%"></div></div>
           </div>
           <div class="tile">
             <div class="label">Identity Score</div>
-            <div class="value" id="resIdentity">—</div>
+            <div class="score"><span class="big" id="resIdentity">—</span><span class="max">/ 100</span></div>
+            <div class="bar"><div id="resIdentityBar" style="width:0%"></div></div>
           </div>
         </div>
         <div id="decisionBanner" style="display:none"></div>
@@ -316,6 +318,19 @@
           <dt>Hostname</dt><dd id="setHostname">—</dd>
           <dt>Fingerprint</dt><dd id="setFingerprint">—</dd>
         </dl>
+      </div>
+
+      <div class="panel">
+        <h2>Change Password</h2>
+        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px">Current Password</label>
+        <input id="currentPwd" type="password" placeholder="Current password" style="margin-bottom:10px" />
+        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px">New Password</label>
+        <input id="newPwd" type="password" placeholder="New password (min 8 characters)" style="margin-bottom:10px" />
+        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px">Confirm New Password</label>
+        <input id="confirmPwd" type="password" placeholder="Confirm new password" style="margin-bottom:14px" />
+        <div class="row">
+          <button class="primary" id="btnChangePwd">Change Password</button>
+        </div>
       </div>
 
       <div class="panel">
@@ -545,7 +560,9 @@
       $("resTotal").textContent = total;
       $("resTotalBar").style.width = Math.max(0, Math.min(100, total)) + "%";
       $("resContext").textContent  = context;
+      $("resContextBar").style.width  = Math.max(0, Math.min(100, context))  + "%";
       $("resIdentity").textContent = identity;
+      $("resIdentityBar").style.width = Math.max(0, Math.min(100, identity)) + "%";
 
       // Decision banner
       const banner = $("decisionBanner");
@@ -753,6 +770,43 @@
       }
     });
     $("btnSignOut").addEventListener("click", () => M.disconnect());
+
+    $("btnChangePwd").addEventListener("click", async () => {
+      const current = $("currentPwd").value;
+      const next    = $("newPwd").value;
+      const confirm = $("confirmPwd").value;
+      if (!current || !next || !confirm) {
+        toast("err", "Please fill in all password fields");
+        return;
+      }
+      if (next !== confirm) {
+        toast("err", "New passwords do not match");
+        return;
+      }
+      if (next.length < 8) {
+        toast("err", "New password must be at least 8 characters");
+        return;
+      }
+      const btn = $("btnChangePwd");
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>Changing…';
+      try {
+        const r = await M.changePassword(current, next);
+        if (r && r.ok) {
+          toast("ok", "Password changed successfully");
+          $("currentPwd").value = "";
+          $("newPwd").value = "";
+          $("confirmPwd").value = "";
+        } else {
+          toast("err", (r && r.error) || "Failed to change password");
+        }
+      } catch (e) {
+        toast("err", String(e?.message || e));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Change Password";
+      }
+    });
 
     function escapeHtml(s) {
       return String(s ?? "").replace(/[&<>"']/g, (c) => ({
