@@ -55,11 +55,13 @@ def _latest_signin(upn: str) -> Optional[dict]:
     hit = _signin_cache.get(key)
     if hit is not None and (now - hit[0]) < _SIGNIN_TTL:
         return hit[1]
+    log.info("Sign-in cache miss for UPN=%r — calling Graph (timeout=15s)", upn)
     try:
         logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=15)
     except Exception as exc:  # noqa: BLE001
         log.warning("Sign-in fetch failed for %s: %s", upn, exc)
         logs = []
+    log.info("Sign-in fetch result for UPN=%r: %d records", upn, len(logs))
     if logs:
         _signin_cache[key] = (now, logs[0])
         return logs[0]
