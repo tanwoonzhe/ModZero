@@ -1,12 +1,22 @@
-"""Identity Signal Module — 5-signal scoring (aligned with web Identity Signals tab).
+"""Identity Signal Module — scoring across local and Entra signals.
 
-Signals and weights:
-  Account Enabled          30  — user account is active and can authenticate
-  Role Valid               20  — user has a recognised role (employee / admin)
-  Recent Login             15  — user has authenticated recently
-  Low Failed Login Count   25  — no excessive failed login attempts
-  Not Locked               10  — account is not locked out
-  Total                   100
+Local signals (always evaluated):
+  Recent Login             15  — authenticated recently (JWT proves it)
+  Low Failed Login Count   25  — no excessive failed login attempts (assumed clean for local)
+  Not Locked               10  — account not locked (assumed for local)
+  Local subtotal           50
+
+Entra-only signals (only when Entra is enabled and Graph returns a value):
+  Account Enabled          30  — verified against Azure AD accountEnabled field
+  Role Valid               20  — user has a recognised Entra role (reserved; currently N/A)
+  MFA Registered           25  — MFA method registered in Entra
+  Identity Risk Low        20  — Entra Identity Protection risk level
+  Conditional Access OK    15  — compliant with Conditional Access policies
+
+Scoring:
+  identity_score = min(100, earned / 100 * 100)
+  Local-only users: max 50/100 = 50% (honest — only 3 signals verifiable without Graph)
+  Entra-linked users: up to 100% when account_enabled + role_valid both pass from Graph
 """
 from __future__ import annotations
 
@@ -18,24 +28,29 @@ if TYPE_CHECKING:
 
 # ── Signal weights ─────────────────────────────────────────────────────────────
 
+# Local signals — always evaluated (3 signals, max 50 pts)
 _SIGNALS = [
-    {"signal": "account_enabled",      "max": 30},
-    {"signal": "role_valid",           "max": 20},
     {"signal": "recent_login",         "max": 15},
     {"signal": "low_failed_logins",    "max": 25},
     {"signal": "not_locked",           "max": 10},
 ]
 
-# Optional Entra (Microsoft Graph) signals — only contribute when enabled and
-# resolvable. Each is N/A (None) when Graph did not return a usable value, so it
-# is excluded from both earned points and the denominator.
+# Entra (Microsoft Graph) signals — only scored when Entra is enabled and Graph
+# returns a usable value. account_enabled and role_valid are the "core" Entra
+# identity checks (max 50 pts); mfa/risk/ca are bonus signals (max 60 pts extra).
+# All are N/A (None) for local-only users — excluded from both earned pts and denominator.
 _AZURE_SIGNALS = [
+    {"signal": "account_enabled",       "max": 30},  # moved from local — only meaningful from Graph
+    {"signal": "role_valid",            "max": 20},  # moved from local — only meaningful from Graph
     {"signal": "mfa_registered",        "max": 25},
     {"signal": "identity_risk_low",     "max": 20},
     {"signal": "conditional_access_ok", "max": 15},
 ]
 
-TOTAL_MAX = sum(s["max"] for s in _SIGNALS)  # 100 (base denominator reference)
+# Fixed denominator = original 100-pt budget (sum of all 5 original signals).
+# Using a fixed denominator (not just applicable signals) ensures local-only users
+# score 50/100 = 50% instead of 100%, making the identity score meaningful.
+TOTAL_MAX = 100
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -46,13 +61,14 @@ class IdentitySignals:
     def __init__(
         self,
         *,
-        account_enabled: bool = True,
-        role_valid: bool = True,
+        # Local signals (always available when user is authenticated)
         recent_login: Optional[bool] = None,
         failed_login_count: int = 0,
         not_locked: bool = True,
         source: str = "local",
-        # Optional Entra signals (None = not collected → N/A)
+        # Entra-only signals (None = N/A — not evaluated for local-only users)
+        account_enabled: Optional[bool] = None,   # from Graph accountEnabled
+        role_valid: Optional[bool] = None,         # reserved; currently always None
         azure_mfa_registered: Optional[bool] = None,
         azure_identity_risk_low: Optional[bool] = None,
         azure_conditional_access_ok: Optional[bool] = None,
@@ -71,88 +87,82 @@ class IdentitySignals:
 def score_identity_signals(signals: IdentitySignals, include_azure: bool = False) -> tuple[float, list[dict]]:
     """Compute identity score (0–100) and per-signal breakdown.
 
-    Unknown signals (None) are treated as 0 per Zero Trust principle:
-    unknown = untrusted = no points.
-
-    Signals sourced from "local" auth always pass for active sessions
-    (the JWT proves the account is enabled and has a valid role).
-    A "note" field is added to those entries so the UI can explain why.
-    Azure-sourced signals reflect real IdP state and may actually fail.
+    Uses a fixed denominator of TOTAL_MAX (100) so local-only users score 50/100 = 50%
+    instead of 100%, reflecting the honest limit of what local auth can verify.
+    Entra-linked users can reach 100% once account_enabled and role_valid are confirmed
+    by Graph. Extra Entra bonus signals (mfa, risk, ca) allow recovery of points if
+    some signals fail, but the score is capped at 100.
     """
     low_failed = signals.failed_login_count < 5
 
     signal_values: dict[str, Optional[bool]] = {
-        "account_enabled":   signals.account_enabled,
-        "role_valid":        signals.role_valid,
         "recent_login":      signals.recent_login,
         "low_failed_logins": low_failed,
         "not_locked":        signals.not_locked,
     }
     azure_values: dict[str, Optional[bool]] = {
+        "account_enabled":       signals.account_enabled,
+        "role_valid":            signals.role_valid,
         "mfa_registered":        signals.azure_mfa_registered,
         "identity_risk_low":     signals.azure_identity_risk_low,
         "conditional_access_ok": signals.azure_conditional_access_ok,
     }
 
-    # Signals that are structurally always-true for local (non-Azure) auth:
-    # holding a valid JWT already proves account_enabled and role_valid.
-    _LOCAL_ASSUMED = {"account_enabled", "role_valid", "not_locked"}
-
     earned = 0
-    denominator = 0      # sum of APPLICABLE (non-N/A) factor weights
     breakdown: list[dict] = []
 
-    def _emit(sig: str, max_pts: int, val: Optional[bool], source: str, note: Optional[str] = None) -> None:
-        nonlocal earned, denominator
+    def _emit(sig: str, max_pts: int, val: Optional[bool], source: str) -> None:
+        nonlocal earned
         if val is None:
             breakdown.append({
                 "signal": sig, "passed": None, "points": 0, "max": max_pts,
-                "module": "identity", "source": source, "note": note or "unknown",
+                "module": "identity", "source": source, "note": "N/A — requires Entra",
             })
             return
         passed = bool(val)
         pts = max_pts if passed else 0
         earned += pts
-        denominator += max_pts
         entry: dict = {
             "signal": sig, "passed": passed, "points": pts, "max": max_pts,
             "module": "identity", "source": source,
         }
-        if source == "local" and sig in _LOCAL_ASSUMED and passed:
+        if source == "local" and sig == "not_locked" and passed:
+            entry["note"] = "local auth — no lock mechanism, assumed unlocked"
+        elif source == "local" and sig == "recent_login" and passed:
             entry["note"] = "local auth — verified by active JWT"
-        elif note:
-            entry["note"] = note
+        elif source == "local" and sig == "low_failed_logins" and passed:
+            entry["note"] = "local auth — no failure tracking, assumed clean"
         breakdown.append(entry)
 
-    # Base (local) signals
+    # Local signals (recent_login, low_failed_logins, not_locked) — always evaluated
     for item in _SIGNALS:
         _emit(item["signal"], item["max"], signal_values.get(item["signal"]), signals.source)
 
-    # Optional Entra signals — only present when the Entra overlay is active.
-    # (Each may still be N/A if Graph could not resolve it for this user.)
+    # Entra signals (account_enabled, role_valid, mfa, risk, ca) — only when Entra active.
+    # N/A entries are still emitted for display when include_azure=True but Graph returned None.
     for item in (_AZURE_SIGNALS if include_azure else []):
         _emit(item["signal"], item["max"], azure_values.get(item["signal"]), "entra")
 
-    # Percentage of applicable points → stays 0–100 regardless of how many Azure
-    # factors were applicable. Falls back to TOTAL_MAX to preserve legacy behaviour
-    # when all base signals somehow ended up N/A.
-    identity_score = round((earned / max(denominator, 1)) * 100, 1) if denominator else 0.0
+    # Fixed denominator = 100 (original 5-signal budget).
+    # Local users earn ≤50 pts → score ≤50%. Entra users can reach 100%.
+    identity_score = round(min(100.0, earned / TOTAL_MAX * 100), 1)
     return identity_score, breakdown
 
 
 def signals_from_local_user(user: "User") -> IdentitySignals:
     """Build IdentitySignals from a local ModZero User record.
 
-    The user is currently authenticated (they sent a valid JWT), so:
-    - account_enabled = True  (can authenticate → account is active)
-    - role_valid      = True  (has a recognized role in the system)
-    - recent_login    = True  (just sent an authenticated request)
-    - failed_logins   = 0     (no per-user failure tracking in local DB)
-    - not_locked      = True  (no account-lock field in local User model)
+    account_enabled and role_valid are intentionally left as None (N/A).
+    These are now Entra-only signals — local auth cannot independently verify
+    account status or role validity against a real directory. They become
+    meaningful only when Entra is connected and Graph is queried.
+
+    Local signals that can be evaluated:
+    - recent_login = True  (just sent an authenticated request via JWT)
+    - failed_login_count = 0  (no per-user failure tracking in local DB — assumed clean)
+    - not_locked = True  (no account-lock field in local User model — assumed unlocked)
     """
     return IdentitySignals(
-        account_enabled=True,
-        role_valid=getattr(user, "role", None) is not None,
         recent_login=True,
         failed_login_count=0,
         not_locked=True,
