@@ -35,6 +35,38 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# The signIns Graph endpoint has high, variable latency on some tenants. Cache the
+# latest sign-in record per UPN so a slow/timed-out fetch falls back to the last
+# good one instead of dropping the context/identity sign-in signals to N/A.
+_SIGNIN_TTL = 900  # seconds (15 min)
+_signin_cache: dict = {}  # upn(lower) -> (fetched_at, latest_record|None)
+
+
+def _latest_signin(upn: str) -> Optional[dict]:
+    """Return this user's most recent sign-in record, best-effort with caching.
+
+    Filters server-side by UPN (top=1) for speed. On a Graph timeout/empty
+    response, returns the last cached record (if still fresh) so transient
+    Graph latency doesn't flap the sign-in signals to N/A.
+    """
+    key = upn.lower()
+    now = time.time()
+    try:
+        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=2)
+    except Exception as exc:  # noqa: BLE001 — get_sign_in_logs is best-effort
+        log.warning("Sign-in fetch failed for %s: %s", upn, exc)
+        logs = []
+    if logs:
+        latest = logs[0]
+        _signin_cache[key] = (now, latest)
+        return latest
+    # No fresh data — fall back to cache if still within TTL.
+    hit = _signin_cache.get(key)
+    if hit is not None and (now - hit[0]) < _SIGNIN_TTL:
+        log.info("Using cached sign-in for %s (Graph slow/empty)", upn)
+        return hit[1]
+    return None
+
 
 @dataclass
 class AzureSignals:
@@ -92,6 +124,34 @@ class AzureSignals:
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
+# The bulk tenant lookups (users / Entra devices / Intune devices) are unchanged
+# between rapid device checks, so cache them per-process for a short TTL. The
+# first posture report after a restart warms the cache (~1-2s of Graph calls);
+# every subsequent check reuses it and returns near-instantly, keeping the
+# client-app device check well under its request timeout.
+_BULK_TTL = 300  # seconds (5 min)
+_bulk_cache: dict = {}  # key -> (fetched_at, value)
+
+
+def _cached_bulk(key: str, fetch):
+    """Return a cached bulk Graph result, refreshing it past the TTL.
+
+    On a fetch error the stale cached value (if any) is reused rather than
+    dropped, so a transient Graph hiccup doesn't blank out matched signals.
+    """
+    now = time.time()
+    hit = _bulk_cache.get(key)
+    if hit is not None and (now - hit[0]) < _BULK_TTL:
+        return hit[1]
+    try:
+        value = fetch()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Bulk Graph fetch '%s' failed: %s", key, exc)
+        return hit[1] if hit is not None else []
+    _bulk_cache[key] = (now, value)
+    return value
+
+
 def _user_principal(user: "User") -> Optional[str]:
     """Best identifier to match a local user against Entra (UPN / email)."""
     linked = getattr(user, "linked_entra_upn", None)
@@ -110,7 +170,7 @@ def _match_azure_user(user: "User") -> Optional[dict]:
     if not principal:
         return None
     try:
-        for u in azure_service.get_users(top=999):
+        for u in _cached_bulk("users", lambda: azure_service.get_users(top=999)):
             upn = (u.get("userPrincipalName") or "").lower()
             mail = (u.get("mail") or "").lower()
             if principal in (upn, mail):
@@ -124,7 +184,7 @@ def _match_entra_device(hostname: Optional[str]) -> Optional[dict]:
     if not hostname:
         return None
     try:
-        for d in azure_service.get_entra_devices(top=999):
+        for d in _cached_bulk("entra_devices", lambda: azure_service.get_entra_devices(top=999)):
             if (d.get("displayName") or "").lower() == hostname.lower():
                 return d
     except Exception as exc:  # noqa: BLE001
@@ -136,7 +196,7 @@ def _match_intune_device(hostname: Optional[str]) -> Optional[dict]:
     if not hostname:
         return None
     try:
-        for d in azure_service.get_managed_devices(top=999):
+        for d in _cached_bulk("managed_devices", lambda: azure_service.get_managed_devices(top=999)):
             if (d.get("deviceName") or "").lower() == hostname.lower():
                 return d
     except Exception as exc:  # noqa: BLE001
@@ -164,14 +224,14 @@ def collect_azure_signals(user: "User", device: Optional["Device"]) -> AzureSign
         # MFA registration
         try:
             if uid:
-                mfa = azure_service.get_user_auth_methods(uid)
-                sig.mfa_registered = _explicit_bool(mfa.get("mfa_registered"))
+                mfa = _cached_bulk(f"mfa:{uid}", lambda: azure_service.get_user_auth_methods(uid))
+                sig.mfa_registered = _explicit_bool((mfa or {}).get("mfa_registered"))
         except Exception as exc:  # noqa: BLE001
             log.warning("MFA lookup failed: %s", exc)
 
         # Identity Protection risk
         try:
-            risky = azure_service.get_risky_users()
+            risky = _cached_bulk("risky_users", lambda: azure_service.get_risky_users())
             upn = (azure_user.get("userPrincipalName") or "").lower()
             match = next(
                 (r for r in risky if (r.get("userPrincipalName") or "").lower() == upn),
@@ -188,12 +248,8 @@ def collect_azure_signals(user: "User", device: Optional["Device"]) -> AzureSign
 
         # Conditional Access + sign-in risk + location from latest sign-in
         try:
-            logs = azure_service.get_sign_in_logs(top=50)
-            upn = (azure_user.get("userPrincipalName") or "").lower()
-            latest = next(
-                (lg for lg in logs if (lg.get("userPrincipalName") or "").lower() == upn),
-                None,
-            )
+            upn = azure_user.get("userPrincipalName") or ""
+            latest = _latest_signin(upn) if upn else None
             if latest is not None:
                 ca = (latest.get("conditionalAccessStatus") or "").lower()
                 if ca == "success":
