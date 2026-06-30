@@ -146,7 +146,7 @@ const ClientAppDownloadCard: React.FC = () => {
                   title={
                     p.available
                       ? `Download ${p.filename}`
-                      : `Run \`npm run package:${p.platform}\` in electron-client/ first`
+                      : `Run \`npm run package:${p.platform}\` in client-app/ first`
                   }
                 >
                   <FaDownload size={12} /> {p.available ? "Download" : "Unavailable"}

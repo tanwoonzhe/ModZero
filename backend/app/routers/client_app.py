@@ -62,7 +62,7 @@ class PlatformInfo(BaseModel):
 class ClientAppInfo(BaseModel):
     version: str = "1.0.0"
     platforms: List[PlatformInfo]
-    source_path: str = "electron-client"
+    source_path: str = "client-app"
     dev_instructions: List[str]
 
 
@@ -90,7 +90,7 @@ def client_app_info() -> ClientAppInfo:
     return ClientAppInfo(
         platforms=platforms,
         dev_instructions=[
-            "cd electron-client",
+            "cd client-app",
             "npm install",
             "npm run build:main",
             "npm run dev          # in one terminal (Vite + tsc watch)",
@@ -122,7 +122,7 @@ def client_app_download(
                 f"No {PLATFORM_LABEL[platform]} installer is published yet. "
                 "Build one with `npm run package:"
                 + platform
-                + "` from the electron-client/ directory and drop the file "
+                + "` from the client-app/ directory and drop the file "
                 "into backend/app/static/client/."
             ),
         )

@@ -365,7 +365,7 @@ const SettingsPage: React.FC = () => {
             <div>
               <p className="font-medium">Session Timeout</p>
               <p className="text-sm text-gray-500">
-                Sessions expire after 8 hours of inactivity
+                Login sessions expire 8 hours after sign-in
               </p>
             </div>
             <span className="text-sm text-gray-500">480 minutes</span>

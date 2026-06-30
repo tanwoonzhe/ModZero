@@ -203,38 +203,38 @@ const UserProfilePage: React.FC = () => {
                 <>
                   <li className="flex items-center">
                     <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                    Full access to all features
+                    Full access to the web dashboard and all management pages
                   </li>
                   <li className="flex items-center">
                     <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                    Can create, edit, and delete security tests
+                    Can create, edit, and remove users, and assign roles
                   </li>
                   <li className="flex items-center">
                     <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                    Can manage users and permissions
+                    Can manage devices, trust policies, and connectors / resources
                   </li>
                   <li className="flex items-center">
                     <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                    Can override risk assessments
+                    Can view audit and access logs
                   </li>
                 </>
               ) : (
                 <>
                   <li className="flex items-center">
                     <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
-                    View security test results
+                    View the web dashboard and your own profile
                   </li>
                   <li className="flex items-center">
                     <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
-                    Add comments to security tests
+                    Request access to authorized resources and run device checks from the ModZero Client App
                   </li>
                   <li className="flex items-center">
                     <span className="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span>
-                    Cannot modify test definitions
+                    Cannot manage users, devices, trust policies, or connectors / resources
                   </li>
                   <li className="flex items-center">
                     <span className="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span>
-                    Cannot override risk assessments
+                    Access to resources is denied if your trust score falls below the required threshold
                   </li>
                 </>
               )}
