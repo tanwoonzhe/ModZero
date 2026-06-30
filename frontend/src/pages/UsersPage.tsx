@@ -25,6 +25,10 @@ const UsersPage: React.FC = () => {
   const [linkUpn, setLinkUpn] = useState("");
   const [linking, setLinking] = useState(false);
   const [togglingAccess, setTogglingAccess] = useState<string | null>(null);
+  const [addUserModal, setAddUserModal] = useState(false);
+  const [newUser, setNewUser] = useState({ username: "", email: "", password: "", role: "employee" });
+  const [addingUser, setAddingUser] = useState(false);
+  const [addUserError, setAddUserError] = useState<string | null>(null);
 
   useEffect(() => {
     api.get("/trust-policy/active")
@@ -250,6 +254,21 @@ const UsersPage: React.FC = () => {
   const deviceCountFor = (userId: string) =>
     devices.filter(d => d.user_id === userId).length;
 
+  const createUser = async () => {
+    setAddingUser(true);
+    setAddUserError(null);
+    try {
+      await api.post("/auth/register", newUser);
+      setAddUserModal(false);
+      setNewUser({ username: "", email: "", password: "", role: "employee" });
+      fetchLocalUsers();
+    } catch (err: any) {
+      setAddUserError(err?.response?.data?.detail || "Failed to create user");
+    } finally {
+      setAddingUser(false);
+    }
+  };
+
   return (
     <div>
       {/* Role Assignment Modal */}
@@ -298,6 +317,73 @@ const UsersPage: React.FC = () => {
               <button
                 onClick={() => setDeleteModal(null)}
                 disabled={deleting}
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {addUserModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 w-96">
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Add User</h3>
+            {addUserError && (
+              <p className="text-sm text-red-600 dark:text-red-400 mb-3">{addUserError}</p>
+            )}
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Username</label>
+                <input
+                  type="text"
+                  value={newUser.username}
+                  onChange={e => setNewUser({ ...newUser, username: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={newUser.email}
+                  onChange={e => setNewUser({ ...newUser, email: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Password</label>
+                <input
+                  type="password"
+                  value={newUser.password}
+                  onChange={e => setNewUser({ ...newUser, password: e.target.value })}
+                  placeholder="Min 8 characters"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
+                <select
+                  value={newUser.role}
+                  onChange={e => setNewUser({ ...newUser, role: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="employee">Employee</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={createUser}
+                disabled={addingUser || !newUser.username.trim() || !newUser.email.trim() || newUser.password.length < 8}
+                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {addingUser ? "Creating…" : "Create User"}
+              </button>
+              <button
+                onClick={() => { setAddUserModal(false); setAddUserError(null); }}
+                disabled={addingUser}
                 className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
               >
                 Cancel
@@ -406,13 +492,21 @@ const UsersPage: React.FC = () => {
 
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-semibold">Local Database Users</h2>
-            <button
-              onClick={() => { fetchLocalUsers(); fetchDevices(); }}
-              className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
-              disabled={loading}
-            >
-              {loading ? "Refreshing..." : "Refresh"}
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setAddUserModal(true)}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+              >
+                Add User
+              </button>
+              <button
+                onClick={() => { fetchLocalUsers(); fetchDevices(); }}
+                className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+                disabled={loading}
+              >
+                {loading ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
           </div>
 
           {loading ? (
