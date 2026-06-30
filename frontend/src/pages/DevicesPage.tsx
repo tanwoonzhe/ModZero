@@ -8,7 +8,6 @@ import {
   FaTimesCircle,
   FaExclamationTriangle,
   FaLock,
-  FaMobile,
   FaApple,
   FaWindows,
   FaAndroid,
@@ -86,10 +85,6 @@ const DevicesPage: React.FC = () => {
   // Live tests state
   const [selectedLiveTest, setSelectedLiveTest] = useState<LiveTestResult | null>(null);
 
-  // Azure connection state for Intune Data tab
-  const [azureStatus, setAzureStatus] = useState<{ success: boolean; message: string } | null>(null);
-  const [azureStatusLoading, setAzureStatusLoading] = useState(false);
-
   const fetchData = async () => {
     try {
       const res = await api.get<DeviceAssessmentData>("/assessment/devices");
@@ -133,13 +128,6 @@ const DevicesPage: React.FC = () => {
     fetchLocalDevicesAndPosture();
   }, []);
 
-  useEffect(() => {
-    if (!azureStatus && !azureStatusLoading) {
-      setAzureStatusLoading(true);
-      api.get("/azure/test-connection").then(r => setAzureStatus(r.data)).catch(() => setAzureStatus({ success: false, message: "Connection failed" })).finally(() => setAzureStatusLoading(false));
-    }
-  }, []);
-
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
@@ -163,13 +151,7 @@ const DevicesPage: React.FC = () => {
 
   // Intune aggregate stats (null if Intune not connected)
   const intuneData = data?.data ?? null;
-  const compliance_stats = intuneData?.compliance_stats ?? { compliant: 0, noncompliant: 0, unknown: 0 };
-  const compliance_rate = intuneData?.compliance_rate ?? 0;
-  const ownership_stats = intuneData?.ownership_stats ?? { corporate: 0, personal: 0 };
-  const encryption_stats = intuneData?.encryption_stats ?? { encrypted: 0, not_encrypted: 0 };
-  const encryption_rate = intuneData?.encryption_rate ?? 0;
   const intuneDevices: any[] = intuneData?.devices ?? [];
-  const total_devices = intuneData?.total_devices ?? localDevices.length;
   const lastSynced = data?.last_synced ? new Date(data.last_synced).toLocaleString() : new Date().toLocaleString();
 
   return (
@@ -205,7 +187,7 @@ const DevicesPage: React.FC = () => {
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
-            Device Inventory ({total_devices})
+            Device Inventory
           </button>
           <button
             onClick={() => setActiveTab("posture")}
@@ -516,105 +498,6 @@ const DevicesPage: React.FC = () => {
           )}
         </div>
       ) : null}
-
-      {/* Intune Data — shown below posture checks on the posture tab, or always when on inventory */}
-      {(activeTab === "posture" || activeTab === "inventory") && (
-        <div className="space-y-4 mt-2">
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Microsoft Graph / Intune Status</h3>
-            {azureStatusLoading ? (
-              <div className="flex items-center gap-2 text-gray-500 text-sm"><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-500"></div> Checking connection...</div>
-            ) : azureStatus?.success ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-green-500"></span>
-                  <span className="text-sm font-medium text-green-700 dark:text-green-400">Graph Status: Connected</span>
-                </div>
-                <p className="text-sm text-gray-600 dark:text-gray-300">{azureStatus.message}</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
-                  <SummaryCard icon={<FaDesktop />} title="Total Devices" value={total_devices} color="indigo" />
-                  <SummaryCard icon={<FaCheckCircle />} title="Compliant" value={compliance_stats.compliant} subtitle={`${compliance_rate}% rate`} color={compliance_rate >= 80 ? "green" : compliance_rate >= 60 ? "yellow" : "red"} />
-                  <SummaryCard icon={<FaLock />} title="Encrypted" value={encryption_stats.encrypted} subtitle={`${encryption_rate}% rate`} color={encryption_rate >= 80 ? "green" : encryption_rate >= 60 ? "yellow" : "red"} />
-                  <SummaryCard icon={<FaMobile />} title="Corporate" value={ownership_stats.corporate} color="purple" />
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-lg bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 px-5 py-6 text-sm text-gray-500 dark:text-gray-400">
-                <p className="font-medium text-gray-700 dark:text-gray-300 mb-1">Microsoft Graph is not configured.</p>
-                <p>ModZero is currently using local client posture data only.</p>
-                <p className="mt-2 text-xs">Configure AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET to enable Intune device compliance data.</p>
-              </div>
-            )}
-          </div>
-
-          {azureStatus?.success && intuneDevices.length > 0 && (
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-              <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 className="font-semibold text-gray-900 dark:text-white">Intune Managed Devices</h3>
-                <p className="text-xs text-gray-500 mt-0.5">Synced from Microsoft Graph / Intune. Last sync: {lastSynced}</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 dark:bg-gray-900/40">
-                    <tr className="text-left text-xs uppercase text-gray-500">
-                      <th className="px-4 py-3">Device Name</th>
-                      <th className="px-4 py-3">OS</th>
-                      <th className="px-4 py-3">Owner</th>
-                      <th className="px-4 py-3">Compliance</th>
-                      <th className="px-4 py-3">Encrypted</th>
-                      <th className="px-4 py-3">Last Intune Sync</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {intuneDevices.map((device: any, idx: number) => (
-                      <tr key={idx} className="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2"><OSIcon os={device.operatingSystem} />{device.deviceName}</div>
-                        </td>
-                        <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{device.operatingSystem} {device.osVersion}</td>
-                        <td className="px-4 py-3 text-gray-600 dark:text-gray-300 text-xs">{device.userPrincipalName || "—"}</td>
-                        <td className="px-4 py-3"><ComplianceBadge state={device.complianceState} /></td>
-                        <td className="px-4 py-3">{device.isEncrypted ? <FaLock className="text-green-500" /> : <span className="text-gray-400">—</span>}</td>
-                        <td className="px-4 py-3 text-xs text-gray-500">{device.lastSyncDateTime ? new Date(device.lastSyncDateTime).toLocaleString() : "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// Summary Card Component
-const SummaryCard: React.FC<{
-  icon: React.ReactNode;
-  title: string;
-  value: number | string;
-  subtitle?: string;
-  color: string;
-}> = ({ icon, title, value, subtitle, color }) => {
-  const colorClasses: Record<string, string> = {
-    indigo: "bg-indigo-100 text-indigo-600 dark:bg-indigo-900 dark:text-indigo-300",
-    green: "bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300",
-    yellow: "bg-yellow-100 text-yellow-600 dark:bg-yellow-900 dark:text-yellow-300",
-    red: "bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-300",
-    purple: "bg-purple-100 text-purple-600 dark:bg-purple-900 dark:text-purple-300",
-  };
-
-  return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-      <div className="flex items-center gap-3">
-        <div className={`p-3 rounded-lg ${colorClasses[color]}`}>{icon}</div>
-        <div>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{title}</p>
-          <p className="text-2xl font-semibold">{value}</p>
-          {subtitle && <p className="text-xs text-gray-400">{subtitle}</p>}
-        </div>
-      </div>
     </div>
   );
 };

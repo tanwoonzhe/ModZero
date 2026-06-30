@@ -52,6 +52,18 @@ const UsersPage: React.FC = () => {
     }
   }, [activeTab]);
 
+  useEffect(() => {
+    if ((activeTab === 'azure' || activeTab === 'identity') && connectionStatus?.success && azureUsers.length === 0 && !azureLoading) {
+      fetchAzureUsers();
+    }
+  }, [activeTab, connectionStatus]);
+
+  useEffect(() => {
+    if (activeTab === 'identity' && Object.keys(mfaStatus).length === 0 && !mfaLoading) {
+      fetchMfaStatus();
+    }
+  }, [activeTab]);
+
   const fetchLocalUsers = async () => {
     try {
       const res = await api.get<User[]>("/users");
@@ -357,7 +369,7 @@ const UsersPage: React.FC = () => {
             Entra Users
           </button>
           <button
-            onClick={() => { setActiveTab('identity'); if (azureUsers.length === 0 && connectionStatus?.success) fetchAzureUsers(); if (Object.keys(mfaStatus).length === 0) fetchMfaStatus(); }}
+            onClick={() => setActiveTab('identity')}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
               activeTab === 'identity'
                 ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'

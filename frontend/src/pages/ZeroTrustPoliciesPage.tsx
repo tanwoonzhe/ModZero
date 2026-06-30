@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Zero Trust Policies Page
  * 
  * Central authority for weight configuration:
@@ -18,7 +18,6 @@ import {
   FaUndo,
   FaSave,
   FaExclamationTriangle,
-  FaSpinner,
   FaLaptop,
   FaNetworkWired,
 } from 'react-icons/fa';
@@ -203,7 +202,7 @@ const ZeroTrustPoliciesPage: React.FC = () => {
 
   const { resetAllWeights } = useZeroTrustStore();
 
-  const [activeTab, setActiveTab] = useState<'resource-policies' | 'device-rules' | 'identity-rules' | 'context-rules' | 'weights' | 'simulator'>('resource-policies');
+  const [activeTab, setActiveTab] = useState<'resource-policies' | 'device-rules' | 'identity-rules' | 'context-rules' | 'weights'>('resource-policies');
 
   // Resources state for Resource Policies tab
   const [resources, setResources] = useState<any[]>([]);
@@ -380,17 +379,6 @@ const ZeroTrustPoliciesPage: React.FC = () => {
           <FaCog className="inline mr-2" size={14} />
           Trust Score Weights
         </button>
-        <button
-          onClick={() => setActiveTab('simulator')}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-            activeTab === 'simulator'
-              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-          }`}
-        >
-          <FaSpinner className="inline mr-2" size={14} />
-          Policy Simulator
-        </button>
       </div>
       
       {/* Resource Policies Tab */}
@@ -503,10 +491,6 @@ const ZeroTrustPoliciesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Policy Simulator Tab */}
-      {activeTab === 'simulator' && (
-        <PolicySimulatorTab resources={resources} />
-      )}
     </div>
   );
 };
@@ -1013,233 +997,6 @@ const ContextRulesTab: React.FC = () => {
     </div>
   );
 };
-
-/* ------------------------------------------------------------------ */
-/*  Policy Simulator Tab                                               */
-/* ------------------------------------------------------------------ */
-
-interface SimulateResult {
-  device_posture_score: number;
-  context_score: number;
-  identity_score: number;
-  final_score: number;
-  decision: 'ALLOW' | 'DENY';
-  breakdown: Array<{ signal: string; passed: boolean; points: number; max: number; module: string }>;
-  threshold: number;
-}
-
-const PolicySimulatorTab: React.FC<{ resources: any[] }> = ({ resources }) => {
-  const moduleWeights = useZeroTrustStore(s => s.moduleWeights);
-  const accessThreshold = useZeroTrustStore(s => s.accessThreshold);
-
-  const [scenario, setScenario] = useState('typical');
-  const [selectedResource, setSelectedResource] = useState('');
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<SimulateResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const scenarios = [
-    { id: 'typical', label: 'Typical user — healthy device, normal hours' },
-    { id: 'mfa_missing', label: 'MFA not registered' },
-    { id: 'unhealthy_device', label: 'Unhealthy device — firewall/AV off' },
-    { id: 'off_hours', label: 'Off-hours access attempt' },
-    { id: 'failed_logins', label: 'Recent failed login attempts' },
-    { id: 'guest_user', label: 'Guest / external user' },
-  ];
-
-  const runSimulation = async () => {
-    setRunning(true);
-    setError(null);
-    setResult(null);
-    try {
-      const res = await api.post('/policies/simulate', {
-        scenario,
-        resource_id: selectedResource || undefined,
-        weights: moduleWeights,
-        threshold: accessThreshold,
-      });
-      setResult(res.data);
-    } catch (err: any) {
-      // If endpoint doesn't exist yet, show a local mock result
-      const mockScores: Record<string, { device: number; context: number; identity: number }> = {
-        typical:         { device: 88, context: 85, identity: 90 },
-        mfa_missing:     { device: 88, context: 80, identity: 40 },
-        unhealthy_device:{ device: 30, context: 70, identity: 85 },
-        off_hours:       { device: 85, context: 45, identity: 85 },
-        failed_logins:   { device: 85, context: 55, identity: 70 },
-        guest_user:      { device: 60, context: 75, identity: 50 },
-      };
-      const s = mockScores[scenario] || mockScores.typical;
-      const final = Math.round(
-        (s.device * moduleWeights.device_posture +
-          s.context * moduleWeights.context_analysis +
-          s.identity * moduleWeights.trust_scoring_engine) / 100
-      );
-      setResult({
-        device_posture_score: s.device,
-        context_score: s.context,
-        identity_score: s.identity,
-        final_score: final,
-        decision: final >= accessThreshold ? 'ALLOW' : 'DENY',
-        threshold: accessThreshold,
-        breakdown: [
-          { signal: 'firewall_enabled', passed: s.device >= 80, points: s.device >= 80 ? 15 : 0, max: 15, module: 'device_posture' },
-          { signal: 'antivirus_enabled', passed: s.device >= 80, points: s.device >= 80 ? 15 : 0, max: 15, module: 'device_posture' },
-          { signal: 'disk_encryption', passed: s.device >= 60, points: s.device >= 60 ? 15 : 0, max: 15, module: 'device_posture' },
-          { signal: 'account_enabled', passed: true, points: 25, max: 25, module: 'identity' },
-          { signal: 'mfa_registered', passed: scenario !== 'mfa_missing', points: scenario !== 'mfa_missing' ? 25 : 0, max: 25, module: 'identity' },
-          { signal: 'normal_time', passed: scenario !== 'off_hours', points: scenario !== 'off_hours' ? 15 : 0, max: 15, module: 'context' },
-          { signal: 'no_failed_login', passed: scenario !== 'failed_logins', points: scenario !== 'failed_logins' ? 20 : 0, max: 20, module: 'context' },
-        ],
-      });
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  const scoreColor = (s: number) => s >= 80 ? 'text-green-600' : s >= 60 ? 'text-amber-600' : 'text-red-600';
-
-  return (
-    <div className="space-y-4">
-      {/* Config Panel */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-        <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">
-          Test Policy Simulator
-          <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-            Simulation Mode
-          </span>
-        </h2>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-          Simulate an access evaluation using the current trust score weights and access threshold.
-          Results show per-module scores and the final allow/deny decision.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Scenario</label>
-            <select
-              value={scenario}
-              onChange={e => setScenario(e.target.value)}
-              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-            >
-              {scenarios.map(s => (
-                <option key={s.id} value={s.id}>{s.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Resource (optional)</label>
-            <select
-              value={selectedResource}
-              onChange={e => setSelectedResource(e.target.value)}
-              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-            >
-              <option value="">— Any resource —</option>
-              {resources.map(r => (
-                <option key={r.resource_id || r.id} value={r.resource_id || r.id}>
-                  {r.name} (min {r.min_trust_score ?? 70})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-end">
-            <button
-              onClick={runSimulation}
-              disabled={running}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium"
-            >
-              {running ? (
-                <><FaSpinner className="animate-spin" size={14} /> Running...</>
-              ) : (
-                <><FaShieldAlt size={14} /> Run Evaluation</>
-              )}
-            </button>
-          </div>
-        </div>
-        <div className="text-xs text-gray-400">
-          Current weights: Device Posture {moduleWeights.device_posture}% · Context Analysis {moduleWeights.context_analysis}% · Identity/Policy {moduleWeights.trust_scoring_engine}% · Access threshold: {accessThreshold}
-        </div>
-      </div>
-
-      {/* Results */}
-      {result && (
-        <>
-          {/* Score Overview */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { label: 'Device Posture', value: result.device_posture_score, subtitle: `× ${moduleWeights.device_posture}% weight` },
-              { label: 'Context Analysis', value: result.context_score, subtitle: `× ${moduleWeights.context_analysis}% weight` },
-              { label: 'Identity / Policy', value: result.identity_score, subtitle: `× ${moduleWeights.trust_scoring_engine}% weight` },
-              { label: 'Final Trust Score', value: result.final_score, subtitle: `threshold: ${result.threshold}` },
-            ].map(m => (
-              <div key={m.label} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 text-center">
-                <div className="text-xs text-gray-500 mb-1">{m.label}</div>
-                <div className={`text-3xl font-bold ${scoreColor(m.value)}`}>{m.value}</div>
-                <div className="text-xs text-gray-400 mt-1">{m.subtitle}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Decision Banner */}
-          <div className={`rounded-xl px-5 py-4 flex items-center justify-between ${
-            result.decision === 'ALLOW'
-              ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700'
-              : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700'
-          }`}>
-            <div>
-              <span className={`text-lg font-bold ${result.decision === 'ALLOW' ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
-                {result.decision === 'ALLOW' ? '✓ ACCESS ALLOWED' : '✕ ACCESS DENIED'}
-              </span>
-              <p className="text-sm text-gray-600 dark:text-gray-300 mt-0.5">
-                Score {result.final_score} {result.decision === 'ALLOW' ? '≥' : '<'} threshold {result.threshold}
-              </p>
-            </div>
-            <div className="text-xs text-gray-400">
-              Scenario: {scenarios.find(s => s.id === scenario)?.label}
-            </div>
-          </div>
-
-          {/* Signal Breakdown */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="font-medium text-gray-900 dark:text-white text-sm">Signal Breakdown</h3>
-            </div>
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 dark:bg-gray-900/40 text-xs uppercase text-gray-500">
-                <tr>
-                  <th className="px-5 py-3 text-left">Signal</th>
-                  <th className="px-5 py-3 text-left">Module</th>
-                  <th className="px-5 py-3 text-left">Status</th>
-                  <th className="px-5 py-3 text-right">Points</th>
-                  <th className="px-5 py-3 text-right">Max</th>
-                </tr>
-              </thead>
-              <tbody>
-                {result.breakdown.map((b, idx) => (
-                  <tr key={idx} className="border-t border-gray-100 dark:border-gray-700">
-                    <td className="px-5 py-3 font-medium text-gray-900 dark:text-white capitalize">
-                      {b.signal.replace(/_/g, ' ')}
-                    </td>
-                    <td className="px-5 py-3 text-gray-500 capitalize">{b.module.replace(/_/g, ' ')}</td>
-                    <td className="px-5 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        b.passed ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                      }`}>
-                        {b.passed ? 'Pass' : 'Fail'}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3 text-right font-mono text-gray-900 dark:text-white">+{b.points}</td>
-                    <td className="px-5 py-3 text-right font-mono text-gray-400">{b.max}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </div>
-  );
-};
-
 /* ------------------------------------------------------------------ */
 /*  FYP Module Weights + Access Threshold                             */
 /* ------------------------------------------------------------------ */
