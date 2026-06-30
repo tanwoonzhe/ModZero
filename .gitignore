@@ -49,6 +49,14 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Editor / tooling backups and scratch artifacts
+*.bak
+*.tsbuildinfo
+
+# Captured auth tokens from manual API testing (never commit credentials)
+login.json
+**/login.json
+
 # Environment files
 .env
 .env.local

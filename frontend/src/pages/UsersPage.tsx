@@ -276,16 +276,16 @@ const UsersPage: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 w-80">
             <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Assign Role</h3>
-            <p className="text-sm text-gray-500 mb-4">Current role: <strong>{roleModal.current}</strong></p>
+            <p className="text-sm text-gray-500 mb-4">Current role: <strong className="capitalize">{roleModal.current}</strong></p>
             <div className="flex flex-col gap-2">
-              {["ADMIN", "EMPLOYEE"].map(r => (
+              {[{ value: "admin", label: "Admin" }, { value: "employee", label: "Employee" }].map(r => (
                 <button
-                  key={r}
-                  disabled={roleUpdating || r === roleModal.current}
-                  onClick={() => assignRole(roleModal.userId, r)}
+                  key={r.value}
+                  disabled={roleUpdating || r.value === roleModal.current}
+                  onClick={() => assignRole(roleModal.userId, r.value)}
                   className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-sm font-medium hover:bg-indigo-50 dark:hover:bg-indigo-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {r === roleModal.current ? `${r} (current)` : `Set as ${r}`}
+                  {r.value === roleModal.current ? `${r.label} (current)` : `Set as ${r.label}`}
                 </button>
               ))}
             </div>
@@ -539,8 +539,8 @@ const UsersPage: React.FC = () => {
                           {user.email}
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            user.role === 'ADMIN'
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full capitalize ${
+                            user.role?.toLowerCase() === 'admin'
                               ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
                               : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
                           }`}>

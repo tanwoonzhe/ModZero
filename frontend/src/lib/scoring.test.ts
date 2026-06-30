@@ -28,6 +28,7 @@ import {
   Control,
   ControlResult,
   ControlStatus,
+  TestResult,
   TenantLicenses,
   WeightConfig,
   Pillar,
@@ -76,6 +77,7 @@ const createWeightConfig = (overrides: Partial<WeightConfig> = {}): WeightConfig
 
 const createControlResult = (overrides: Partial<ControlResult> = {}): ControlResult => ({
   controlId: 'test-001',
+  result: TestResult.NOT_RUN,
   status: ControlStatus.TO_ADDRESS,
   evidence: [],
   lastCheckedAt: new Date().toISOString(),
