@@ -310,14 +310,6 @@
       </div>
 
       <div class="panel">
-        <h2>Device Identity</h2>
-        <dl class="kv">
-          <dt>Hostname</dt><dd id="setHostname">—</dd>
-          <dt>Fingerprint</dt><dd id="setFingerprint">—</dd>
-        </dl>
-      </div>
-
-      <div class="panel">
         <h2>Change Password</h2>
         <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px">Current Password</label>
         <input id="currentPwd" type="password" placeholder="Current password" style="margin-bottom:10px" />
@@ -721,12 +713,6 @@
     async function loadSettings() {
       const snap = await M.getSnapshot();
       $("settingsUrl").value = snap.url || "";
-      $("setHostname").textContent = snap.hostname || "—";
-      try {
-        $("setFingerprint").textContent = await M.getFingerprint();
-      } catch {
-        $("setFingerprint").textContent = "(unavailable)";
-      }
       renderEntraStatus();
     }
 
