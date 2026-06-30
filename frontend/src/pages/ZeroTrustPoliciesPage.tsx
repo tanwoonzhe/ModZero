@@ -48,7 +48,7 @@ type EntraModule = 'identity' | 'device' | 'context';
 
 const DEFAULT_ENTRA_SIGNALS: Record<EntraModule, EntraSignalRule[]> = {
   identity: [
-    { key: 'account_enabled',       label: 'Account Enabled',         description: 'Entra account is active — a disabled account is always denied access regardless of score', pts: 30, enabled: true,  failureAction: 'deny_access' },
+    { key: 'account_enabled',       label: 'Account Enabled',         description: 'Entra account is active — a disabled account is always denied access regardless of score', pts: 30, enabled: true,  failureAction: 'deny_immediately' },
     { key: 'role_valid',            label: 'Role Valid',              description: 'User belongs to at least one Entra group or directory role (legitimate employees always do)', pts: 20, enabled: true,  failureAction: 'reduce_score' },
     { key: 'mfa_registered',        label: 'MFA Registered',          description: 'Multi-factor authentication method registered in Entra (Authenticator App, FIDO2, etc.)', pts: 25, enabled: true,  failureAction: 'reduce_score' },
     { key: 'identity_risk_low',     label: 'Identity Risk Low',       description: 'Entra Identity Protection risk level is none or low for this user', pts: 20, enabled: true,  failureAction: 'reduce_score' },

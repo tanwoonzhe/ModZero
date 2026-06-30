@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   FaGlobe, FaPlus, FaSearch, FaSyncAlt, FaTrash, FaTimes, FaPencilAlt,
-  FaCheck, FaCircle, FaPlug,
+  FaCheck, FaCircle, FaPlug, FaLock,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 import api from "../api";
