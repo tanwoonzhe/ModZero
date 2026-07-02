@@ -66,10 +66,19 @@ if ($null -eq $o.firewall) {
   } catch {}
 }
 
+# ── Shared Defender lookups: fetched ONCE and reused below. Get-MpPreference
+# in particular is known to be slow on some systems — calling either cmdlet
+# twice in this script (as an earlier version of this script did) roughly
+# doubled that cost and risked pushing the whole script past its timeout,
+# which fails EVERY signal below (not just the Defender ones).
+$mpStatus = $null
+try { $mpStatus = Get-MpComputerStatus } catch {}
+$mpPref = $null
+try { $mpPref = Get-MpPreference } catch {}
+
 # ── Antivirus: Defender status, Security Center WMI, then WinDefend service ──
 try {
-  $d = (Get-MpComputerStatus).AntivirusEnabled
-  if ($null -ne $d) { $o.antivirus = [bool]$d }
+  if ($null -ne $mpStatus.AntivirusEnabled) { $o.antivirus = [bool]$mpStatus.AntivirusEnabled }
 } catch {}
 if ($null -eq $o.antivirus) {
   try {
@@ -89,16 +98,14 @@ if ($null -eq $o.antivirus) {
 # Dev Drive protection is a newer Defender preference (PerformanceModeStatusForDevDrive)
 # not present on all Windows builds — that sub-check safely no-ops via try/catch.
 try {
-  $status = Get-MpComputerStatus
-  $pref = Get-MpPreference
-  $rtp = $status.RealTimeProtectionEnabled
+  $rtp = $mpStatus.RealTimeProtectionEnabled
   $cloud = $null
-  if ($null -ne $pref.MAPSReporting) { $cloud = [bool]($pref.MAPSReporting -ne 0) }
+  if ($null -ne $mpPref.MAPSReporting) { $cloud = [bool]($mpPref.MAPSReporting -ne 0) }
   $sample = $null
-  if ($null -ne $pref.SubmitSamplesConsent) { $sample = [bool]($pref.SubmitSamplesConsent -eq 1 -or $pref.SubmitSamplesConsent -eq 3) }
+  if ($null -ne $mpPref.SubmitSamplesConsent) { $sample = [bool]($mpPref.SubmitSamplesConsent -eq 1 -or $mpPref.SubmitSamplesConsent -eq 3) }
   $devDrive = $null
   try {
-    if ($null -ne $pref.PerformanceModeStatusForDevDrive) { $devDrive = [bool]($pref.PerformanceModeStatusForDevDrive -eq 0) }
+    if ($null -ne $mpPref.PerformanceModeStatusForDevDrive) { $devDrive = [bool]($mpPref.PerformanceModeStatusForDevDrive -eq 0) }
   } catch {}
   if (($null -ne $rtp) -and ($null -ne $cloud) -and ($null -ne $sample) -and ($null -ne $devDrive)) {
     $o.avAdvanced = [bool]($rtp -and $cloud -and $sample -and $devDrive)
@@ -113,7 +120,11 @@ try {
 if ($null -eq $o.disk) {
   try {
     $r = (manage-bde -status $env:SystemDrive | Out-String)
-    if ("$r" -ne '') {
+    # manage-bde without admin rights prints an "Access denied" error, not a
+    # status block — that error text still isn't empty, so checking only
+    # "-ne ''" previously mis-scored it as a real (and always-false) result.
+    # Require the actual status line to be present before trusting the match.
+    if ($r -match 'Conversion Status:') {
       $o.disk = [bool](($r -match 'Conversion Status:\\s+Fully Encrypted') -and ($r -match 'Protection Status:\\s+Protection On'))
     }
   } catch {}
@@ -132,11 +143,13 @@ try {
 # Win32_QuickFixEngineering is the standard source for this but is known to
 # under-report on some systems (cumulative updates don't always populate
 # InstalledOn) — unreadable/empty leaves this N/A rather than a false Fail.
+# Measure-Object -Maximum avoids sorting the full update history (can be
+# years' worth of entries) just to keep the single newest date.
 try {
-  $hf = Get-CimInstance -ClassName Win32_QuickFixEngineering -ErrorAction Stop |
-    Where-Object { $_.InstalledOn } | Sort-Object InstalledOn -Descending | Select-Object -First 1
-  if ($hf -and $hf.InstalledOn) {
-    $days = (New-TimeSpan -Start $hf.InstalledOn -End (Get-Date)).Days
+  $dates = Get-CimInstance -ClassName Win32_QuickFixEngineering -ErrorAction Stop |
+    Where-Object { $_.InstalledOn } | Measure-Object -Property InstalledOn -Maximum
+  if ($dates -and $dates.Maximum) {
+    $days = (New-TimeSpan -Start $dates.Maximum -End (Get-Date)).Days
     $o.osPatched = [bool]($days -le 90)
   }
 } catch {}
@@ -144,7 +157,7 @@ try {
 $o | ConvertTo-Json -Compress
 `;
 
-async function collectWindowsPosture(timeoutMs = 20000): Promise<WinPosture> {
+async function collectWindowsPosture(timeoutMs = 30000): Promise<WinPosture> {
   const empty: WinPosture = { firewall: null, antivirus: null, avAdvanced: null, disk: null, lock: null, osPatched: null };
   if (process.platform !== "win32") return empty;
   // -EncodedCommand (base64 UTF-16LE) sidesteps all quoting/escaping issues that
@@ -211,7 +224,7 @@ export function getOrCreateFingerprint(): string {
 export async function collectPosture(): Promise<PostureSignals> {
   let win = await collectWindowsPosture();
   const allNull =
-    win.firewall === null && win.antivirus === null &&
+    win.firewall === null && win.antivirus === null && win.avAdvanced === null &&
     win.disk === null && win.lock === null && win.osPatched === null;
   if (process.platform === "win32" && allNull) {
     win = await collectWindowsPosture();
@@ -225,7 +238,11 @@ export async function collectPosture(): Promise<PostureSignals> {
     av_advanced_protection:  win.avAdvanced,
     disk_encryption_enabled: win.disk,
     screen_lock_enabled:     win.lock,
-    os_supported:            win.osPatched !== null ? win.osPatched : detectOsSupportedFallback(),
+    // Only fall back to the major-version heuristic when genuinely not on
+    // Windows (dev-mode testing on Mac/Linux) — NOT whenever win.osPatched
+    // happens to be null, which previously masked a real collection
+    // failure (PS script error/timeout) as a fake Pass instead of N/A.
+    os_supported:            process.platform === "win32" ? win.osPatched : detectOsSupportedFallback(),
     client_version:          app.getVersion(),
     intune_compliant:        null,
   };
