@@ -43,13 +43,13 @@ const FAILURE_ACTION_OPTIONS: { value: FailureAction; label: string }[] = [
 // not a full description, so this stays a frontend-only lookup.
 const SIGNAL_DESCRIPTIONS: Record<string, string> = {
   // Device — local
-  firewall_enabled:        'Windows Firewall is enabled on at least one network profile',
-  antivirus_enabled:       'Windows Defender or registered antivirus is active and up to date',
+  firewall_enabled:        'All three Windows Firewall profiles (Domain, Private, Public) are enabled — not just one',
+  antivirus_enabled:       'Windows Defender or a registered third-party antivirus is active',
+  av_advanced_protection:  'Real-time protection, cloud-delivered protection, automatic sample submission, and Dev Drive protection are all on (Defender-specific; Windows Security > Virus & threat protection settings)',
   disk_encryption_enabled: 'BitLocker system drive is fully encrypted with protection on',
   screen_lock_enabled:     'Secure screensaver or console-lock timeout is configured',
-  os_supported:            'Windows major version is 10 or later',
-  client_healthy:          'Client fingerprint file exists and is readable',
-  recent_check:            'Last posture report was submitted within 7 days',
+  os_supported:            'Most recently installed Windows update (Win32_QuickFixEngineering) was within the last 90 days',
+  client_healthy:          'Client app reported version meets MIN_CLIENT_VERSION (posture_scoring.py)',
   intune_compliant:        'Device is marked compliant by Intune',
   // Device — entra
   entra_registered: 'Device is registered in the Entra ID directory',
