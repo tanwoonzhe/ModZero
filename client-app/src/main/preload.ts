@@ -8,7 +8,7 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("modzero", {
   // Onboarding
   getConfig: (): Promise<unknown> => ipcRenderer.invoke("modzero:get-config"),
-  saveAndConnect: (payload: unknown): Promise<boolean> =>
+  saveAndConnect: (payload: unknown): Promise<{ ok: boolean; blocked?: boolean; reason?: string }> =>
     ipcRenderer.invoke("modzero:save-and-connect", payload),
 
   // Connected dashboard

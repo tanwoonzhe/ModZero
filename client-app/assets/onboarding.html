@@ -250,13 +250,17 @@
           setStatus("info", "Exchanging enrollment token…");
           credential = { enrollment: await doEnroll(base) };
         }
-        setStatus("ok", "Connected. Saving configuration…");
-        const ok = await window.modzero.saveAndConnect({
+        setStatus("ok", "Connected. Verifying device…");
+        const outcome = await window.modzero.saveAndConnect({
           url: base,
           mode,
           credential,
         });
-        if (!ok) setStatus("err", "Could not save configuration.");
+        if (outcome && outcome.blocked) {
+          setStatus("err", `Blocked by policy: ${outcome.reason || "device check failed"}. This clears automatically once a device check passes — try again after resolving the issue.`);
+        } else if (!outcome || !outcome.ok) {
+          setStatus("err", "Could not save configuration.");
+        }
       } catch (e) {
         setStatus("err", String(e.message || e));
       } finally {

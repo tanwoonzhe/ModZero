@@ -96,6 +96,17 @@ def _run_migrations() -> None:
         ALTER TABLE trust_policy_config
           ADD COLUMN IF NOT EXISTS auto_check_interval_hours integer NOT NULL DEFAULT 0
         """,
+        # Ephemeral (not persistent) client-login block from a
+        # deny_immediately_client signal. Deliberately separate from
+        # users.client_access_enabled — see models.py's DeviceTrustScore docstring.
+        """
+        ALTER TABLE device_trust_scores
+          ADD COLUMN IF NOT EXISTS hard_denied_client boolean NOT NULL DEFAULT false
+        """,
+        """
+        ALTER TABLE device_trust_scores
+          ADD COLUMN IF NOT EXISTS hard_deny_client_reason varchar(256)
+        """,
     ]
     with engine.connect() as conn:
         for stmt in migrations:

@@ -1428,6 +1428,17 @@ class DeviceTrustScore(Base):
     hard_denied_resources: bool = Column(Boolean, nullable=False, default=False)
     hard_deny_reason: str = Column(String(256), nullable=True)
 
+    # Set when a signal with failure_action=deny_immediately_client failed on
+    # this check. Deliberately NOT the same thing as User.client_access_enabled
+    # (that's an admin's manual, persistent switch) — this is ephemeral and
+    # only reflects the MOST RECENT check. posture.py pushes a force_logout
+    # event when this becomes True; main.ts's modzero:save-and-connect also
+    # runs an immediate device check right after login and bounces back to
+    # onboarding if it comes back True. Either way it self-clears the moment
+    # a later check passes — no admin action needed to "undo" it.
+    hard_denied_client: bool = Column(Boolean, nullable=False, default=False)
+    hard_deny_client_reason: str = Column(String(256), nullable=True)
+
     calculated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
 
     device = relationship("Device", back_populates="device_trust_scores")

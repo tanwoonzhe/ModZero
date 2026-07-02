@@ -105,7 +105,7 @@ def score_posture(
         if not enabled:
             breakdown.append({
                 "factor": factor, "value": None, "passed": None,
-                "points": 0, "max": max_pts, "note": "disabled by policy",
+                "points": 0, "max": max_pts, "module": "device", "note": "disabled by policy",
             })
             continue
 
@@ -113,7 +113,7 @@ def score_posture(
         if factor == "intune_compliant" and not intune_configured:
             breakdown.append({
                 "factor": factor, "value": None, "passed": None,
-                "points": 0, "max": max_pts, "note": "not configured",
+                "points": 0, "max": max_pts, "module": "device", "note": "not configured",
             })
             continue
 
@@ -123,7 +123,7 @@ def score_posture(
         if value is None:
             breakdown.append({
                 "factor": factor, "value": None, "passed": None,
-                "points": 0, "max": max_pts, "note": "not collected",
+                "points": 0, "max": max_pts, "module": "device", "note": "not collected",
             })
             continue
 
@@ -133,7 +133,7 @@ def score_posture(
         denominator += max_pts
         breakdown.append({
             "factor": factor, "value": value, "passed": passed,
-            "points": pts, "max": max_pts,
+            "points": pts, "max": max_pts, "module": "device",
         })
         if not passed and failure_action != "reduce_score":
             hard_fails.append({
@@ -152,7 +152,7 @@ def score_posture(
         if not enabled:
             breakdown.append({
                 "factor": factor, "value": None, "passed": None,
-                "points": 0, "max": max_pts, "source": "entra", "note": "disabled by policy",
+                "points": 0, "max": max_pts, "module": "device", "source": "entra", "note": "disabled by policy",
             })
             continue
 
@@ -160,7 +160,7 @@ def score_posture(
         if value is None:
             breakdown.append({
                 "factor": factor, "value": None, "passed": None,
-                "points": 0, "max": max_pts, "source": "entra", "note": "not collected",
+                "points": 0, "max": max_pts, "module": "device", "source": "entra", "note": "not collected",
             })
             continue
         passed = bool(value)
@@ -169,7 +169,7 @@ def score_posture(
         denominator += max_pts
         breakdown.append({
             "factor": factor, "value": value, "passed": passed,
-            "points": pts, "max": max_pts, "source": "entra",
+            "points": pts, "max": max_pts, "module": "device", "source": "entra",
         })
         if not passed and failure_action != "reduce_score":
             hard_fails.append({
