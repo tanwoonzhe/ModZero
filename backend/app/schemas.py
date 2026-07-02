@@ -482,6 +482,8 @@ class TrustPolicyConfigOut(BaseModel):
     require_known_device:      bool
     unknown_device_penalty:    int
     suspicious_ip_penalty:     int
+    # Admin-managed IP blocklist backing the Normal IP context signal.
+    blocked_ips:               Optional[list] = None
     # Client app auto device-check interval, hours. 0 = disabled. Pure
     # scheduling config — not part of the trust score.
     auto_check_interval_hours: int = 0
@@ -509,6 +511,7 @@ class TrustPolicyConfigUpdate(BaseModel):
     require_known_device:      Optional[bool]  = None
     unknown_device_penalty:    Optional[int]   = None
     suspicious_ip_penalty:     Optional[int]   = None
+    blocked_ips:               Optional[list]  = None
     auto_check_interval_hours: Optional[int]   = None
     entra_enabled:             Optional[bool]  = None
     valid_role_ids:            Optional[list]  = None

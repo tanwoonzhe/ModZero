@@ -55,7 +55,8 @@ def _latest_signin(upn: str) -> Optional[dict]:
     top=1 filtered to a single user — data volume doesn't explain it, this
     looks like an inherent characteristic of this specific beta endpoint on
     this tenant/region. 30s is a pragmatic ceiling, not a guarantee: on a
-    tenant this slow, Conditional Access OK / Trusted Location may keep
+    tenant this slow, Trusted Location (the only remaining signal derived
+    from this fetch — Conditional Access OK was removed entirely) may keep
     showing "Not Configured" regardless of the timeout value. A real fix
     would move this off the synchronous device-check path entirely (a
     background refresh job reading from cache only) rather than keep
@@ -89,7 +90,6 @@ class AzureSignals:
     role_valid:             Optional[bool] = None    # reserved; left None unless resolvable
     mfa_registered:         Optional[bool] = None
     identity_risk_low:      Optional[bool] = None
-    conditional_access_ok:  Optional[bool] = None
 
     # Device
     entra_registered:       Optional[bool] = None
@@ -117,7 +117,6 @@ class AzureSignals:
             "role_valid":                  self.role_valid,
             "azure_mfa_registered":        self.mfa_registered,
             "azure_identity_risk_low":     self.identity_risk_low,
-            "azure_conditional_access_ok": self.conditional_access_ok,
         }
 
     def device_overrides(self) -> dict:
@@ -348,34 +347,16 @@ def collect_azure_signals(
         except Exception as exc:  # noqa: BLE001
             log.warning("Sign-in risk (from riskyUsers) failed: %s", exc)
 
-        # Conditional Access + trusted location from latest sign-in (best-effort, short timeout).
-        # These are secondary signals; if signIns is unavailable they become Not Configured.
+        # Trusted location from latest sign-in (best-effort, short timeout).
+        # Secondary signal; if signIns is unavailable it becomes Not Configured.
+        # (Conditional Access OK used to be derived from this same sign-in
+        # fetch too, but was removed — conditionalAccessStatus only reflects
+        # ENFORCED policies, so it never resolved on a tenant running CA in
+        # Report-only mode. Not worth the added complexity for one signal.)
         try:
             upn = azure_user.get("userPrincipalName") or ""
             latest = _latest_signin(upn) if upn else None
             if latest is not None:
-                ca = (latest.get("conditionalAccessStatus") or "").lower()
-                if ca == "success":
-                    sig.conditional_access_ok = True
-                elif ca == "failure":
-                    sig.conditional_access_ok = False
-                else:
-                    # conditionalAccessStatus only reflects ENFORCED policies —
-                    # it stays "notApplied" when every applicable policy is in
-                    # Report-only mode, even though Graph evaluated them and
-                    # recorded a real result per-policy. That per-policy result
-                    # lives in appliedConditionalAccessPolicies[].result as
-                    # "reportOnlySuccess"/"reportOnlyFailure" — check there
-                    # before giving up and calling it Not Configured.
-                    applied = latest.get("appliedConditionalAccessPolicies") or []
-                    results = {(p.get("result") or "").lower() for p in applied if isinstance(p, dict)}
-                    if "reportonlyfailure" in results:
-                        sig.conditional_access_ok = False
-                    elif "reportonlysuccess" in results:
-                        sig.conditional_access_ok = True
-                    else:
-                        sig.na_reasons["conditional_access_ok"] = "not_configured"
-
                 loc = latest.get("networkLocationDetails")
                 if isinstance(loc, list) and loc:
                     types = {t for d in loc for t in (d.get("networkType") or "").split(",") if t}
@@ -385,13 +366,11 @@ def collect_azure_signals(
                 else:
                     sig.na_reasons["trusted_location"] = "not_configured"
             else:
-                # signIns unavailable — mark both as not_configured so UI shows
+                # signIns unavailable — mark as not_configured so UI shows
                 # "Not Configured" rather than the error-like "N/A".
-                sig.na_reasons["conditional_access_ok"] = "not_configured"
                 sig.na_reasons["trusted_location"] = "not_configured"
         except Exception as exc:  # noqa: BLE001
             log.warning("Sign-in log lookup failed: %s", exc)
-            sig.na_reasons["conditional_access_ok"] = "not_configured"
             sig.na_reasons["trusted_location"] = "not_configured"
     else:
         sig.notes.append("user not found in Entra")

@@ -19,7 +19,12 @@ Entra-only signals (only when Entra is enabled and Graph returns a value):
                                   (admin-configurable; any membership by default)
   MFA Registered            25  — MFA method registered in Entra
   Identity Risk Low         20  — Entra Identity Protection risk level
-  Conditional Access OK     15  — compliant with Conditional Access policies
+
+(Conditional Access OK was removed: conditionalAccessStatus on a sign-in
+only reflects ENFORCED Conditional Access policies, so a tenant running CA
+in Report-only mode could never resolve it — it permanently read "Not
+Configured". Report-only evaluation is handled separately, as a context
+signal, not scored here.)
 
 Scoring:
   identity_score = min(100, earned / 100 * 100)
@@ -51,7 +56,6 @@ _AZURE_SIGNALS = [
     {"signal": "role_valid",            "max": 20},
     {"signal": "mfa_registered",        "max": 25},
     {"signal": "identity_risk_low",     "max": 20},
-    {"signal": "conditional_access_ok", "max": 15},
 ]
 
 # Fixed denominator = original 100-pt budget (sum of all 5 original signals).
@@ -79,7 +83,6 @@ class IdentitySignals:
         role_valid: Optional[bool] = None,
         azure_mfa_registered: Optional[bool] = None,
         azure_identity_risk_low: Optional[bool] = None,
-        azure_conditional_access_ok: Optional[bool] = None,
     ) -> None:
         self.failed_login_count = failed_login_count
         self.locked = locked
@@ -90,7 +93,6 @@ class IdentitySignals:
         self.role_valid = role_valid
         self.azure_mfa_registered = azure_mfa_registered
         self.azure_identity_risk_low = azure_identity_risk_low
-        self.azure_conditional_access_ok = azure_conditional_access_ok
 
 
 def score_identity_signals(
@@ -133,7 +135,6 @@ def score_identity_signals(
         "role_valid":            signals.role_valid,
         "mfa_registered":        signals.azure_mfa_registered,
         "identity_risk_low":     signals.azure_identity_risk_low,
-        "conditional_access_ok": signals.azure_conditional_access_ok,
     }
 
     earned = 0

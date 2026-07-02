@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from .. import schemas
 from ..azure_service import azure_service
 from ..deps import get_db, get_current_user
-from ..models import Device, DeviceTrustScore, PostureReport, RoleEnum, TrustPolicyConfig, User
+from ..models import Connector, ConnectorOnlineStatusEnum, Device, DeviceTrustScore, PostureReport, RoleEnum, TrustPolicyConfig, User
 from ..routers.trust_policy import get_or_create_policy
 from ..services.azure_signal_service import AzureSignals, collect_azure_signals
 from ..services.context_analysis_service import score_context_default
@@ -101,6 +101,7 @@ async def _score_and_persist(
     policy: TrustPolicyConfig,
     current_user: User,
     device: Device,
+    device_is_known: bool,
     report: PostureReport,
     source_ip: Optional[str],
     settings,
@@ -123,10 +124,17 @@ async def _score_and_persist(
         report, azure.device_overrides() if azure else None, rules=device_rules,
     )
 
-    is_known_device = device.device_id is not None
+    # gateway_online: is at least one connector currently online. Evaluated at
+    # device-check time (not tied to a specific resource, unlike access.py's
+    # per-resource connector check), so this is a coarse "is the backend
+    # reachable at all" system-health signal, not per-resource routing.
+    gateway_online = db.query(Connector).filter(
+        Connector.status == ConnectorOnlineStatusEnum.ONLINE
+    ).first() is not None
+
     ctx_score, ctx_breakdown, context_hard_fails = score_context_default(
         source_ip=source_ip,
-        known_device=is_known_device,
+        known_device=device_is_known,
         failed_attempt_count=current_user.failed_login_count or 0,
         allowed_start_hour=policy.allowed_start_hour,
         allowed_end_hour=policy.allowed_end_hour,
@@ -134,6 +142,8 @@ async def _score_and_persist(
         require_known_device=policy.require_known_device,
         unknown_device_penalty=policy.unknown_device_penalty,
         suspicious_ip_penalty=policy.suspicious_ip_penalty,
+        blocked_ips=policy.blocked_ips or [],
+        gateway_online=gateway_online,
         include_azure=bool(azure),
         na_reasons=azure.na_reasons if azure else None,
         rules=context_rules,
@@ -231,8 +241,16 @@ async def _score_and_persist(
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _resolve_device(payload: schemas.PostureReportIn, user: User, db: Session) -> Device:
-    """Return an existing Device or auto-register a new one."""
+def _resolve_device(payload: schemas.PostureReportIn, user: User, db: Session) -> tuple[Device, bool]:
+    """Return (device, is_known) — an existing Device or a freshly auto-registered one.
+
+    is_known=True only for a device row that already existed before this
+    request; a device created right here (first-ever check-in) is not
+    "known" yet. Backs the known_device context signal — previously always
+    True regardless of whether the device had ever been seen before, since
+    every caller (including this function's own auto-register path) has a
+    non-null device_id by the time scoring runs.
+    """
     # 1. Explicit device_id
     if payload.device_id:
         device = db.query(Device).filter(Device.device_id == payload.device_id).first()
@@ -240,7 +258,7 @@ def _resolve_device(payload: schemas.PostureReportIn, user: User, db: Session) -
             raise HTTPException(status_code=404, detail="Device not found")
         if user.role != RoleEnum.ADMIN and device.user_id != user.user_id:
             raise HTTPException(status_code=403, detail="Not your device")
-        return device
+        return device, True
 
     # 2. Fingerprint lookup / auto-register
     if payload.fingerprint:
@@ -251,7 +269,7 @@ def _resolve_device(payload: schemas.PostureReportIn, user: User, db: Session) -
             # Update os_version if supplied
             if payload.os_version and device.os_version != payload.os_version:
                 device.os_version = payload.os_version
-            return device
+            return device, True
 
     # 3. Auto-register new device
     device = Device(
@@ -262,7 +280,7 @@ def _resolve_device(payload: schemas.PostureReportIn, user: User, db: Session) -
     )
     db.add(device)
     db.flush()  # populate device_id without committing yet
-    return device
+    return device, False
 
 
 def _score_dict(score: DeviceTrustScore) -> dict:
@@ -331,7 +349,7 @@ async def submit_posture_report(
     """
     settings = get_settings()
     policy: TrustPolicyConfig = get_or_create_policy(db)
-    device = _resolve_device(payload, current_user, db)
+    device, device_is_known = _resolve_device(payload, current_user, db)
     source_ip: Optional[str] = request.client.host if request.client else None
 
     # ── 1. Intune compliance overlay from Graph ────────────────────────────────
@@ -363,7 +381,7 @@ async def submit_posture_report(
     db.flush()
 
     # ── 3–9. Score all three modules, enforce hard-fail signals, persist ───────
-    result = await _score_and_persist(db, policy, current_user, device, report, source_ip, settings)
+    result = await _score_and_persist(db, policy, current_user, device, device_is_known, report, source_ip, settings)
     trust = result["trust"]
 
     device_contrib = round(result["posture_score"]  * policy.device_weight,   1)
@@ -487,7 +505,7 @@ async def client_posture_report(
     """
     settings = get_settings()
     policy: TrustPolicyConfig = get_or_create_policy(db)
-    device = _resolve_device(payload, current_user, db)
+    device, device_is_known = _resolve_device(payload, current_user, db)
     source_ip: Optional[str] = request.client.host if request.client else None
 
     # Intune overlay
@@ -517,7 +535,7 @@ async def client_posture_report(
     db.add(report)
     db.flush()
 
-    result = await _score_and_persist(db, policy, current_user, device, report, source_ip, settings)
+    result = await _score_and_persist(db, policy, current_user, device, device_is_known, report, source_ip, settings)
     trust = result["trust"]
     posture_score, ctx_score, identity_score = result["posture_score"], result["ctx_score"], result["identity_score"]
     total, threshold, decision, reason = result["total"], result["threshold"], result["decision"], result["reason"]
