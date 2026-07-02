@@ -99,6 +99,12 @@ class User(Base):
     client_access_enabled: bool = Column(Boolean, nullable=False, default=True)
     linked_entra_user_id: Optional[str] = Column(String(128), nullable=True, unique=True)
     linked_entra_upn: Optional[str] = Column(String(256), nullable=True, unique=True)
+
+    # ── Login security (backs the "Low Failed Logins" / "Not Locked" identity signals) ──
+    failed_login_count: int = Column(Integer, nullable=False, default=0)
+    locked_until: Optional[datetime] = Column(DateTime(timezone=True), nullable=True)
+    password_changed_at: Optional[datetime] = Column(DateTime(timezone=True), nullable=True)
+
     created_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -1016,6 +1022,13 @@ class TrustPolicyConfig(Base):
     # overlays additional Entra-sourced identity/device/context signals and
     # enforces the identity hard gate. Admin-only; toggled from web Settings.
     entra_enabled: bool = Column(Boolean, nullable=False, default=False)
+
+    # Entra group/directory-role object IDs that count as "valid" for the
+    # Role Valid identity signal. Stored as a JSON list of Graph object IDs.
+    # Empty/null = fall back to "any group or role membership" (the original,
+    # backward-compatible behaviour) so existing tenants keep working
+    # unconfigured.
+    valid_role_ids: Optional[list] = Column(JSON, nullable=True)
 
     # ── Context Analysis rules ────────────────────────────────────────────────
     allowed_start_hour:       int  = Column(Integer, nullable=False, default=8)

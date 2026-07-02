@@ -1,47 +1,52 @@
 """Identity Signal Module — scoring across local and Entra signals.
 
-Local signals (always evaluated):
-  Recent Login             15  — authenticated recently (JWT proves it)
-  Low Failed Login Count   25  — no excessive failed login attempts (assumed clean for local)
-  Not Locked               10  — account not locked (assumed for local)
-  Local subtotal           50
+Local signals (always evaluated, backed by real per-user account data —
+no hardcoded always-pass stubs):
+  Low Failed Login Count      15  — User.failed_login_count < MAX_FAILED_LOGIN_ATTEMPTS
+  Not Locked                  10  — User.locked_until is unset or in the past
+  Entra Linked                10  — User.linked_entra_upn is set
+  Password Changed Recently   15  — password changed within PASSWORD_MAX_AGE_DAYS
+  Local subtotal               50
 
 Entra-only signals (only when Entra is enabled and Graph returns a value):
   Account Enabled          30  — verified against Azure AD accountEnabled field
-  Role Valid               20  — user has a recognised Entra role (reserved; currently N/A)
-  MFA Registered           25  — MFA method registered in Entra
-  Identity Risk Low        20  — Entra Identity Protection risk level
-  Conditional Access OK    15  — compliant with Conditional Access policies
+  Role Valid                20  — user belongs to a qualifying Entra group/role
+                                  (admin-configurable; any membership by default)
+  MFA Registered            25  — MFA method registered in Entra
+  Identity Risk Low         20  — Entra Identity Protection risk level
+  Conditional Access OK     15  — compliant with Conditional Access policies
 
 Scoring:
   identity_score = min(100, earned / 100 * 100)
-  Local-only users: max 50/100 = 50% (honest — only 3 signals verifiable without Graph)
-  Entra-linked users: up to 100% when account_enabled + role_valid both pass from Graph
+  Local-only users: max 50/100 = 50% (honest — only local-DB signals verifiable without Graph)
+  Entra-linked users: up to 100% when all Entra signals pass
 """
 from __future__ import annotations
 
 import datetime
 from typing import Optional, TYPE_CHECKING
 
+from ..security import MAX_FAILED_LOGIN_ATTEMPTS, PASSWORD_MAX_AGE_DAYS
+
 if TYPE_CHECKING:
     from ..models import User
 
 # ── Signal weights ─────────────────────────────────────────────────────────────
 
-# Local signals — always evaluated (3 signals, max 50 pts)
+# Local signals — always evaluated against real per-user account data (4 signals, max 50 pts)
 _SIGNALS = [
-    {"signal": "recent_login",         "max": 15},
-    {"signal": "low_failed_logins",    "max": 25},
-    {"signal": "not_locked",           "max": 10},
+    {"signal": "low_failed_logins",         "max": 15},
+    {"signal": "not_locked",                "max": 10},
+    {"signal": "entra_linked",              "max": 10},
+    {"signal": "password_changed_recently", "max": 15},
 ]
 
 # Entra (Microsoft Graph) signals — only scored when Entra is enabled and Graph
-# returns a usable value. account_enabled and role_valid are the "core" Entra
-# identity checks (max 50 pts); mfa/risk/ca are bonus signals (max 60 pts extra).
-# All are N/A (None) for local-only users — excluded from both earned pts and denominator.
+# returns a usable value. All are N/A (None) for users with no matching Entra
+# account — excluded from both earned pts and denominator.
 _AZURE_SIGNALS = [
-    {"signal": "account_enabled",       "max": 30},  # moved from local — only meaningful from Graph
-    {"signal": "role_valid",            "max": 20},  # moved from local — only meaningful from Graph
+    {"signal": "account_enabled",       "max": 30},
+    {"signal": "role_valid",            "max": 20},
     {"signal": "mfa_registered",        "max": 25},
     {"signal": "identity_risk_low",     "max": 20},
     {"signal": "conditional_access_ok", "max": 15},
@@ -61,24 +66,26 @@ class IdentitySignals:
     def __init__(
         self,
         *,
-        # Local signals (always available when user is authenticated)
-        recent_login: Optional[bool] = None,
+        # Local signals — sourced from the real User row, always available
         failed_login_count: int = 0,
-        not_locked: bool = True,
+        locked: bool = False,
+        entra_linked: bool = False,
+        password_age_days: Optional[int] = None,
         source: str = "local",
-        # Entra-only signals (None = N/A — not evaluated for local-only users)
-        account_enabled: Optional[bool] = None,   # from Graph accountEnabled
-        role_valid: Optional[bool] = None,         # reserved; currently always None
+        # Entra-only signals (None = N/A — not evaluated when Entra is off or unmatched)
+        account_enabled: Optional[bool] = None,
+        role_valid: Optional[bool] = None,
         azure_mfa_registered: Optional[bool] = None,
         azure_identity_risk_low: Optional[bool] = None,
         azure_conditional_access_ok: Optional[bool] = None,
     ) -> None:
+        self.failed_login_count = failed_login_count
+        self.locked = locked
+        self.entra_linked = entra_linked
+        self.password_age_days = password_age_days
+        self.source = source
         self.account_enabled = account_enabled
         self.role_valid = role_valid
-        self.recent_login = recent_login
-        self.failed_login_count = failed_login_count
-        self.not_locked = not_locked
-        self.source = source
         self.azure_mfa_registered = azure_mfa_registered
         self.azure_identity_risk_low = azure_identity_risk_low
         self.azure_conditional_access_ok = azure_conditional_access_ok
@@ -93,20 +100,23 @@ def score_identity_signals(
 
     Uses a fixed denominator of TOTAL_MAX (100) so local-only users score 50/100 = 50%
     instead of 100%, reflecting the honest limit of what local auth can verify.
-    Entra-linked users can reach 100% once account_enabled and role_valid are confirmed
-    by Graph. Extra Entra bonus signals (mfa, risk, ca) allow recovery of points if
-    some signals fail, but the score is capped at 100.
+    Entra-linked users can reach 100% once all Entra signals are confirmed by Graph.
 
     na_reasons: optional {signal: "not_configured"} from the Entra overlay so the UI
     can tell a benign "not configured in Entra" apart from a transient collection miss.
     """
     na_reasons = na_reasons or {}
-    low_failed = signals.failed_login_count < 5
+    low_failed = signals.failed_login_count < MAX_FAILED_LOGIN_ATTEMPTS
+    not_locked = not signals.locked
+    password_recent: Optional[bool] = None
+    if signals.password_age_days is not None:
+        password_recent = signals.password_age_days <= PASSWORD_MAX_AGE_DAYS
 
     signal_values: dict[str, Optional[bool]] = {
-        "recent_login":      signals.recent_login,
-        "low_failed_logins": low_failed,
-        "not_locked":        signals.not_locked,
+        "low_failed_logins":         low_failed,
+        "not_locked":                not_locked,
+        "entra_linked":              signals.entra_linked,
+        "password_changed_recently": password_recent,
     }
     azure_values: dict[str, Optional[bool]] = {
         "account_enabled":       signals.account_enabled,
@@ -119,11 +129,26 @@ def score_identity_signals(
     earned = 0
     breakdown: list[dict] = []
 
+    def _local_note(sig: str, passed: bool) -> Optional[str]:
+        if sig == "low_failed_logins":
+            return f"{signals.failed_login_count} failed attempt(s) in the current window (limit {MAX_FAILED_LOGIN_ATTEMPTS})"
+        if sig == "not_locked":
+            return "account is currently locked" if not passed else "not currently locked"
+        if sig == "entra_linked":
+            return "linked to an Entra account" if passed else "no Entra account linked — link one in Users → Entra Users"
+        if sig == "password_changed_recently":
+            return f"password last changed {signals.password_age_days} day(s) ago (limit {PASSWORD_MAX_AGE_DAYS})"
+        return None
+
     def _emit(sig: str, max_pts: int, val: Optional[bool], source: str) -> None:
         nonlocal earned
         if val is None:
-            reason = na_reasons.get(sig, "not_collected" if source == "entra" else "not_applicable")
-            note = "not configured in Entra" if reason == "not_configured" else "N/A — requires Entra"
+            if source == "local":
+                reason = "not_collected"
+                note = "password change date unknown for this account" if sig == "password_changed_recently" else "unable to determine"
+            else:
+                reason = na_reasons.get(sig, "not_collected")
+                note = "not configured in Entra" if reason == "not_configured" else "N/A — requires Entra"
             breakdown.append({
                 "signal": sig, "passed": None, "points": 0, "max": max_pts,
                 "module": "identity", "source": source,
@@ -137,15 +162,13 @@ def score_identity_signals(
             "signal": sig, "passed": passed, "points": pts, "max": max_pts,
             "module": "identity", "source": source,
         }
-        if source == "local" and sig == "not_locked" and passed:
-            entry["note"] = "local auth — no lock mechanism, assumed unlocked"
-        elif source == "local" and sig == "recent_login" and passed:
-            entry["note"] = "local auth — verified by active JWT"
-        elif source == "local" and sig == "low_failed_logins" and passed:
-            entry["note"] = "local auth — no failure tracking, assumed clean"
+        if source == "local":
+            note = _local_note(sig, passed)
+            if note:
+                entry["note"] = note
         breakdown.append(entry)
 
-    # Local signals (recent_login, low_failed_logins, not_locked) — always evaluated
+    # Local signals — always evaluated against the real User row
     for item in _SIGNALS:
         _emit(item["signal"], item["max"], signal_values.get(item["signal"]), signals.source)
 
@@ -161,22 +184,41 @@ def score_identity_signals(
 
 
 def signals_from_local_user(user: "User") -> IdentitySignals:
-    """Build IdentitySignals from a local ModZero User record.
+    """Build IdentitySignals from a real local ModZero User record.
 
-    account_enabled and role_valid are intentionally left as None (N/A).
-    These are now Entra-only signals — local auth cannot independently verify
-    account status or role validity against a real directory. They become
-    meaningful only when Entra is connected and Graph is queried.
-
-    Local signals that can be evaluated:
-    - recent_login = True  (just sent an authenticated request via JWT)
-    - failed_login_count = 0  (no per-user failure tracking in local DB — assumed clean)
-    - not_locked = True  (no account-lock field in local User model — assumed unlocked)
+    All four local signals now read genuine per-user state instead of
+    hardcoded always-pass values:
+    - failed_login_count comes from User.failed_login_count, incremented on
+      every failed login and reset on success (see routers/auth.py).
+    - locked reflects User.locked_until — set automatically after
+      MAX_FAILED_LOGIN_ATTEMPTS failures, or manually by an admin.
+    - entra_linked is True when the user has a linked Entra account
+      (User.linked_entra_upn).
+    - password_age_days is derived from User.password_changed_at.
     """
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    locked_until = getattr(user, "locked_until", None)
+    locked = False
+    if locked_until is not None:
+        lu = locked_until
+        if lu.tzinfo is None:
+            lu = lu.replace(tzinfo=datetime.timezone.utc)
+        locked = lu > now
+
+    password_changed_at = getattr(user, "password_changed_at", None)
+    password_age_days: Optional[int] = None
+    if password_changed_at is not None:
+        pca = password_changed_at
+        if pca.tzinfo is None:
+            pca = pca.replace(tzinfo=datetime.timezone.utc)
+        password_age_days = (now - pca).days
+
     return IdentitySignals(
-        recent_login=True,
-        failed_login_count=0,
-        not_locked=True,
+        failed_login_count=getattr(user, "failed_login_count", 0) or 0,
+        locked=locked,
+        entra_linked=bool(getattr(user, "linked_entra_upn", None)),
+        password_age_days=password_age_days,
         source="local",
     )
 

@@ -67,6 +67,154 @@ const DEFAULT_ENTRA_SIGNALS: Record<EntraModule, EntraSignalRule[]> = {
 
 const ENTRA_RULES_KEY = (module: EntraModule) => `modzero-entra-signals-${module}`;
 
+interface GroupOrRole {
+  id: string;
+  display_name: string;
+  description: string | null;
+  type: 'group' | 'role';
+}
+
+const RoleValidConfigModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const [items, setItems] = useState<GroupOrRole[]>([]);
+  const [fetchErrors, setFetchErrors] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/azure/groups-and-roles'),
+      api.get('/trust-policy/active'),
+    ]).then(([listRes, policyRes]) => {
+      setItems(listRes.data.items || []);
+      setFetchErrors(listRes.data.errors || []);
+      setSelected(new Set((policyRes.data.valid_role_ids || []) as string[]));
+    }).catch(() => {
+      setFetchErrors(['Failed to load groups and roles from Microsoft Graph.']);
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const toggleItem = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/trust-policy/active', { valid_role_ids: Array.from(selected) });
+      toast.success(selected.size === 0 ? 'Reset to default: any group/role membership counts' : `Saved — ${selected.size} qualifying group(s)/role(s)`);
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const filtered = items.filter(i => i.display_name?.toLowerCase().includes(search.toLowerCase()));
+  const groups = filtered.filter(i => i.type === 'group');
+  const roles = filtered.filter(i => i.type === 'role');
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col">
+        <div className="p-5 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="font-semibold text-gray-900 dark:text-white">Configure Role Valid</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Pick which Entra groups and/or directory roles count as "valid" for this user's Role Valid signal.
+            Leave nothing selected to keep the default: any group or role membership counts.
+            This saves directly to the trust policy — unlike the rest of this card, it takes effect immediately.
+          </p>
+        </div>
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search groups and roles…"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
+            </div>
+          ) : (
+            <>
+              {fetchErrors.length > 0 && (
+                <div className="mb-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-xs text-amber-800 dark:text-amber-300">
+                  {fetchErrors.join(' · ')}
+                </div>
+              )}
+              {groups.length === 0 && roles.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-6">No groups or roles found.</p>
+              )}
+              {groups.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Groups</p>
+                  <div className="space-y-1">
+                    {groups.map(g => (
+                      <label key={g.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+                        <input type="checkbox" checked={selected.has(g.id)} onChange={() => toggleItem(g.id)} className="rounded" />
+                        <span className="text-sm text-gray-900 dark:text-white">{g.display_name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {roles.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Directory Roles</p>
+                  <div className="space-y-1">
+                    {roles.map(r => (
+                      <label key={r.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+                        <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleItem(r.id)} className="rounded" />
+                        <span className="text-sm text-gray-900 dark:text-white">{r.display_name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
+          <span className="text-xs text-gray-400">{selected.size === 0 ? 'Default: any membership' : `${selected.size} selected`}</span>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setSelected(new Set())}
+              disabled={saving}
+              className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400"
+            >
+              Reset to default
+            </button>
+            <button
+              onClick={onClose}
+              disabled={saving}
+              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || loading}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const EntraSignalsCard: React.FC<{ module: EntraModule }> = ({ module }) => {
   const [globalEnabled, setGlobalEnabled] = useState<boolean | null>(null);
   const [rules, setRules] = useState<EntraSignalRule[]>(() => {
@@ -83,6 +231,7 @@ const EntraSignalsCard: React.FC<{ module: EntraModule }> = ({ module }) => {
     return DEFAULT_ENTRA_SIGNALS[module];
   });
   const [saved, setSaved] = useState(false);
+  const [roleValidModalOpen, setRoleValidModalOpen] = useState(false);
 
   useEffect(() => {
     api.get('/trust-policy/active')
@@ -143,7 +292,17 @@ const EntraSignalsCard: React.FC<{ module: EntraModule }> = ({ module }) => {
             {rules.map(s => (
               <tr key={s.key} className={(!globalEnabled || !s.enabled) ? 'opacity-50' : ''}>
                 <td className="px-4 py-3">
-                  <div className="text-sm font-medium text-gray-900 dark:text-white">{s.label}</div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-2">
+                    {s.label}
+                    {s.key === 'role_valid' && (
+                      <button
+                        onClick={() => setRoleValidModalOpen(true)}
+                        className="text-xs px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30"
+                      >
+                        Configure
+                      </button>
+                    )}
+                  </div>
                   {s.description && <div className="text-xs text-gray-400 mt-0.5">{s.description}</div>}
                 </td>
                 <td className="px-4 py-3 text-xs">
@@ -190,8 +349,10 @@ const EntraSignalsCard: React.FC<{ module: EntraModule }> = ({ module }) => {
       <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
         <p className="text-xs text-gray-400">
           Changes saved here are UI display only — actual backend weights are in <code className="font-mono">azure_signal_service.py</code>.
+          Role Valid's "Configure" button is the exception — it saves for real.
         </p>
       </div>
+      {roleValidModalOpen && <RoleValidConfigModal onClose={() => setRoleValidModalOpen(false)} />}
     </div>
   );
 };
@@ -505,22 +666,13 @@ export default ZeroTrustPoliciesPage;
 
 const DEFAULT_IDENTITY_RULES = [
   {
-    key:           'recent_login',
-    label:         'Recent Login',
+    key:           'low_failed_logins',
+    label:         'Low Failed Login Count',
     source:        'Local Auth',
     maxPoints:     15,
     enabled:       true,
     failureAction: 'reduce_score' as const,
-    description:   'User authenticated recently. Implied by the active JWT — always pass for local auth.',
-  },
-  {
-    key:           'low_failed_logins',
-    label:         'Low Failed Login Count',
-    source:        'Local Auth',
-    maxPoints:     25,
-    enabled:       true,
-    failureAction: 'reduce_score' as const,
-    description:   'No excessive failed logins (threshold: 5). Local DB has no failed-login tracking — assumed clean. Real failures tracked via Entra sign-in logs.',
+    description:   'User.failed_login_count is below the lockout threshold (5). Incremented on every failed login and reset on success — real per-user counter, not assumed.',
   },
   {
     key:           'not_locked',
@@ -529,7 +681,25 @@ const DEFAULT_IDENTITY_RULES = [
     maxPoints:     10,
     enabled:       true,
     failureAction: 'deny_immediately' as const,
-    description:   'Account is not locked out. Local DB has no lock field — assumed unlocked. Azure AD lockout state evaluated via Entra when enabled.',
+    description:   'Account is not currently locked. Auto-locks for 15 minutes after 5 failed logins, or can be locked/unlocked manually by an admin from the user detail page.',
+  },
+  {
+    key:           'entra_linked',
+    label:         'Entra Linked',
+    source:        'Local Auth',
+    maxPoints:     10,
+    enabled:       true,
+    failureAction: 'reduce_score' as const,
+    description:   'User.linked_entra_upn is set. Linking unlocks the Entra identity signals below and lets an admin configure which roles/groups count as valid.',
+  },
+  {
+    key:           'password_changed_recently',
+    label:         'Password Changed Recently',
+    source:        'Local Auth',
+    maxPoints:     15,
+    enabled:       true,
+    failureAction: 'reduce_score' as const,
+    description:   'Password was changed within the last 90 days, from User.password_changed_at.',
   },
   {
     key:           'account_enabled',
@@ -547,7 +717,7 @@ const DEFAULT_IDENTITY_RULES = [
     maxPoints:     20,
     enabled:       true,
     failureAction: 'deny_immediately' as const,
-    description:   'User has a recognised Entra role. N/A for local-only users — only scored when Entra is connected (currently reserved).',
+    description:   'User belongs to a qualifying Entra group or directory role — any membership by default, or a specific admin-configured set (see "Configure" on this signal below). N/A for local-only users — only scored when Entra is connected.',
   },
 ];
 

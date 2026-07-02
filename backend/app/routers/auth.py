@@ -1,6 +1,6 @@
 """Authentication and user registration endpoints."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Form
@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session
 
 from .. import schemas, models
 from ..db import SessionLocal
-from ..security import verify_password, create_access_token, get_password_hash
+from ..security import (
+    verify_password, create_access_token, get_password_hash,
+    MAX_FAILED_LOGIN_ATTEMPTS, LOCKOUT_DURATION_MINUTES,
+)
 from ..deps import get_db, get_current_user, get_current_admin
 
 
@@ -21,6 +24,13 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     """Authenticate a user and return a JWT access token.
 
     Uses OAuth2PasswordRequestForm which expects fields `username` and `password`.
+
+    Tracks failed attempts on `User.failed_login_count` and, once
+    MAX_FAILED_LOGIN_ATTEMPTS is reached, locks the account for
+    LOCKOUT_DURATION_MINUTES via `User.locked_until`. A successful login
+    resets the counter. Locked accounts are rejected before the password is
+    even checked, so repeated attempts during lockout don't also reset the
+    lockout clock.
     """
     user = (
         db.query(models.User)
@@ -29,15 +39,40 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
         )
         .first()
     )
+
+    now = datetime.now(timezone.utc)
+
+    if user is not None and user.locked_until is not None:
+        locked_until = user.locked_until
+        if locked_until.tzinfo is None:
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
+        if locked_until > now:
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail=f"Account locked until {locked_until.isoformat()} after too many failed login attempts.",
+            )
+        # Lock has expired — clear it before continuing.
+        user.locked_until = None
+
     if not user or not verify_password(form_data.password, user.password_hash):
+        if user is not None:
+            user.failed_login_count = (user.failed_login_count or 0) + 1
+            if user.failed_login_count >= MAX_FAILED_LOGIN_ATTEMPTS:
+                user.locked_until = now + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+            db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
     source = request.headers.get("X-ModZero-Source", "web")
     if source == "client" and not getattr(user, "client_access_enabled", True):
         raise HTTPException(status_code=403, detail="client_access_disabled")
+
+    user.failed_login_count = 0
+    db.commit()
+
     access_token = create_access_token(str(user.user_id))
     return schemas.Token(access_token=access_token)
 
@@ -59,6 +94,7 @@ def register_user(
         email=user_in.email,
         password_hash=get_password_hash(user_in.password),
         role=user_in.role,
+        password_changed_at=datetime.now(timezone.utc),
     )
     db.add(user)
     db.commit()

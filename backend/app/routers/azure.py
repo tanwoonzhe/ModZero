@@ -1,6 +1,7 @@
 """Azure integration endpoints."""
 
-from typing import List, Any
+from datetime import datetime, timezone
+from typing import List, Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -195,6 +196,7 @@ def sync_azure_user_to_local(
             auth_provider="entra",
             linked_entra_user_id=entra_id,
             linked_entra_upn=upn,
+            password_changed_at=datetime.now(timezone.utc),
         )
 
         db.add(new_user)
@@ -281,6 +283,7 @@ def sync_all_azure_users(
                     auth_provider="entra",
                     linked_entra_user_id=azure_user.get("id", ""),
                     linked_entra_upn=azure_user.get("userPrincipalName", ""),
+                    password_changed_at=datetime.now(timezone.utc),
                 )
                 
                 db.add(new_user)
@@ -354,3 +357,43 @@ def get_subscribed_skus(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch subscribed SKUs: {str(e)}"
         )
+
+
+@router.get("/groups-and-roles")
+def get_groups_and_roles(
+    current_admin: models.User = Depends(get_current_admin)
+) -> Any:
+    """List Entra groups and activated directory roles (admin only).
+
+    Powers the "which groups/roles count as valid" picker for the Role
+    Valid identity signal in Trust Policies. Best-effort per source — if
+    the app registration is missing permission for one source (e.g. no
+    RoleManagement.Read.Directory), that source is returned empty instead
+    of failing the whole request.
+    """
+    items: List[Dict[str, Any]] = []
+    errors: List[str] = []
+
+    try:
+        for g in azure_service.get_groups():
+            items.append({
+                "id": g.get("id"),
+                "display_name": g.get("displayName"),
+                "description": g.get("description"),
+                "type": "group",
+            })
+    except Exception as e:
+        errors.append(f"groups: {str(e)}")
+
+    try:
+        for r in azure_service.get_directory_roles():
+            items.append({
+                "id": r.get("id"),
+                "display_name": r.get("displayName"),
+                "description": r.get("description"),
+                "type": "role",
+            })
+    except Exception as e:
+        errors.append(f"directory roles: {str(e)}")
+
+    return {"items": items, "errors": errors}

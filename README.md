@@ -256,7 +256,7 @@ alembic revision --autogenerate -m "message"  # create a new migration
 alembic downgrade -1                           # roll back the latest
 ```
 
-In the Docker deployment, migrations run from the backend container (see `backend/setup.sh`).
+The Docker deployment does **not** run `alembic upgrade head` automatically — the backend container starts uvicorn directly (see `backend/Dockerfile`). Schema changes actually reach a running deployment through `init_db()` (`backend/app/db.py`), which runs `Base.metadata.create_all()` plus a list of idempotent `ADD COLUMN IF NOT EXISTS` statements on every startup. When adding a new column, add both an Alembic migration (for history/local dev) **and** a matching statement in `db.py`'s `_run_migrations()` list, or it will never apply in the Docker deployment.
 
 ---
 

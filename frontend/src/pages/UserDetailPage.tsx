@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { FaArrowLeft, FaUser, FaDesktop, FaHistory, FaCheck, FaTimes, FaSpinner, FaExclamationTriangle } from "react-icons/fa";
+import { FaArrowLeft, FaUser, FaDesktop, FaHistory, FaCheck, FaTimes, FaSpinner, FaExclamationTriangle, FaLock, FaLockOpen } from "react-icons/fa";
 import toast from "react-hot-toast";
 import api from "../api";
 
@@ -32,6 +32,9 @@ interface UserDetails {
     auth_provider: string;
     client_access_enabled: boolean;
     linked_entra_upn: string | null;
+    failed_login_count: number;
+    locked_until: string | null;
+    password_changed_at: string | null;
     created_at: string | null;
     updated_at: string | null;
   };
@@ -88,6 +91,7 @@ const UserDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [roleUpdating, setRoleUpdating] = useState(false);
+  const [lockUpdating, setLockUpdating] = useState(false);
 
   useEffect(() => {
     if (userId) {
@@ -106,6 +110,20 @@ const UserDetailPage: React.FC = () => {
       toast.error(err?.response?.data?.detail || "Failed to update role");
     } finally {
       setRoleUpdating(false);
+    }
+  };
+
+  const toggleLock = async (lock: boolean) => {
+    if (!userId) return;
+    setLockUpdating(true);
+    try {
+      await api.post(`/users/${userId}/${lock ? "lock" : "unlock"}`);
+      toast.success(lock ? "Account locked" : "Account unlocked");
+      await fetchUserDetails();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || `Failed to ${lock ? "lock" : "unlock"} account`);
+    } finally {
+      setLockUpdating(false);
     }
   };
 
@@ -153,6 +171,10 @@ const UserDetailPage: React.FC = () => {
   }
 
   const { user, devices, recent_attempts, stats, current_weights } = details;
+  const isLocked = !!user.locked_until && new Date(user.locked_until).getTime() > Date.now();
+  // Manual locks are set to a far-future timestamp (see backend POST /users/{id}/lock);
+  // anything further out than a year from now is treated as "locked indefinitely".
+  const isPermanentLock = isLocked && new Date(user.locked_until!).getTime() - Date.now() > 365 * 24 * 60 * 60 * 1000;
 
   return (
     <div className="space-y-6">
@@ -276,6 +298,56 @@ const UserDetailPage: React.FC = () => {
                 {user.linked_entra_upn
                   ? <span className="font-mono text-purple-700 dark:text-purple-300">{user.linked_entra_upn}</span>
                   : <span className="text-gray-400">Not linked</span>}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-sm text-gray-500 dark:text-gray-400 mb-1">Account Status</dt>
+              <dd className="flex items-center gap-2">
+                {isLocked ? (
+                  <>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                      <FaLock size={10} /> Locked
+                    </span>
+                    <button
+                      onClick={() => toggleLock(false)}
+                      disabled={lockUpdating}
+                      className="text-xs text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 disabled:opacity-50"
+                    >
+                      Unlock
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">
+                      <FaLockOpen size={10} /> Active
+                    </span>
+                    <button
+                      onClick={() => toggleLock(true)}
+                      disabled={lockUpdating}
+                      className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 disabled:opacity-50"
+                    >
+                      Lock account
+                    </button>
+                  </>
+                )}
+                {lockUpdating && <FaSpinner className="animate-spin text-gray-400" size={12} />}
+              </dd>
+              {user.locked_until && isLocked && (
+                <p className="text-xs text-gray-400 mt-1">
+                  {isPermanentLock ? 'Locked manually by an admin' : `Auto-locked until ${new Date(user.locked_until).toLocaleString()}`}
+                </p>
+              )}
+            </div>
+            <div>
+              <dt className="text-sm text-gray-500 dark:text-gray-400">Failed Login Attempts</dt>
+              <dd className="text-sm text-gray-900 dark:text-white">
+                {user.failed_login_count} <span className="text-xs text-gray-400">(resets on successful login)</span>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-sm text-gray-500 dark:text-gray-400">Password Last Changed</dt>
+              <dd className="text-sm text-gray-900 dark:text-white">
+                {user.password_changed_at ? new Date(user.password_changed_at).toLocaleString() : <span className="text-gray-400">Unknown</span>}
               </dd>
             </div>
             <div>

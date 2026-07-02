@@ -233,8 +233,19 @@ def _explicit_bool(value: Any) -> Optional[bool]:
 
 # ── public entry point ─────────────────────────────────────────────────────────
 
-def collect_azure_signals(user: "User", device: Optional["Device"]) -> AzureSignals:
-    """Resolve all Entra signals for one (user, device). Never raises."""
+def collect_azure_signals(
+    user: "User",
+    device: Optional["Device"],
+    valid_role_ids: Optional[list] = None,
+) -> AzureSignals:
+    """Resolve all Entra signals for one (user, device). Never raises.
+
+    valid_role_ids: admin-configured list of Entra group/directory-role
+    object IDs (TrustPolicyConfig.valid_role_ids). When non-empty, Role
+    Valid passes only if the user belongs to one of these specific
+    groups/roles. When empty/None, falls back to the original behaviour —
+    any group or role membership counts.
+    """
     sig = AzureSignals()
 
     # ── Identity ──────────────────────────────────────────────────────────────
@@ -243,14 +254,20 @@ def collect_azure_signals(user: "User", device: Optional["Device"]) -> AzureSign
         sig.account_enabled = _explicit_bool(azure_user.get("accountEnabled"))
         uid = azure_user.get("id")
 
-        # Role valid: user belongs to at least one Entra group or directory role.
-        # Legitimate employees always have at least one group membership.
+        # Role valid: by default, any Entra group or directory-role membership
+        # counts (legitimate employees always have at least one). When the
+        # admin has configured a specific set of qualifying groups/roles in
+        # Trust Policies, only membership in one of those counts instead.
         # None on Graph error (permission issue) → N/A rather than Fail.
         try:
             if uid:
                 memberships = _get_user_memberships(uid)
                 if memberships is not None:
-                    sig.role_valid = len(memberships) > 0
+                    if valid_role_ids:
+                        member_ids = {m.get("id") for m in memberships if m.get("id")}
+                        sig.role_valid = bool(member_ids & set(valid_role_ids))
+                    else:
+                        sig.role_valid = len(memberships) > 0
         except Exception as exc:  # noqa: BLE001
             log.warning("Role-valid lookup failed: %s", exc)
 

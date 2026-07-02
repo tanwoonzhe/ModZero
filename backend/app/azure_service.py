@@ -914,6 +914,59 @@ class AzureGraphService:
             logger.warning(f"Error fetching memberOf for user {user_id}: {str(e)}")
             raise Exception(f"Failed to fetch memberOf: {str(e)}")
 
+    def get_groups(self, top: int = 999) -> List[Dict]:
+        """List security/M365 groups in the tenant.
+
+        Used to populate the Role Valid signal's "which groups/roles count as
+        valid" picker in Trust Policies. Requires Group.Read.All or
+        Directory.Read.All permission.
+        """
+        access_token = self._get_access_token()
+        if not access_token:
+            raise Exception("Failed to acquire Azure access token")
+
+        headers = {'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'}
+        url = f"{self.graph_endpoint}/groups"
+        params = {'$select': 'id,displayName,description', '$top': top}
+
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+            if response.status_code == 403:
+                raise Exception("Missing Group.Read.All permission")
+            response.raise_for_status()
+            return response.json().get('value', [])
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Error fetching groups: {str(e)}")
+            raise Exception(f"Failed to fetch groups: {str(e)}")
+
+    def get_directory_roles(self) -> List[Dict]:
+        """List directory roles currently activated in the tenant.
+
+        Only roles that have been activated (have at least one assignment
+        history) are returned by /directoryRoles — the full ~100-role
+        catalog lives at /directoryRoleTemplates, which is intentionally not
+        used here since roles with zero members aren't useful as a "valid
+        role" target. Requires RoleManagement.Read.Directory or
+        Directory.Read.All permission.
+        """
+        access_token = self._get_access_token()
+        if not access_token:
+            raise Exception("Failed to acquire Azure access token")
+
+        headers = {'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'}
+        url = f"{self.graph_endpoint}/directoryRoles"
+        params = {'$select': 'id,displayName,description'}
+
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+            if response.status_code == 403:
+                raise Exception("Missing RoleManagement.Read.Directory permission")
+            response.raise_for_status()
+            return response.json().get('value', [])
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Error fetching directory roles: {str(e)}")
+            raise Exception(f"Failed to fetch directory roles: {str(e)}")
+
     def get_users_mfa_status(self, user_ids: List[str]) -> Dict[str, Any]:
         """Get MFA status for multiple users. Returns a dict keyed by user_id."""
         from concurrent.futures import ThreadPoolExecutor, as_completed

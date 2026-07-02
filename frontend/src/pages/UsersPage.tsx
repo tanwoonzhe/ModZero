@@ -744,7 +744,7 @@ const UsersPage: React.FC = () => {
             <h2 className="text-lg font-semibold mb-1">Identity Signals</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Per-user identity checks that feed into the Trust Scoring Engine.
-              Local signals (max 50): Recent Login(+15) + Low Failed Logins(+25) + Not Locked(+10).
+              Local signals (max 50): Low Failed Logins(+15) + Not Locked(+10) + Entra Linked(+10) + Password Changed Recently(+15) — all backed by real per-user account data, not assumptions.
               Entra signals (require Entra enabled + user linked): Account Enabled(+30) + Role Valid(+20) + MFA Registered(+25) + Identity Risk Low(+20) + CA OK(+15).
               Score = min(earned, 100) — local-only users cap at 50/100.
             </p>
@@ -752,7 +752,7 @@ const UsersPage: React.FC = () => {
 
           {/* Local auth explanation banner */}
           <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-sm text-amber-800 dark:text-amber-300">
-            <strong>Local Auth note:</strong> Account Enabled, Role Valid, MFA, Risk, and CA are resolved live from Microsoft Graph — local auth alone cannot verify these. A user shows real pass/fail values here only when Entra is enabled (Settings → Azure AD Integration) <em>and</em> that user has a linked Entra account (Entra Users tab). Unlinked users cap at 50/100 (Recent Login + Low Failed Logins + Not Locked). A disabled Entra account triggers a hard gate regardless of score.
+            <strong>Local Auth note:</strong> Account Enabled, Role Valid, MFA, Risk, and CA are resolved live from Microsoft Graph — local auth alone cannot verify these. A user shows real pass/fail values here only when Entra is enabled (Settings → Azure AD Integration) <em>and</em> that user has a linked Entra account (Entra Users tab). Unlinked users cap at 50/100 (Low Failed Logins + Not Locked + Entra Linked + Password Changed Recently). A disabled Entra account triggers a hard gate regardless of score. Accounts auto-lock for 15 minutes after 5 failed logins, or can be locked/unlocked manually from the user's detail page.
           </div>
 
           {/* Local users signals */}
@@ -767,9 +767,10 @@ const UsersPage: React.FC = () => {
                 <thead className="bg-gray-50 dark:bg-gray-800">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Recent Login <span className="text-gray-400 normal-case font-normal">(+15)</span></th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Low Failed Logins <span className="text-gray-400 normal-case font-normal">(+25)</span></th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Low Failed Logins <span className="text-gray-400 normal-case font-normal">(+15)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Not Locked <span className="text-gray-400 normal-case font-normal">(+10)</span></th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Entra Linked <span className="text-gray-400 normal-case font-normal">(+10)</span></th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Password Recent <span className="text-gray-400 normal-case font-normal">(+15)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Enabled <span className="text-gray-400 normal-case font-normal">(+30)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role Valid <span className="text-gray-400 normal-case font-normal">(+20)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MFA Registered <span className="text-gray-400 normal-case font-normal">(+25)</span></th>
@@ -793,6 +794,10 @@ const UsersPage: React.FC = () => {
                         return <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500" title="Enable Entra in Settings → Azure AD Integration to evaluate this signal">Entra disabled</span>;
                       }
                       if (item.passed === null) {
+                        if (item.source !== 'entra') {
+                          // Local-signal N/A (e.g. password_changed_at unknown for a legacy account)
+                          return <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400" title={item.note || 'Not available'}>N/A</span>;
+                        }
                         const linked = !!data.linked_entra_upn;
                         const label = !linked ? 'Not linked' : data.entra_matched === false ? 'Not matched' : 'N/A';
                         const title = !linked
@@ -816,9 +821,10 @@ const UsersPage: React.FC = () => {
                             <div className="text-xs text-purple-600 dark:text-purple-400 mt-0.5">↔ {data.linked_entra_upn}</div>
                           )}
                         </td>
-                        <td className="px-4 py-3">{renderCell('recent_login')}</td>
                         <td className="px-4 py-3">{renderCell('low_failed_logins')}</td>
                         <td className="px-4 py-3">{renderCell('not_locked')}</td>
+                        <td className="px-4 py-3">{renderCell('entra_linked')}</td>
+                        <td className="px-4 py-3">{renderCell('password_changed_recently')}</td>
                         <td className="px-4 py-3">{renderCell('account_enabled')}</td>
                         <td className="px-4 py-3">{renderCell('role_valid')}</td>
                         <td className="px-4 py-3">{renderCell('mfa_registered')}</td>
@@ -835,7 +841,7 @@ const UsersPage: React.FC = () => {
                     );
                   })}
                   {localUsers.length === 0 && !loading && (
-                    <tr><td colSpan={11} className="px-4 py-6 text-center text-gray-400">No local users found.</td></tr>
+                    <tr><td colSpan={12} className="px-4 py-6 text-center text-gray-400">No local users found.</td></tr>
                   )}
                 </tbody>
               </table>
