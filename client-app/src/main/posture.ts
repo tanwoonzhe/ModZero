@@ -181,13 +181,20 @@ function logDiagnostic(line: string): void {
 async function collectWindowsPosture(timeoutMs = 30000): Promise<WinPosture> {
   const empty: WinPosture = { firewall: null, antivirus: null, avAdvanced: null, disk: null, lock: null, osPatched: null };
   if (process.platform !== "win32") return empty;
-  // -EncodedCommand (base64 UTF-16LE) sidesteps all quoting/escaping issues that
-  // plague passing a multi-line script via -Command.
-  const encoded = Buffer.from(PS_POSTURE_SCRIPT, "utf16le").toString("base64");
+  // Write the script to a temp file and run it with -File instead of passing
+  // it inline via -EncodedCommand. The script grew enough (AV Advanced
+  // Protection + OS-patch checks) that its base64 form now exceeds cmd.exe's
+  // ~8191-character command-line limit — child_process.exec always shells
+  // out through cmd.exe on Windows, so a long -EncodedCommand fails outright
+  // with "The command line is too long." (silently, since the old code
+  // swallowed the error — see logDiagnostic below for how that surfaced).
+  // -File has no such limit since the script content is read from disk.
+  const scriptPath = path.join(app.getPath("temp"), `modzero-posture-${process.pid}.ps1`);
   const startedAt = Date.now();
   try {
+    fs.writeFileSync(scriptPath, PS_POSTURE_SCRIPT, "utf-8");
     const { stdout } = await execAsync(
-      `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}`,
+      `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${scriptPath}"`,
       { timeout: timeoutMs, encoding: "utf-8", maxBuffer: 1024 * 1024 },
     );
     const elapsedMs = Date.now() - startedAt;
@@ -210,6 +217,8 @@ async function collectWindowsPosture(timeoutMs = 30000): Promise<WinPosture> {
       `message=${e?.message} stderr=${(e?.stderr || "").slice(0, 2000)} stdout=${(e?.stdout || "").slice(0, 2000)}`
     );
     return empty;
+  } finally {
+    try { fs.unlinkSync(scriptPath); } catch { /* best-effort cleanup */ }
   }
 }
 
