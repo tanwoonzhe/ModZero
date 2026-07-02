@@ -107,6 +107,18 @@ def _run_migrations() -> None:
         ALTER TABLE device_trust_scores
           ADD COLUMN IF NOT EXISTS hard_deny_client_reason varchar(256)
         """,
+        # AV Advanced Protection (real-time + cloud-delivered + sample
+        # submission + Dev Drive protection all on) and the client app's own
+        # reported version, which client_healthy is now scored against
+        # instead of the old always-true fingerprint-file check.
+        """
+        ALTER TABLE posture_reports
+          ADD COLUMN IF NOT EXISTS av_advanced_protection boolean
+        """,
+        """
+        ALTER TABLE posture_reports
+          ADD COLUMN IF NOT EXISTS client_version varchar(32)
+        """,
     ]
     with engine.connect() as conn:
         for stmt in migrations:
@@ -118,6 +130,7 @@ def _run_migrations() -> None:
         conn.commit()
 
     _seed_signal_rules()
+    _cleanup_retired_signal_rules()
 
 
 def _seed_signal_rules() -> None:
@@ -143,4 +156,26 @@ def _seed_signal_rules() -> None:
                 """),
                 {"id": str(_uuid.uuid4()), "module": module, "key": key, "source": source, "label": label, "max_points": max_points},
             )
+        conn.commit()
+
+
+def _cleanup_retired_signal_rules() -> None:
+    """Remove the recent_check device signal (deleted from the scoring engine
+    — it always reported Pass, see posture_scoring.py's history) and relabel
+    the two signals whose meaning changed, but only rows still holding their
+    original default label so an admin's own edit is never clobbered."""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        conn.execute(text(
+            "DELETE FROM signal_rules WHERE module = 'device' AND signal_key = 'recent_check'"
+        ))
+        conn.execute(text(
+            "UPDATE signal_rules SET label = 'OS Recently Patched' "
+            "WHERE module = 'device' AND signal_key = 'os_supported' AND label = 'OS Version Supported'"
+        ))
+        conn.execute(text(
+            "UPDATE signal_rules SET label = 'Client Version Supported' "
+            "WHERE module = 'device' AND signal_key = 'client_healthy' AND label = 'Client App Healthy'"
+        ))
         conn.commit()

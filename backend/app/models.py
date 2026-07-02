@@ -1372,10 +1372,23 @@ class PostureReport(Base):
     firewall_enabled: bool = Column(Boolean, nullable=True)
     antivirus_enabled: bool = Column(Boolean, nullable=True)
     disk_encryption_enabled: bool = Column(Boolean, nullable=True)
+    # os_supported: as of the client_version-gating change, this reflects
+    # whether the OS's most recent update was installed within 90 days
+    # (Win32_QuickFixEngineering), not the OS major version — see
+    # posture_scoring.py / client-app's posture.ts for the exact check.
     os_supported: bool = Column(Boolean, nullable=True)
     # Phase 2 additional factors
     screen_lock_enabled: bool = Column(Boolean, nullable=True)
+    # Legacy — no longer written by current clients (superseded by
+    # client_version below, scored via _client_version_ok()). Left in place
+    # so old rows still deserialize; not read by scoring anymore.
     client_healthy: bool = Column(Boolean, nullable=True)
+    # Real-time protection + cloud-delivered protection + automatic sample
+    # submission + Dev Drive protection all enabled (Defender-specific).
+    av_advanced_protection: bool = Column(Boolean, nullable=True)
+    # Client app's own reported version (app.getVersion()) — scored against
+    # MIN_CLIENT_VERSION in posture_scoring.py to produce client_healthy.
+    client_version: str = Column(String(32), nullable=True)
     # Accepted from Graph /deviceManagement lookup or passed as manual placeholder
     intune_compliant: bool = Column(Boolean, nullable=True)
 

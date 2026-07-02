@@ -14,7 +14,6 @@ neither reward nor penalise — only knowable signals affect the score.
 """
 from __future__ import annotations
 
-import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
 from .signal_rules import resolve_rule
@@ -27,13 +26,39 @@ if TYPE_CHECKING:
 _FACTORS: list[dict] = [
     {"factor": "firewall_enabled",        "max": 15},
     {"factor": "antivirus_enabled",       "max": 15},
+    {"factor": "av_advanced_protection",  "max": 10},
     {"factor": "disk_encryption_enabled", "max": 15},
     {"factor": "screen_lock_enabled",     "max": 10},
     {"factor": "os_supported",            "max": 10},
     {"factor": "client_healthy",          "max": 10},
-    {"factor": "recent_check",            "max": 10},
     {"factor": "intune_compliant",        "max": 20},
 ]
+
+# Minimum client-app version (client_version, from app.getVersion()) required
+# to pass client_healthy. Bump this when shipping a release that fixes a
+# security issue or is otherwise required — older clients then start failing
+# this check instead of silently running an unsupported build forever.
+MIN_CLIENT_VERSION = "1.0.0"
+
+
+def _parse_version(v: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(p) for p in v.strip().split("."))
+    except (ValueError, AttributeError):
+        return ()
+
+
+def _client_version_ok(version: Optional[str]) -> Optional[bool]:
+    """None (N/A) for older clients that don't report a version yet, or an
+    unparseable string — never guesses, and never silently fails a client
+    just because it predates this field."""
+    if not version:
+        return None
+    parsed = _parse_version(version)
+    if not parsed:
+        return None
+    return parsed >= _parse_version(MIN_CLIENT_VERSION)
+
 
 # Optional Entra-sourced device factors — only contribute when enabled and the
 # device was matched in Entra/Intune. Each is N/A (None) otherwise, excluded from
@@ -75,23 +100,10 @@ def score_posture(
     intune_val = getattr(report, "intune_compliant", None)
     intune_configured = intune_val is not None
 
-    # recent_check: pass if reported_at is within last 7 days
-    reported_at = getattr(report, "reported_at", None)
-    if reported_at is None:
-        recent = False
-    else:
-        if isinstance(reported_at, str):
-            try:
-                reported_at = datetime.datetime.fromisoformat(reported_at)
-            except ValueError:
-                reported_at = None
-        if reported_at:
-            age = datetime.datetime.utcnow() - reported_at.replace(tzinfo=None)
-            recent = age.total_seconds() < 7 * 24 * 3600
-        else:
-            recent = False
-
-    overrides = {"recent_check": recent}
+    # client_healthy: derived from the client-reported app version against
+    # MIN_CLIENT_VERSION, not a raw client-supplied boolean (clients can't
+    # score themselves) — see _client_version_ok().
+    overrides = {"client_healthy": _client_version_ok(getattr(report, "client_version", None))}
 
     earned = 0
     denominator = 0

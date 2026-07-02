@@ -416,10 +416,12 @@ class PostureReportIn(BaseModel):
     # The posture factors
     firewall_enabled: Optional[bool] = None
     antivirus_enabled: Optional[bool] = None
+    av_advanced_protection: Optional[bool] = None
     disk_encryption_enabled: Optional[bool] = None
     os_supported: Optional[bool] = None
     screen_lock_enabled: Optional[bool] = None
-    client_healthy: Optional[bool] = None
+    client_healthy: Optional[bool] = None  # legacy, no longer scored — see client_version
+    client_version: Optional[str] = None
     # Pass the value from Graph deviceManagement lookup, or True/False manually
     intune_compliant: Optional[bool] = None
 

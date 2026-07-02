@@ -13,14 +13,14 @@ admin edits a rule via /api/signal-rules.
 
 DEFAULT_SIGNAL_RULES: list[tuple[str, str, str, str, int]] = [
     # ── Device (local) ──
-    ("device", "firewall_enabled",        "local", "Firewall Enabled",         15),
-    ("device", "antivirus_enabled",       "local", "Antivirus Enabled",        15),
-    ("device", "disk_encryption_enabled", "local", "Disk Encryption Enabled",  15),
-    ("device", "screen_lock_enabled",     "local", "Screen Lock Enabled",      10),
-    ("device", "os_supported",            "local", "OS Version Supported",     10),
-    ("device", "client_healthy",          "local", "Client App Healthy",       10),
-    ("device", "recent_check",            "local", "Recent Posture Check",     10),
-    ("device", "intune_compliant",        "local", "Intune Compliant",         20),
+    ("device", "firewall_enabled",        "local", "Firewall Enabled",             15),
+    ("device", "antivirus_enabled",       "local", "Antivirus Enabled",            15),
+    ("device", "av_advanced_protection",  "local", "AV Advanced Protection",       10),
+    ("device", "disk_encryption_enabled", "local", "Disk Encryption Enabled",      15),
+    ("device", "screen_lock_enabled",     "local", "Screen Lock Enabled",          10),
+    ("device", "os_supported",            "local", "OS Recently Patched",          10),
+    ("device", "client_healthy",          "local", "Client Version Supported",     10),
+    ("device", "intune_compliant",        "local", "Intune Compliant",             20),
     # ── Device (entra) ──
     ("device", "entra_registered",  "entra", "Entra Registered",  10),
     ("device", "intune_managed",    "entra", "Intune Managed",    10),
