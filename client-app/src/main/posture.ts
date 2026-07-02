@@ -47,7 +47,7 @@ interface WinPosture {
 // failure leaves that signal null (N/A) without aborting the rest.
 const PS_POSTURE_SCRIPT = `
 $ErrorActionPreference = 'SilentlyContinue'
-$o = [ordered]@{ firewall = $null; antivirus = $null; avAdvanced = $null; disk = $null; lock = $null; osPatched = $null }
+$o = [ordered]@{ firewall = $null; antivirus = $null; avAdvanced = $null; avAdvancedDetail = $null; disk = $null; lock = $null; osPatched = $null }
 
 # ── Firewall: ALL THREE profiles (Domain, Private, Public) must be enabled ──
 # Registry fallback works on locked-down VMs where the cmdlet is unavailable.
@@ -112,6 +112,15 @@ try {
   try {
     if ($null -ne $mpPref.PerformanceModeStatus) { $devDrive = [bool]($mpPref.PerformanceModeStatus -eq 0) }
   } catch {}
+  # Raw sub-values always recorded (even on partial/total failure) so a
+  # report of "AV Advanced Protection shows Fail/N/A" is diagnosable from
+  # posture-debug.log without another guess-and-repackage round trip.
+  $o.avAdvancedDetail = [ordered]@{
+    realTimeProtectionEnabled = $rtp
+    mapsReporting             = $mpPref.MAPSReporting
+    submitSamplesConsent      = $mpPref.SubmitSamplesConsent
+    performanceModeStatus     = $mpPref.PerformanceModeStatus
+  }
   if (($null -ne $rtp) -and ($null -ne $cloud) -and ($null -ne $sample) -and ($null -ne $devDrive)) {
     $o.avAdvanced = [bool]($rtp -and $cloud -and $sample -and $devDrive)
   }
