@@ -1046,6 +1046,12 @@ class TrustPolicyConfig(Base):
     # as before this field existed.
     blocked_ips: Optional[list] = Column(JSON, nullable=True)
 
+    # Admin-managed trusted-network allowlist backing the "Trusted Network"
+    # context signal. JSON list of IPs or CIDR ranges (e.g. "203.0.113.0/24").
+    # Empty/null = no trusted networks configured — the signal is N/A (not
+    # evaluable), never a fake Pass, since there's nothing to confirm trust against.
+    trusted_networks: Optional[list] = Column(JSON, nullable=True)
+
     # Client app auto device-check interval, in hours. Pure scheduling
     # config — does NOT feed into the trust score (unlike everything else
     # in this table). 0 = disabled: the client only checks on manual click,
@@ -1401,6 +1407,11 @@ class PostureReport(Base):
 
     # Client IP for context scoring later
     ip_address: str = Column(String(64), nullable=True)
+
+    # Worst (most public) Windows network connection category at check time —
+    # "Public", "Private", "DomainAuthenticated", or null if not collected.
+    # Backs the "Network Profile Check" context signal.
+    network_profile: str = Column(String(32), nullable=True)
 
     device = relationship("Device", back_populates="posture_reports")
     trust_score = relationship(

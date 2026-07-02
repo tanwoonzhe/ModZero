@@ -424,6 +424,9 @@ class PostureReportIn(BaseModel):
     client_version: Optional[str] = None
     # Pass the value from Graph deviceManagement lookup, or True/False manually
     intune_compliant: Optional[bool] = None
+    # Worst (most public) Windows network connection category at check time —
+    # "Public", "Private", "DomainAuthenticated", or omitted if not collected.
+    network_profile: Optional[str] = None
 
 
 class PostureFactorDetail(BaseModel):
@@ -479,11 +482,12 @@ class TrustPolicyConfigOut(BaseModel):
     allowed_end_hour:          int
     max_failed_attempts:       int
     block_outside_hours:       bool
-    require_known_device:      bool
-    unknown_device_penalty:    int
     suspicious_ip_penalty:     int
     # Admin-managed IP blocklist backing the Normal IP context signal.
     blocked_ips:               Optional[list] = None
+    # Admin-managed trusted-network allowlist backing the Trusted Network
+    # context signal (IPs or CIDR ranges).
+    trusted_networks:          Optional[list] = None
     # Client app auto device-check interval, hours. 0 = disabled. Pure
     # scheduling config — not part of the trust score.
     auto_check_interval_hours: int = 0
@@ -508,10 +512,9 @@ class TrustPolicyConfigUpdate(BaseModel):
     allowed_end_hour:          Optional[int]   = None
     max_failed_attempts:       Optional[int]   = None
     block_outside_hours:       Optional[bool]  = None
-    require_known_device:      Optional[bool]  = None
-    unknown_device_penalty:    Optional[int]   = None
     suspicious_ip_penalty:     Optional[int]   = None
     blocked_ips:               Optional[list]  = None
+    trusted_networks:          Optional[list]  = None
     auto_check_interval_hours: Optional[int]   = None
     entra_enabled:             Optional[bool]  = None
     valid_role_ids:            Optional[list]  = None

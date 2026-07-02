@@ -1,32 +1,37 @@
-"""Context Analysis Module — 5-signal scoring.
+"""Context Analysis Module — local + Entra signal scoring.
 
 Which signals exist, their point values, whether they're enabled, and what
 happens when one fails are all read from the signal_rules table (admin
 editable via /api/signal-rules) — this module only supplies the fallback
 defaults below, used if a rule row is somehow missing.
 
-  Known device               20
-  Normal access time         15
-  No repeated failed login   20
-  Normal IP / not blocked    15
-  Gateway / Connector online  5
-  Total                      75
+  Local signals
+  Normal access time           15
+  No repeated failed login     20
+  Normal IP / not blocked      15
+  Trusted network              15
+  Network profile check        10
+  Access frequency check       10
+  Gateway / Connector online    5
 
-(known_user_device_pair and resource_pattern_normal were removed — neither
-was ever wired to real data by any caller, so they silently scored a
-hardcoded Pass on every check, no matter what. known_user_device_pair was
-also redundant with known_device in this data model, since a Device
-belongs to exactly one User permanently — there's no separate "pairing" to
-track. resource_pattern_normal would need real historical-access anomaly
-detection, which doesn't exist anywhere in this codebase and is evaluated
-at the wrong point in the flow anyway — a device check has no specific
-resource to compare a "pattern" against.)
+  Entra signals (optional overlay, N/A unless collected)
+  Sign-in risk low             15
+  Trusted location             10
+  Latest sign-in IP match      10
+  Sign-in location consistent  10
+
+(known_device was removed — Device already has a permanent 1:1 owner in
+this data model, so "is this a known device" duplicated identity/enrolment
+checks elsewhere without adding a real signal. known_user_device_pair and
+resource_pattern_normal were removed earlier for the same reason: neither
+was ever wired to real data by any caller.)
 
 Caller supplies the signals; this service computes the score + breakdown.
 """
 from __future__ import annotations
 
 import datetime
+import ipaddress
 from typing import Optional
 
 from .signal_rules import resolve_rule
@@ -34,23 +39,46 @@ from .signal_rules import resolve_rule
 # ── Signal weights (fallback defaults; see signal_rules table) ─────────────────
 
 _SIGNALS = [
-    {"signal": "known_device",              "max": 20},
     {"signal": "normal_access_time",        "max": 15},
     {"signal": "no_repeated_failed_login",  "max": 20},
     {"signal": "normal_ip",                 "max": 15},
+    {"signal": "trusted_network",           "max": 15},
+    {"signal": "network_profile_check",     "max": 10},
+    {"signal": "access_frequency_check",    "max": 10},
     {"signal": "gateway_online",            "max":  5},
 ]
 
 # Optional Entra (Microsoft Graph sign-in) context signals. N/A (None) unless
 # resolved from the latest sign-in log → excluded from earned + denominator.
 _AZURE_SIGNALS = [
-    {"signal": "signin_risk_low",  "max": 15},
-    {"signal": "trusted_location", "max": 10},
+    {"signal": "signin_risk_low",             "max": 15},
+    {"signal": "trusted_location",            "max": 10},
+    {"signal": "latest_signin_ip_match",      "max": 10},
+    {"signal": "signin_location_consistent",  "max": 10},
 ]
 
 _ALLOWED_START_HOUR = 8   # 08:00
 _ALLOWED_END_HOUR   = 20  # 20:00
 _MAX_FAILED_ATTEMPTS = 5
+_MAX_ACCESS_FREQUENCY = 20  # access requests within the caller-defined lookback window
+
+
+def _ip_in_networks(ip: str, networks: list[str]) -> Optional[bool]:
+    """True if `ip` matches any entry in `networks` (single IPs or CIDR ranges)."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return None
+    for net in networks:
+        try:
+            if "/" in net:
+                if addr in ipaddress.ip_network(net, strict=False):
+                    return True
+            elif addr == ipaddress.ip_address(net):
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -61,24 +89,32 @@ class ContextSignals:
     def __init__(
         self,
         *,
-        known_device: Optional[bool] = None,
         request_time: Optional[datetime.datetime] = None,
         failed_attempt_count: int = 0,
         source_ip: Optional[str] = None,
         blocked_ips: Optional[list[str]] = None,
         gateway_online: Optional[bool] = None,
+        trusted_networks: Optional[list[str]] = None,
+        network_profile: Optional[str] = None,
+        access_frequency_count: Optional[int] = None,
         # Optional Entra sign-in context (None = not collected → N/A)
         signin_risk_low: Optional[bool] = None,
         trusted_location: Optional[bool] = None,
+        latest_signin_ip_match: Optional[bool] = None,
+        signin_location_consistent: Optional[bool] = None,
     ) -> None:
-        self.known_device = known_device
         self.request_time = request_time or datetime.datetime.now()
         self.failed_attempt_count = failed_attempt_count
         self.source_ip = source_ip
         self.blocked_ips: list[str] = blocked_ips or []
         self.gateway_online = gateway_online
+        self.trusted_networks: list[str] = trusted_networks or []
+        self.network_profile = network_profile
+        self.access_frequency_count = access_frequency_count
         self.signin_risk_low = signin_risk_low
         self.trusted_location = trusted_location
+        self.latest_signin_ip_match = latest_signin_ip_match
+        self.signin_location_consistent = signin_location_consistent
 
 
 def score_context_signals(
@@ -87,8 +123,6 @@ def score_context_signals(
     allowed_start_hour: int = _ALLOWED_START_HOUR,
     allowed_end_hour: int = _ALLOWED_END_HOUR,
     max_failed_attempts: int = _MAX_FAILED_ATTEMPTS,
-    require_known_device: bool = True,
-    unknown_device_penalty: Optional[int] = None,
     suspicious_ip_penalty: Optional[int] = None,
     include_azure: bool = False,
     na_reasons: Optional[dict] = None,
@@ -100,13 +134,9 @@ def score_context_signals(
     Optional keyword overrides let the posture endpoint pass DB-stored rules.
     na_reasons: optional {signal: "not_configured"} from the Entra overlay so the UI
     can tell a benign "not configured in Entra" apart from a transient collection miss.
-    require_known_device: from TrustPolicyConfig (Context Rules tab). False means
-    an unrecognised device is not penalised at all — known_device is reported N/A
-    instead of failed.
-    unknown_device_penalty / suspicious_ip_penalty: from TrustPolicyConfig (Context
-    Rules tab). When set, override the known_device / normal_ip signal's point
-    value for this calculation — the dedicated Context Rules knobs for these two
-    signals take precedence over their signal_rules.max_points row.
+    suspicious_ip_penalty: from TrustPolicyConfig (Context Rules tab). When set,
+    overrides the normal_ip signal's point value for this calculation — the
+    dedicated Context Rules knob takes precedence over its signal_rules.max_points row.
     rules: {signal_key: SignalRule} for module="context" (from
     signal_rules.get_signal_rules). A disabled rule excludes that signal
     entirely. Missing rows fall back to the shipped defaults.
@@ -125,17 +155,44 @@ def score_context_signals(
     else:
         normal_ip = True  # assume ok if unknown
 
-    signal_values = {
-        "known_device":             signals.known_device if signals.known_device is not None else True,
+    signal_notes: dict[str, str] = {}
+
+    if not signals.trusted_networks:
+        trusted_network: Optional[bool] = None
+        signal_notes["trusted_network"] = "no trusted networks configured"
+    elif not signals.source_ip:
+        trusted_network = None
+        signal_notes["trusted_network"] = "source IP not available"
+    else:
+        trusted_network = _ip_in_networks(signals.source_ip, signals.trusted_networks)
+
+    if signals.network_profile:
+        network_profile_check: Optional[bool] = signals.network_profile != "Public"
+    else:
+        network_profile_check = None
+        signal_notes["network_profile_check"] = "not collected"
+
+    if signals.access_frequency_count is None:
+        access_frequency_check: Optional[bool] = None
+        signal_notes["access_frequency_check"] = "not collected"
+    else:
+        access_frequency_check = signals.access_frequency_count <= _MAX_ACCESS_FREQUENCY
+
+    signal_values: dict[str, Optional[bool]] = {
         "normal_access_time":       normal_time,
         "no_repeated_failed_login": no_failed_login,
         "normal_ip":                normal_ip,
+        "trusted_network":          trusted_network,
+        "network_profile_check":    network_profile_check,
+        "access_frequency_check":   access_frequency_check,
         "gateway_online":           signals.gateway_online if signals.gateway_online is not None else True,
     }
 
     azure_values: dict[str, Optional[bool]] = {
-        "signin_risk_low":  signals.signin_risk_low,
-        "trusted_location": signals.trusted_location,
+        "signin_risk_low":             signals.signin_risk_low,
+        "trusted_location":            signals.trusted_location,
+        "latest_signin_ip_match":      signals.latest_signin_ip_match,
+        "signin_location_consistent":  signals.signin_location_consistent,
     }
 
     earned = 0
@@ -146,8 +203,6 @@ def score_context_signals(
     for item in _SIGNALS:
         sig = item["signal"]
         enabled, max_pts, failure_action = resolve_rule(rules, sig, item["max"])
-        if sig == "known_device" and unknown_device_penalty is not None:
-            max_pts = unknown_device_penalty
         if sig == "normal_ip" and suspicious_ip_penalty is not None:
             max_pts = suspicious_ip_penalty
         if not enabled:
@@ -156,13 +211,14 @@ def score_context_signals(
                 "module": "context_analysis", "note": "disabled by policy",
             })
             continue
-        if sig == "known_device" and not require_known_device:
+        val = signal_values.get(sig, True)
+        if val is None:
             breakdown.append({
                 "signal": sig, "passed": None, "points": 0, "max": max_pts,
-                "module": "context_analysis", "note": "not required by policy",
+                "module": "context_analysis", "note": signal_notes.get(sig, "not collected"),
             })
             continue
-        passed = bool(signal_values.get(sig, True))
+        passed = bool(val)
         pts = max_pts if passed else 0
         earned += pts
         denominator += max_pts
@@ -223,18 +279,20 @@ def score_context_signals(
 def score_context_default(
     *,
     source_ip: Optional[str] = None,
-    known_device: Optional[bool] = None,
     failed_attempt_count: int = 0,
     allowed_start_hour: int = _ALLOWED_START_HOUR,
     allowed_end_hour: int = _ALLOWED_END_HOUR,
     max_failed_attempts: int = _MAX_FAILED_ATTEMPTS,
-    require_known_device: bool = True,
-    unknown_device_penalty: Optional[int] = None,
     suspicious_ip_penalty: Optional[int] = None,
     blocked_ips: Optional[list[str]] = None,
     gateway_online: Optional[bool] = None,
+    trusted_networks: Optional[list[str]] = None,
+    network_profile: Optional[str] = None,
+    access_frequency_count: Optional[int] = None,
     signin_risk_low: Optional[bool] = None,
     trusted_location: Optional[bool] = None,
+    latest_signin_ip_match: Optional[bool] = None,
+    signin_location_consistent: Optional[bool] = None,
     include_azure: bool = False,
     na_reasons: Optional[dict] = None,
     rules: Optional[dict] = None,
@@ -247,21 +305,23 @@ def score_context_default(
     Returns (score, breakdown, hard_fails).
     """
     signals = ContextSignals(
-        known_device=known_device,
         source_ip=source_ip,
         failed_attempt_count=failed_attempt_count,
         blocked_ips=blocked_ips,
         gateway_online=gateway_online,
+        trusted_networks=trusted_networks,
+        network_profile=network_profile,
+        access_frequency_count=access_frequency_count,
         signin_risk_low=signin_risk_low,
         trusted_location=trusted_location,
+        latest_signin_ip_match=latest_signin_ip_match,
+        signin_location_consistent=signin_location_consistent,
     )
     return score_context_signals(
         signals,
         allowed_start_hour=allowed_start_hour,
         allowed_end_hour=allowed_end_hour,
         max_failed_attempts=max_failed_attempts,
-        require_known_device=require_known_device,
-        unknown_device_penalty=unknown_device_penalty,
         suspicious_ip_penalty=suspicious_ip_penalty,
         include_azure=include_azure,
         na_reasons=na_reasons,

@@ -42,26 +42,27 @@ _SIGNIN_TTL = 900  # seconds (15 min)
 _signin_cache: dict = {}  # upn(lower) -> (fetched_at, latest_record|None)
 
 
-def _latest_signin(upn: str) -> Optional[dict]:
-    """Return this user's most recent sign-in record, best-effort with caching.
+def _recent_signins(upn: str) -> list[dict]:
+    """Return this user's 2 most recent sign-in records (newest first), best-effort with caching.
 
     Cache is checked first; on a miss, Graph is fetched synchronously with a
     30s timeout. The client-app device-check HTTP timeout is 45s so waiting up
-    to 30s here is safe. Once fetched the record is cached for 15 min so every
-    subsequent device check within that window is instant.
+    to 30s here is safe. Once fetched the records are cached for 15 min so every
+    subsequent device check within that window is instant. Fetching top=2
+    instead of top=1 costs nothing extra (same query) and lets one fetch back
+    both Trusted Location / Latest Sign-in IP Match (need only the newest
+    record) and Sign-in Location Consistency (needs the two most recent).
 
     Confirmed on at least one real tenant: this endpoint exceeded even 20s
     (server logs: "Read timed out. (read timeout=20)"), despite querying
-    top=1 filtered to a single user — data volume doesn't explain it, this
-    looks like an inherent characteristic of this specific beta endpoint on
-    this tenant/region. 30s is a pragmatic ceiling, not a guarantee: on a
-    tenant this slow, Trusted Location (the only remaining signal derived
-    from this fetch — Conditional Access OK was removed entirely) may keep
-    showing "Not Configured" regardless of the timeout value. A real fix
-    would move this off the synchronous device-check path entirely (a
-    background refresh job reading from cache only) rather than keep
-    raising this number — flagged for follow-up if the timeout keeps not
-    being enough.
+    filtered to a single user — data volume doesn't explain it, this looks
+    like an inherent characteristic of this specific beta endpoint on this
+    tenant/region. 30s is a pragmatic ceiling, not a guarantee: on a tenant
+    this slow, the signals derived from this fetch may keep showing "Not
+    Configured" regardless of the timeout value. A real fix would move this
+    off the synchronous device-check path entirely (a background refresh job
+    reading from cache only) rather than keep raising this number — flagged
+    for follow-up if the timeout keeps not being enough.
     """
     key = upn.lower()
     now = time.time()
@@ -69,14 +70,12 @@ def _latest_signin(upn: str) -> Optional[dict]:
     if hit is not None and (now - hit[0]) < _SIGNIN_TTL:
         return hit[1]
     try:
-        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=30)
+        logs = azure_service.get_sign_in_logs(top=2, upn=upn, timeout=30)
     except Exception as exc:  # noqa: BLE001
         log.warning("Sign-in fetch failed for %s: %s", upn, exc)
         logs = []
-    if logs:
-        _signin_cache[key] = (now, logs[0])
-        return logs[0]
-    return None
+    _signin_cache[key] = (now, logs)
+    return logs
 
 
 
@@ -97,8 +96,10 @@ class AzureSignals:
     intune_encrypted:       Optional[bool] = None
 
     # Context
-    signin_risk_low:        Optional[bool] = None
-    trusted_location:       Optional[bool] = None
+    signin_risk_low:             Optional[bool] = None
+    trusted_location:            Optional[bool] = None
+    latest_signin_ip_match:      Optional[bool] = None
+    signin_location_consistent:  Optional[bool] = None
 
     # Diagnostics (not scored)
     matched_entra_device:   Optional[str] = None
@@ -129,8 +130,10 @@ class AzureSignals:
 
     def context_kwargs(self) -> dict:
         return {
-            "signin_risk_low":  self.signin_risk_low,
-            "trusted_location": self.trusted_location,
+            "signin_risk_low":             self.signin_risk_low,
+            "trusted_location":             self.trusted_location,
+            "latest_signin_ip_match":       self.latest_signin_ip_match,
+            "signin_location_consistent":   self.signin_location_consistent,
         }
 
 
@@ -260,6 +263,7 @@ def collect_azure_signals(
     user: "User",
     device: Optional["Device"],
     valid_role_ids: Optional[list] = None,
+    source_ip: Optional[str] = None,
 ) -> AzureSignals:
     """Resolve all Entra signals for one (user, device). Never raises.
 
@@ -268,6 +272,9 @@ def collect_azure_signals(
     Valid passes only if the user belongs to one of these specific
     groups/roles. When empty/None, falls back to the original behaviour —
     any group or role membership counts.
+    source_ip: the requesting client's IP for this device check, used to
+    back the Latest Sign-in IP Match signal (compared against the newest
+    Entra sign-in record's ipAddress).
     """
     sig = AzureSignals()
 
@@ -347,15 +354,17 @@ def collect_azure_signals(
         except Exception as exc:  # noqa: BLE001
             log.warning("Sign-in risk (from riskyUsers) failed: %s", exc)
 
-        # Trusted location from latest sign-in (best-effort, short timeout).
-        # Secondary signal; if signIns is unavailable it becomes Not Configured.
+        # Trusted location / IP match / location consistency, all derived from
+        # the 2 most recent sign-ins (best-effort, short timeout). Secondary
+        # signals; if signIns is unavailable they all become Not Configured.
         # (Conditional Access OK used to be derived from this same sign-in
         # fetch too, but was removed — conditionalAccessStatus only reflects
         # ENFORCED policies, so it never resolved on a tenant running CA in
         # Report-only mode. Not worth the added complexity for one signal.)
         try:
             upn = azure_user.get("userPrincipalName") or ""
-            latest = _latest_signin(upn) if upn else None
+            recent = _recent_signins(upn) if upn else []
+            latest = recent[0] if recent else None
             if latest is not None:
                 loc = latest.get("networkLocationDetails")
                 if isinstance(loc, list) and loc:
@@ -365,13 +374,37 @@ def collect_azure_signals(
                         sig.na_reasons["trusted_location"] = "not_configured"
                 else:
                     sig.na_reasons["trusted_location"] = "not_configured"
+
+                # Latest Sign-in IP Match: does this request's source IP match
+                # the IP Entra recorded for the user's most recent sign-in?
+                signin_ip = latest.get("ipAddress")
+                if signin_ip and source_ip:
+                    sig.latest_signin_ip_match = signin_ip == source_ip
+                else:
+                    sig.na_reasons["latest_signin_ip_match"] = "not_configured"
             else:
                 # signIns unavailable — mark as not_configured so UI shows
                 # "Not Configured" rather than the error-like "N/A".
                 sig.na_reasons["trusted_location"] = "not_configured"
+                sig.na_reasons["latest_signin_ip_match"] = "not_configured"
+
+            # Sign-in Location Consistency: same country on the 2 most recent
+            # sign-ins. Needs a second record, so it's N/A more often than the
+            # single-record signals above (e.g. this device's first sign-in).
+            if len(recent) >= 2:
+                country_a = ((recent[0].get("location") or {}).get("countryOrRegion") or "").strip().lower()
+                country_b = ((recent[1].get("location") or {}).get("countryOrRegion") or "").strip().lower()
+                if country_a and country_b:
+                    sig.signin_location_consistent = country_a == country_b
+                else:
+                    sig.na_reasons["signin_location_consistent"] = "not_configured"
+            else:
+                sig.na_reasons["signin_location_consistent"] = "not_configured"
         except Exception as exc:  # noqa: BLE001
             log.warning("Sign-in log lookup failed: %s", exc)
             sig.na_reasons["trusted_location"] = "not_configured"
+            sig.na_reasons["latest_signin_ip_match"] = "not_configured"
+            sig.na_reasons["signin_location_consistent"] = "not_configured"
     else:
         sig.notes.append("user not found in Entra")
 

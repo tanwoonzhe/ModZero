@@ -124,6 +124,16 @@ def _run_migrations() -> None:
         ALTER TABLE trust_policy_config
           ADD COLUMN IF NOT EXISTS blocked_ips json
         """,
+        # Admin-managed trusted-network allowlist ("Trusted Network" signal)
+        # and client-reported Windows network category ("Network Profile Check").
+        """
+        ALTER TABLE trust_policy_config
+          ADD COLUMN IF NOT EXISTS trusted_networks json
+        """,
+        """
+        ALTER TABLE posture_reports
+          ADD COLUMN IF NOT EXISTS network_profile varchar(32)
+        """,
     ]
     with engine.connect() as conn:
         for stmt in migrations:
@@ -183,6 +193,9 @@ def _cleanup_retired_signal_rules() -> None:
         conn.execute(text(
             "DELETE FROM signal_rules WHERE module = 'context' AND signal_key IN "
             "('known_user_device_pair', 'resource_pattern_normal')"
+        ))
+        conn.execute(text(
+            "DELETE FROM signal_rules WHERE module = 'context' AND signal_key = 'known_device'"
         ))
         conn.execute(text(
             "UPDATE signal_rules SET label = 'OS Recently Patched' "

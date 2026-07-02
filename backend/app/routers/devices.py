@@ -220,10 +220,18 @@ def get_device_trust_contribution(
     posture_contribution = round(trust.posture_score * policy.device_weight, 1) if trust.posture_score is not None else None
     context_contribution = round(trust.context_score * policy.context_weight, 1) if trust.context_score is not None else None
     identity_contribution = round(getattr(trust, "identity_score", None) * policy.identity_weight, 1) if getattr(trust, "identity_score", None) is not None else None
+
+    last_ip = None
+    if trust.report_id:
+        report = db.query(models.PostureReport).filter(models.PostureReport.report_id == trust.report_id).first()
+        if report:
+            last_ip = report.ip_address
+
     return {
         "device_id": str(device.device_id),
         "device_name": device.device_name,
         "posture_score": trust.posture_score,
+        "last_ip": last_ip,
         "posture_weight": policy.device_weight,
         "context_weight": policy.context_weight,
         "identity_weight": policy.identity_weight,
