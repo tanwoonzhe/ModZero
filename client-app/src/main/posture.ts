@@ -27,6 +27,7 @@ export interface PostureSignals {
   os_supported: boolean | null;
   client_version: string;
   intune_compliant: boolean | null;
+  network_profile: string | null;
 }
 
 interface WinPosture {
@@ -36,6 +37,7 @@ interface WinPosture {
   disk: boolean | null;
   lock: boolean | null;
   osPatched: boolean | null;
+  networkProfile: string | null;
 }
 
 // A SINGLE PowerShell script runs all OS checks and emits one JSON object.
@@ -47,7 +49,7 @@ interface WinPosture {
 // failure leaves that signal null (N/A) without aborting the rest.
 const PS_POSTURE_SCRIPT = `
 $ErrorActionPreference = 'SilentlyContinue'
-$o = [ordered]@{ firewall = $null; antivirus = $null; avAdvanced = $null; avAdvancedDetail = $null; disk = $null; lock = $null; osPatched = $null }
+$o = [ordered]@{ firewall = $null; antivirus = $null; avAdvanced = $null; avAdvancedDetail = $null; disk = $null; lock = $null; osPatched = $null; networkProfile = $null }
 
 # ── Firewall: ALL THREE profiles (Domain, Private, Public) must be enabled ──
 # Registry fallback works on locked-down VMs where the cmdlet is unavailable.
@@ -170,6 +172,20 @@ try {
   }
 } catch {}
 
+# ── Network profile: worst (most public) category across all adapters ──
+# NetworkCategory is Public / Private / DomainAuthenticated. Public is the
+# least trusted (untrusted network) and DomainAuthenticated the most, so a
+# machine connected to both a domain network and a public hotspot should be
+# scored on the public one, not the safer one.
+try {
+  $profiles2 = @(Get-NetConnectionProfile)
+  if ($profiles2.Count -gt 0) {
+    $rank = @{ 'Public' = 0; 'Private' = 1; 'DomainAuthenticated' = 2 }
+    $worst = $profiles2 | Sort-Object { $rank[[string]$_.NetworkCategory] } | Select-Object -First 1
+    if ($worst) { $o.networkProfile = [string]$worst.NetworkCategory }
+  }
+} catch {}
+
 $o | ConvertTo-Json -Compress
 `;
 
@@ -195,7 +211,7 @@ function logDiagnostic(line: string): void {
 }
 
 async function collectWindowsPosture(timeoutMs = 30000): Promise<WinPosture> {
-  const empty: WinPosture = { firewall: null, antivirus: null, avAdvanced: null, disk: null, lock: null, osPatched: null };
+  const empty: WinPosture = { firewall: null, antivirus: null, avAdvanced: null, disk: null, lock: null, osPatched: null, networkProfile: null };
   if (process.platform !== "win32") return empty;
   // Write the script to a temp file and run it with -File instead of passing
   // it inline via -EncodedCommand. The script grew enough (AV Advanced
@@ -216,14 +232,16 @@ async function collectWindowsPosture(timeoutMs = 30000): Promise<WinPosture> {
     const elapsedMs = Date.now() - startedAt;
     const parsed = JSON.parse((stdout || "").trim());
     const asBool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
+    const asStr = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
     logDiagnostic(`posture script OK in ${elapsedMs}ms: ${stdout.trim()}`);
     return {
-      firewall:   asBool(parsed.firewall),
-      antivirus:  asBool(parsed.antivirus),
-      avAdvanced: asBool(parsed.avAdvanced),
-      disk:       asBool(parsed.disk),
-      lock:       asBool(parsed.lock),
-      osPatched:  asBool(parsed.osPatched),
+      firewall:       asBool(parsed.firewall),
+      antivirus:      asBool(parsed.antivirus),
+      avAdvanced:     asBool(parsed.avAdvanced),
+      disk:           asBool(parsed.disk),
+      lock:           asBool(parsed.lock),
+      osPatched:      asBool(parsed.osPatched),
+      networkProfile: asStr(parsed.networkProfile),
     };
   } catch (e: any) {
     const elapsedMs = Date.now() - startedAt;
@@ -301,5 +319,6 @@ export async function collectPosture(): Promise<PostureSignals> {
     os_supported:            process.platform === "win32" ? win.osPatched : detectOsSupportedFallback(),
     client_version:          app.getVersion(),
     intune_compliant:        null,
+    network_profile:         win.networkProfile,
   };
 }

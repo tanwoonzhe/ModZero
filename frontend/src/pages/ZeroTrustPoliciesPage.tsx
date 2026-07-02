@@ -65,14 +65,18 @@ const SIGNAL_DESCRIPTIONS: Record<string, string> = {
   mfa_registered:        'Multi-factor authentication method registered in Entra (Authenticator App, FIDO2, etc.)',
   identity_risk_low:     'Entra Identity Protection risk level is none or low for this user',
   // Context — local
-  known_device:               'The reporting device already existed in the database before this check — i.e. not its first-ever check-in',
-  normal_access_time:         'Request hour falls within the Allowed Start/End Hour window below',
-  no_repeated_failed_login:   'User.failed_login_count is below Max Failed Login Attempts below (shared with the Identity module\'s Low Failed Logins, evaluated against a different threshold here)',
+  normal_access_time:         'Request hour falls within the Allowed Start/End Hour window (see "Configure")',
+  no_repeated_failed_login:   'User.failed_login_count is below Max Failed Login Attempts (see "Configure"; shared with the Identity module\'s Low Failed Logins, evaluated against a different threshold there)',
   normal_ip:                  'Request source IP is not on the admin-managed blocklist — empty list (default) always passes (see "Configure")',
+  trusted_network:            'Request source IP matches an admin-managed trusted network (IP or CIDR range) — N/A until at least one is configured (see "Configure")',
+  network_profile_check:      'Client-reported Windows network connection category (Public / Private / DomainAuthenticated) is not Public — N/A until the client app reports one',
+  access_frequency_check:     'This user has made no more than 20 access requests in the last 10 minutes',
   gateway_online:             'At least one Connector is currently online — a coarse "is the backend reachable" system-health check, not tied to a specific resource',
   // Context — entra
-  signin_risk_low:  'User is not flagged by Entra Identity Protection as a risky sign-in',
-  trusted_location: 'Sign-in originated from a Named Location configured as trusted in this tenant',
+  signin_risk_low:            'User is not flagged by Entra Identity Protection as a risky sign-in',
+  trusted_location:           'Sign-in originated from a Named Location configured as trusted in this tenant',
+  latest_signin_ip_match:     'This request\'s source IP matches the IP Entra recorded for the user\'s most recent sign-in',
+  signin_location_consistent: 'The user\'s 2 most recent Entra sign-ins originated from the same country',
 };
 
 interface GroupOrRole {
@@ -227,12 +231,16 @@ const RoleValidConfigModal: React.FC<{ onClose: () => void }> = ({ onClose }) =>
 const IPBlocklistConfigModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [ips, setIps] = useState<string[]>([]);
   const [newIp, setNewIp] = useState('');
+  const [penalty, setPenalty] = useState(15);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     api.get('/trust-policy/active')
-      .then(r => setIps((r.data.blocked_ips || []) as string[]))
+      .then(r => {
+        setIps((r.data.blocked_ips || []) as string[]);
+        setPenalty(r.data.suspicious_ip_penalty ?? 15);
+      })
       .catch(() => toast.error('Failed to load IP blocklist'))
       .finally(() => setLoading(false));
   }, []);
@@ -249,7 +257,7 @@ const IPBlocklistConfigModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.patch('/trust-policy/active', { blocked_ips: ips });
+      await api.patch('/trust-policy/active', { blocked_ips: ips, suspicious_ip_penalty: penalty });
       api.post('/signal-rules/notify-check').catch(() => {});
       toast.success(ips.length === 0 ? 'Blocklist cleared — Normal IP will always pass' : `Saved — ${ips.length} blocked IP(s)`);
       onClose();
@@ -264,11 +272,20 @@ const IPBlocklistConfigModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col">
         <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-          <h3 className="font-semibold text-gray-900 dark:text-white">Configure IP Blocklist</h3>
+          <h3 className="font-semibold text-gray-900 dark:text-white">Configure Normal IP</h3>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             The "Normal IP" signal fails when a device check's source IP exactly matches one of these entries.
             Empty list = always passes (no blocklist configured). CIDR ranges aren't matched — exact IP strings only.
           </p>
+        </div>
+        <div className="px-5 pt-4 pb-2 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <span className="text-sm text-gray-700 dark:text-gray-300">Suspicious IP Score Penalty</span>
+          <div className="flex items-center gap-2">
+            <input type="number" min={0} max={100} value={penalty}
+              onChange={e => setPenalty(Number(e.target.value))}
+              className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            <span className="text-xs text-gray-400">pts</span>
+          </div>
         </div>
         <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex gap-2">
           <input
@@ -322,6 +339,254 @@ const IPBlocklistConfigModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
               {saving ? 'Saving…' : 'Save'}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const TrustedNetworkConfigModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const [networks, setNetworks] = useState<string[]>([]);
+  const [newNetwork, setNewNetwork] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get('/trust-policy/active')
+      .then(r => setNetworks((r.data.trusted_networks || []) as string[]))
+      .catch(() => toast.error('Failed to load trusted networks'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const addNetwork = () => {
+    const v = newNetwork.trim();
+    if (!v) return;
+    if (networks.includes(v)) { toast.error('Already in the list'); return; }
+    setNetworks(prev => [...prev, v]);
+    setNewNetwork('');
+  };
+  const removeNetwork = (n: string) => setNetworks(prev => prev.filter(x => x !== n));
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/trust-policy/active', { trusted_networks: networks });
+      api.post('/signal-rules/notify-check').catch(() => {});
+      toast.success(networks.length === 0 ? 'Cleared — Trusted Network will always show N/A' : `Saved — ${networks.length} trusted network(s)`);
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col">
+        <div className="p-5 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="font-semibold text-gray-900 dark:text-white">Configure Trusted Network</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            The "Trusted Network" signal passes when a device check's source IP falls inside one of these ranges.
+            Empty list (default) = N/A — nothing configured to confirm trust against, never a fake Pass.
+          </p>
+        </div>
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex gap-2">
+          <input
+            type="text"
+            value={newNetwork}
+            onChange={e => setNewNetwork(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addNetwork(); } }}
+            placeholder="e.g., 203.0.113.0/24 or 203.0.113.42"
+            className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          <button
+            onClick={addNetwork}
+            className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+          >
+            Add
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
+            </div>
+          ) : networks.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-6">No trusted networks configured.</p>
+          ) : (
+            <div className="space-y-1">
+              {networks.map(n => (
+                <div key={n} className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700">
+                  <span className="text-sm font-mono text-gray-900 dark:text-white">{n}</span>
+                  <button onClick={() => removeNetwork(n)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
+          <span className="text-xs text-gray-400">{networks.length} configured</span>
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              disabled={saving}
+              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || loading}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const NormalAccessTimeConfigModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [startHour, setStartHour] = useState(8);
+  const [endHour, setEndHour] = useState(20);
+  const [blockOutside, setBlockOutside] = useState(false);
+
+  useEffect(() => {
+    api.get('/trust-policy/active')
+      .then(r => {
+        setStartHour(r.data.allowed_start_hour ?? 8);
+        setEndHour(r.data.allowed_end_hour ?? 20);
+        setBlockOutside(r.data.block_outside_hours ?? false);
+      })
+      .catch(() => toast.error('Failed to load'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/trust-policy/active', {
+        allowed_start_hour: startHour,
+        allowed_end_hour: endHour,
+        block_outside_hours: blockOutside,
+      });
+      api.post('/signal-rules/notify-check').catch(() => {});
+      toast.success('Saved');
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md">
+        <div className="p-5 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="font-semibold text-gray-900 dark:text-white">Configure Normal Access Time</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            The allowed hour window this signal checks against, and whether access outside it is denied outright regardless of trust score.
+          </p>
+        </div>
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
+          </div>
+        ) : (
+          <div className="p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-700 dark:text-gray-300">Allowed Start Hour (0–23)</span>
+              <input type="number" min={0} max={23} value={startHour}
+                onChange={e => setStartHour(Number(e.target.value))}
+                className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-700 dark:text-gray-300">Allowed End Hour (0–23)</span>
+              <input type="number" min={0} max={23} value={endHour}
+                onChange={e => setEndHour(Number(e.target.value))}
+                className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <span className="text-sm text-gray-700 dark:text-gray-300">Block Outside Allowed Hours</span>
+                <p className="text-xs text-gray-400">Deny access outright outside the window, regardless of trust score.</p>
+              </div>
+              <button
+                onClick={() => setBlockOutside(!blockOutside)}
+                className={`w-10 h-5 rounded-full transition-colors flex-shrink-0 ${blockOutside ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+              >
+                <span className={`block w-4 h-4 bg-white rounded-full shadow mx-0.5 transition-transform ${blockOutside ? 'translate-x-5' : 'translate-x-0'}`} />
+              </button>
+            </div>
+          </div>
+        )}
+        <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+          <button onClick={onClose} disabled={saving} className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+          <button onClick={handleSave} disabled={saving || loading} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const NoRepeatedFailedLoginConfigModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [maxFailedAttempts, setMaxFailedAttempts] = useState(5);
+
+  useEffect(() => {
+    api.get('/trust-policy/active')
+      .then(r => setMaxFailedAttempts(r.data.max_failed_attempts ?? 5))
+      .catch(() => toast.error('Failed to load'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/trust-policy/active', { max_failed_attempts: maxFailedAttempts });
+      api.post('/signal-rules/notify-check').catch(() => {});
+      toast.success('Saved');
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-sm">
+        <div className="p-5 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="font-semibold text-gray-900 dark:text-white">Configure No Repeated Failed Login</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            If a user's failed login count meets or exceeds this number, this signal fails.
+          </p>
+        </div>
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
+          </div>
+        ) : (
+          <div className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-700 dark:text-gray-300">Max Failed Login Attempts</span>
+              <input type="number" min={1} max={20} value={maxFailedAttempts}
+                onChange={e => setMaxFailedAttempts(Number(e.target.value))}
+                className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            </div>
+          </div>
+        )}
+        <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+          <button onClick={onClose} disabled={saving} className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+          <button onClick={handleSave} disabled={saving || loading} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
         </div>
       </div>
     </div>
@@ -897,24 +1162,39 @@ const IdentityRulesTab: React.FC = () => (
 
 const ContextLocalSignalsTab: React.FC = () => {
   const [ipModalOpen, setIpModalOpen] = useState(false);
+  const [trustedNetworkModalOpen, setTrustedNetworkModalOpen] = useState(false);
+  const [accessTimeModalOpen, setAccessTimeModalOpen] = useState(false);
+  const [failedLoginModalOpen, setFailedLoginModalOpen] = useState(false);
+
+  const configureButton = (onClick: () => void) => (
+    <button
+      onClick={onClick}
+      className="text-xs px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30"
+    >
+      Configure
+    </button>
+  );
+
   return (
     <>
       <SignalRulesTable
         module="context"
         source="local"
         title="Context Rules"
-        subtitle="Real-time request context checks. Known Device now reflects whether this device had a prior check-in (not just whether it's registered); Normal IP checks against an admin-managed blocklist (empty by default); Gateway/Connector Online reflects real Connector status."
+        subtitle="Real-time request context checks. Normal IP and Trusted Network check against admin-managed lists (empty by default — see Configure on each row); Gateway/Connector Online reflects real Connector status."
         sourceLabel="Backend (real-time)"
-        extraRowAction={(row) => row.signal_key === 'normal_ip' ? (
-          <button
-            onClick={() => setIpModalOpen(true)}
-            className="text-xs px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30"
-          >
-            Configure
-          </button>
-        ) : null}
+        extraRowAction={(row) => {
+          if (row.signal_key === 'normal_ip') return configureButton(() => setIpModalOpen(true));
+          if (row.signal_key === 'trusted_network') return configureButton(() => setTrustedNetworkModalOpen(true));
+          if (row.signal_key === 'normal_access_time') return configureButton(() => setAccessTimeModalOpen(true));
+          if (row.signal_key === 'no_repeated_failed_login') return configureButton(() => setFailedLoginModalOpen(true));
+          return null;
+        }}
       />
       {ipModalOpen && <IPBlocklistConfigModal onClose={() => setIpModalOpen(false)} />}
+      {trustedNetworkModalOpen && <TrustedNetworkConfigModal onClose={() => setTrustedNetworkModalOpen(false)} />}
+      {accessTimeModalOpen && <NormalAccessTimeConfigModal onClose={() => setAccessTimeModalOpen(false)} />}
+      {failedLoginModalOpen && <NoRepeatedFailedLoginConfigModal onClose={() => setFailedLoginModalOpen(false)} />}
     </>
   );
 };
@@ -929,27 +1209,12 @@ const ContextRulesTab: React.FC = () => {
   const [savedOk, setSavedOk] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [allowedStartHour, setAllowedStartHour] = useState(8);
-  const [allowedEndHour, setAllowedEndHour]     = useState(20);
-  const [blockOutsideHours, setBlockOutsideHours]       = useState(false);
-  const [maxFailedAttempts, setMaxFailedAttempts]       = useState(5);
-  const [unknownDevicePenalty, setUnknownDevicePenalty] = useState(20);
-  const [suspiciousIpPenalty, setSuspiciousIpPenalty]   = useState(15);
-  const [requireKnownDevice, setRequireKnownDevice]     = useState(true);
   const [autoCheckIntervalHours, setAutoCheckIntervalHours] = useState(0);
 
   useEffect(() => {
     api.get('/trust-policy/active')
       .then(r => {
-        const d = r.data;
-        setAllowedStartHour(d.allowed_start_hour ?? 8);
-        setAllowedEndHour(d.allowed_end_hour ?? 20);
-        setBlockOutsideHours(d.block_outside_hours ?? false);
-        setMaxFailedAttempts(d.max_failed_attempts ?? 5);
-        setUnknownDevicePenalty(d.unknown_device_penalty ?? 20);
-        setSuspiciousIpPenalty(d.suspicious_ip_penalty ?? 15);
-        setRequireKnownDevice(d.require_known_device ?? true);
-        setAutoCheckIntervalHours(d.auto_check_interval_hours ?? 0);
+        setAutoCheckIntervalHours(r.data.auto_check_interval_hours ?? 0);
       })
       .catch(() => setError('Failed to load context rules from backend.'))
       .finally(() => setLoading(false));
@@ -960,13 +1225,6 @@ const ContextRulesTab: React.FC = () => {
     setError(null);
     try {
       await api.patch('/trust-policy/active', {
-        allowed_start_hour: allowedStartHour,
-        allowed_end_hour: allowedEndHour,
-        block_outside_hours: blockOutsideHours,
-        max_failed_attempts: maxFailedAttempts,
-        unknown_device_penalty: unknownDevicePenalty,
-        suspicious_ip_penalty: suspiciousIpPenalty,
-        require_known_device: requireKnownDevice,
         auto_check_interval_hours: autoCheckIntervalHours,
       });
       api.post('/signal-rules/notify-check').catch(() => {});
@@ -1000,9 +1258,10 @@ const ContextRulesTab: React.FC = () => {
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Context Rules — Thresholds &amp; Scheduling</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Context Rules — Scheduling</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Values referenced by the Context Rules signals above (which one is toggled on/off and worth how many points), plus the client app's auto-check interval. Stored in the backend and used by every trust score calculation.
+            Settings not tied to any specific signal above. Everything a specific Context Rules signal checks against
+            (allowed hours, failed-login threshold, IP/network lists) now lives behind that signal's own "Configure" button.
           </p>
         </div>
         <button
@@ -1011,7 +1270,7 @@ const ContextRulesTab: React.FC = () => {
           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium"
         >
           <FaSave size={13} />
-          {saving ? 'Saving…' : savedOk ? 'Saved!' : 'Save Rules'}
+          {saving ? 'Saving…' : savedOk ? 'Saved!' : 'Save'}
         </button>
       </div>
 
@@ -1023,81 +1282,15 @@ const ContextRulesTab: React.FC = () => {
 
       <div className="px-6 divide-y divide-gray-100 dark:divide-gray-700">
         {row(
-          'Allowed Access Start Hour (0–23)',
-          'Context score "normal_access_time" check passes only when the request hour is within this range.',
-          <input type="number" min={0} max={23} value={allowedStartHour}
-            onChange={e => setAllowedStartHour(Number(e.target.value))}
-            className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-        )}
-        {row(
-          'Allowed Access End Hour (0–23)',
-          `Access at or after this hour (local server time) is considered outside working hours.`,
-          <input type="number" min={0} max={23} value={allowedEndHour}
-            onChange={e => setAllowedEndHour(Number(e.target.value))}
-            className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-        )}
-        {row(
-          'Block Outside Allowed Hours',
-          'If enabled, access outside the time window is denied immediately regardless of trust score.',
-          <button
-            onClick={() => setBlockOutsideHours(!blockOutsideHours)}
-            className={`w-10 h-5 rounded-full transition-colors ${blockOutsideHours ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
-          >
-            <span className={`block w-4 h-4 bg-white rounded-full shadow mx-0.5 transition-transform ${blockOutsideHours ? 'translate-x-5' : 'translate-x-0'}`} />
-          </button>
-        )}
-        {row(
-          'Max Failed Login Attempts',
-          'If a user exceeds this count, the "no_repeated_failed_login" check fails, reducing the context score.',
-          <input type="number" min={1} max={20} value={maxFailedAttempts}
-            onChange={e => setMaxFailedAttempts(Number(e.target.value))}
-            className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-        )}
-        {row(
-          'Require Known Device',
-          'If enabled (default), an unrecognised device fails the "known_device" check and loses its points. If disabled, "known_device" is skipped entirely (shown N/A) and never penalizes the score.',
-          <button
-            onClick={() => setRequireKnownDevice(!requireKnownDevice)}
-            className={`w-10 h-5 rounded-full transition-colors ${requireKnownDevice ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
-          >
-            <span className={`block w-4 h-4 bg-white rounded-full shadow mx-0.5 transition-transform ${requireKnownDevice ? 'translate-x-5' : 'translate-x-0'}`} />
-          </button>
-        )}
-        {row(
-          'Unknown Device Score Penalty',
-          'Points deducted from the "known_device" signal when the device is not registered.',
+          'Auto Device Check Interval',
+          'Not a trust score signal — purely a schedule. Every N hours, all connected client apps automatically re-run a device check on their own, in addition to manual clicks, app startup, and pushes triggered by policy saves. Set to 0 to disable.',
           <div className="flex items-center gap-2">
-            <input type="number" min={0} max={100} value={unknownDevicePenalty}
-              onChange={e => setUnknownDevicePenalty(Number(e.target.value))}
+            <input type="number" min={0} max={168} value={autoCheckIntervalHours}
+              onChange={e => setAutoCheckIntervalHours(Number(e.target.value))}
               className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-            <span className="text-xs text-gray-400">pts</span>
+            <span className="text-xs text-gray-400">{autoCheckIntervalHours === 0 ? 'disabled' : 'hours'}</span>
           </div>
         )}
-        {row(
-          'Suspicious IP Score Penalty',
-          'Points the "normal_ip" signal is worth when it fails against the admin-managed IP blocklist (Context Rules signal list above → Normal IP → Configure).',
-          <div className="flex items-center gap-2">
-            <input type="number" min={0} max={100} value={suspiciousIpPenalty}
-              onChange={e => setSuspiciousIpPenalty(Number(e.target.value))}
-              className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-            <span className="text-xs text-gray-400">pts</span>
-          </div>
-        )}
-      </div>
-
-      <div className="px-6 pt-2 pb-2">
-        <div className="border border-dashed border-gray-200 dark:border-gray-700 rounded-lg px-4 divide-y divide-gray-100 dark:divide-gray-700">
-          {row(
-            'Auto Device Check Interval',
-            'Not a trust score signal — purely a schedule. Every N hours, all connected client apps automatically re-run a device check on their own, in addition to manual clicks, app startup, and pushes triggered by policy saves. Set to 0 to disable.',
-            <div className="flex items-center gap-2">
-              <input type="number" min={0} max={168} value={autoCheckIntervalHours}
-                onChange={e => setAutoCheckIntervalHours(Number(e.target.value))}
-                className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-              <span className="text-xs text-gray-400">{autoCheckIntervalHours === 0 ? 'disabled' : 'hours'}</span>
-            </div>
-          )}
-        </div>
       </div>
 
       <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">

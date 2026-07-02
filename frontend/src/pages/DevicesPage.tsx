@@ -430,6 +430,7 @@ const DevicesPage: React.FC = () => {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Device Name</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">OS Version</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fingerprint</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last IP</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Posture Score</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Check</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Registered</th>
@@ -449,6 +450,7 @@ const DevicesPage: React.FC = () => {
                           </td>
                           <td className="px-4 py-3 text-sm">{device.os_version || "—"}</td>
                           <td className="px-4 py-3 text-xs font-mono text-gray-400">{device.fingerprint ? device.fingerprint.slice(0, 12) + "…" : "—"}</td>
+                          <td className="px-4 py-3 text-xs font-mono text-gray-500">{posture?.last_ip || "—"}</td>
                           <td className="px-4 py-3">
                             {score != null ? (
                               <span className={`font-bold text-sm ${score >= 80 ? "text-green-600" : score >= 60 ? "text-amber-600" : "text-red-600"}`}>{Math.round(score)} / 100</span>
