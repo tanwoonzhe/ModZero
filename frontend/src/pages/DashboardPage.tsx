@@ -17,6 +17,7 @@ import {
 } from "react-icons/fa";
 
 import AccessControlOverviewPanel from "../components/AccessControlOverviewPanel";
+import { useSocket } from "../hooks/useSocket";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -90,6 +91,11 @@ const DashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { fetchData(); }, []);
+
+  // Live refresh — posture.py emits "assessment_updated" (best-effort)
+  // whenever a new DeviceTrustScore is persisted, so trust scores and
+  // recent decisions here stay current without a manual reload.
+  useSocket("assessment_updated", () => { fetchData(); });
 
   const fetchData = async () => {
     setLoading(true);

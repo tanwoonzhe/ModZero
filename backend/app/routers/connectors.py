@@ -40,7 +40,7 @@ from ..models import (
 )
 from ..security import decode_access_token
 from ..settings import get_settings
-from ..sio_server import notify_connector_change
+from ..sio_server import notify_connector_change, notify_policy_update
 
 router = APIRouter()
 
@@ -354,6 +354,55 @@ def connector_heartbeat(
 
 # ?�?�?� Policy/resource fetch ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
+def _build_resource_list(db: Session, connector: Connector) -> list[dict]:
+    """Same resource set a connector would get from GET .../policies — shared
+    with the push path (notify_policy_update) so both stay in sync."""
+    resources = db.query(ConnectorResource).filter(
+        ConnectorResource.is_active == True,
+        (ConnectorResource.connector_id == connector.connector_id) |
+        (ConnectorResource.network == connector.network),
+    ).all()
+    return [
+        {
+            "resource_id": str(r.resource_id),
+            "name": r.name,
+            "protocol": r.protocol.value if hasattr(r.protocol, 'value') else r.protocol,
+            "target_host": r.target_host,
+            "target_port": int(r.target_port),
+            "path_prefix": r.path_prefix or "",
+        }
+        for r in resources
+    ]
+
+
+async def _push_policy_update_for_resource(db: Session, resource: ConnectorResource) -> None:
+    """Push the refreshed resource list to whichever connector(s) this
+    resource is visible to, so they pick it up within seconds instead of
+    waiting for their next policy_poll_loop tick (connector/heartbeat.py).
+
+    A resource pinned to one connector_id only affects that connector; a
+    network-wide resource (connector_id is None) is visible to every
+    connector on that network (see get_connector_policies' query).
+    """
+    if resource.connector_id:
+        connectors = db.query(Connector).filter(
+            Connector.connector_id == resource.connector_id
+        ).all()
+    else:
+        connectors = db.query(Connector).filter(
+            Connector.network == resource.network
+        ).all()
+
+    for connector in connectors:
+        try:
+            await notify_policy_update(
+                str(connector.connector_id),
+                _build_resource_list(db, connector),
+            )
+        except Exception:  # noqa: BLE001
+            pass  # best-effort — policy_poll_loop is the fallback
+
+
 @router.get("/connectors/{connector_id}/policies", tags=["connectors"])
 def get_connector_policies(
     connector_id: str,
@@ -366,28 +415,8 @@ def get_connector_policies(
     if str(connector.connector_id) != connector_id:
         raise HTTPException(status_code=403, detail="Connector ID mismatch")
 
-    resources = db.query(ConnectorResource).filter(
-        ConnectorResource.is_active == True,
-        (ConnectorResource.connector_id == connector.connector_id) |
-        (ConnectorResource.network == connector.network),
-    ).all()
-
-    settings = get_settings()
-    controller_url = str(settings.database_url).split("@")[0]  # placeholder
-
-    resource_list = []
-    for r in resources:
-        resource_list.append({
-            "resource_id": str(r.resource_id),
-            "name": r.name,
-            "protocol": r.protocol.value if hasattr(r.protocol, 'value') else r.protocol,
-            "target_host": r.target_host,
-            "target_port": int(r.target_port),
-            "path_prefix": r.path_prefix or "",
-        })
-
     return {
-        "resources": resource_list,
+        "resources": _build_resource_list(db, connector),
         "jwks_url": "",  # will be populated when JWKS is configured
     }
 
@@ -516,7 +545,7 @@ def list_enroll_tokens(
 
 @router.post("/admin/connectors/resources", response_model=ResourceOut,
              status_code=201, tags=["connectors-admin"])
-def create_connector_resource(
+async def create_connector_resource(
     body: ResourceCreateRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
@@ -543,6 +572,8 @@ def create_connector_resource(
     db.add(resource)
     db.commit()
     db.refresh(resource)
+
+    await _push_policy_update_for_resource(db, resource)
 
     return ResourceOut(
         resource_id=resource.resource_id,
