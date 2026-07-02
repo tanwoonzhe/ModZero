@@ -26,7 +26,7 @@ from ..services.identity_signal_service import signals_from_local_user, get_mock
 from ..services.posture_scoring import score_posture, weighted_total
 from ..services.signal_rules import get_signal_rules
 from ..settings import get_settings
-from ..sio_server import notify_force_logout
+from ..sio_server import notify_assessment_update, notify_force_logout
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -173,6 +173,13 @@ async def _score_and_persist(
     db.commit()
     db.refresh(report)
     db.refresh(trust)
+
+    # Best-effort push so the Dashboard Overview's trust score / assessment
+    # views refresh live instead of waiting on their own polling.
+    try:
+        await notify_assessment_update()
+    except Exception:  # noqa: BLE001
+        pass
 
     return {
         "azure": azure,
