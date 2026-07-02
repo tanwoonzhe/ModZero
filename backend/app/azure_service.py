@@ -397,14 +397,27 @@ class AzureGraphService:
                 except Exception:  # noqa: BLE001
                     pass
                 if e.response.status_code == 403:
-                    logger.warning("Missing IdentityRiskyUser.Read.All permission")
+                    # A 403 here is NOT necessarily a missing-permission problem —
+                    # confirmed on a real tenant with IdentityRiskyUser.Read.All
+                    # fully consented (green check, "Granted for ...") that Graph
+                    # still returns 403 with body {"error":{"code":"Forbidden",
+                    # "message":"Your tenant is not licensed for this feature."}}.
+                    # Identity Protection's riskyUsers endpoint requires Entra ID
+                    # P2 regardless of API permissions. Report whichever is true.
+                    body_lower = (e.response.text or "").lower()
+                    if "not licensed" in body_lower:
+                        logger.warning("Tenant lacks the Entra ID P2 license required for Identity Protection (riskyUsers)")
+                        reason = "not_licensed: Entra ID P2 required for Identity Protection"
+                    else:
+                        logger.warning("Missing IdentityRiskyUser.Read.All permission")
+                        reason = "missing_permission: IdentityRiskyUser.Read.All"
                     # Must raise, not return [] — the caller (azure_signal_service.py)
                     # reads an empty list as "confirmed zero risky users" and scores
                     # identity/sign-in risk as a genuine Pass. Silently returning []
-                    # on a permission error would produce that same false Pass for
+                    # on a fetch failure would produce that same false Pass for
                     # every user, every time, with no way to tell it apart from a
                     # real "nobody is flagged" result.
-                    raise Exception("missing_permission: IdentityRiskyUser.Read.All")
+                    raise Exception(reason)
             raise Exception(f"Failed to fetch risky users: {str(e)}")
     
     def get_conditional_access_policies(self) -> List[Dict]:
