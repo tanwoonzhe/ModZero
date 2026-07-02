@@ -1053,6 +1053,50 @@ class TrustPolicyConfig(Base):
         )
 
 
+class SignalRule(Base):
+    """Per-signal scoring configuration — the single source of truth read by
+    posture_scoring.py / identity_signal_service.py / context_analysis_service.py.
+
+    One row per (module, signal_key). Admin-editable via /api/signal-rules;
+    the three scoring services no longer hardcode which signals exist, their
+    point values, or what happens on failure — they load this table.
+
+    failure_action:
+      reduce_score               — default; only affects the weighted score
+      deny_immediately_client    — on failure, sets User.client_access_enabled
+                                    = False (blocks client app login until an
+                                    admin manually re-enables it)
+      deny_immediately_resources — on failure, flags the resulting
+                                    DeviceTrustScore as hard-denied; every
+                                    resource-access request is refused
+                                    regardless of score until the next
+                                    passing device check
+    """
+    __tablename__ = "signal_rules"
+
+    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    module: str = Column(String(16), nullable=False)        # device | identity | context
+    signal_key: str = Column(String(64), nullable=False)
+    source: str = Column(String(16), nullable=False, default="local")  # local | entra
+    label: str = Column(String(128), nullable=False)
+    enabled: bool = Column(Boolean, nullable=False, default=True)
+    max_points: int = Column(Integer, nullable=False)
+    failure_action: str = Column(String(32), nullable=False, default="reduce_score")
+    created_at: datetime = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("module", "signal_key", name="uq_signal_rules_module_key"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<SignalRule {self.module}.{self.signal_key} enabled={self.enabled} max={self.max_points}>"
+
+
 # ============================================================================
 # CUSTOM POLICY MODELS
 # ============================================================================
@@ -1371,6 +1415,12 @@ class DeviceTrustScore(Base):
 
     # Factor-level breakdown stored as JSON for audit / UI display
     breakdown: dict = Column(JSON, nullable=True)
+
+    # Set when a signal with failure_action=deny_immediately_resources failed
+    # on this check. access.py's resource gate refuses every request while
+    # this is True, regardless of total_score, until the next passing check.
+    hard_denied_resources: bool = Column(Boolean, nullable=False, default=False)
+    hard_deny_reason: str = Column(String(256), nullable=True)
 
     calculated_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
 

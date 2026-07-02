@@ -440,7 +440,26 @@ def request_access(
             resource=resource_out,
         )
 
-    # 3. Trust score too low
+    # 3. Hard-denied by a deny_immediately_resources signal on the latest check
+    if getattr(score, "hard_denied_resources", False):
+        _log(
+            db,
+            user_id=current_user.user_id,
+            device_id=score.device_id,
+            resource_id=resource.id,
+            decision="deny",
+            reason=score.hard_deny_reason or "hard_denied_by_policy",
+            trust_score=score.total_score,
+        )
+        return schemas.AccessDecisionOut(
+            decision="deny",
+            reason=score.hard_deny_reason or "Denied by a signal configured to deny resource access immediately. Run a new device check to clear this.",
+            trust_score=score.total_score,
+            required_score=resource.minimum_trust_score,
+            resource=resource_out,
+        )
+
+    # 4. Trust score too low
     if score.total_score < resource.minimum_trust_score:
         _log(
             db,
@@ -459,7 +478,7 @@ def request_access(
             resource=resource_out,
         )
 
-    # 4. Intune compliance required
+    # 5. Intune compliance required
     if resource.require_intune_compliant:
         report = (
             db.query(PostureReport)
@@ -485,7 +504,7 @@ def request_access(
                 resource=resource_out,
             )
 
-    # 5. Connector availability check
+    # 6. Connector availability check
     online_connector: Optional[Connector] = None
     if resource.connector_resource_id:
         conn_status = _live_connector_status(db, resource.connector_resource_id)
@@ -514,7 +533,7 @@ def request_access(
         if cr:
             online_connector = _connector_by_resource(db, cr)
 
-    # 6. Allow — evaluate tunnel readiness, resolve access_mode, mint session as needed.
+    # 7. Allow — evaluate tunnel readiness, resolve access_mode, mint session as needed.
     tunnel_eval = _evaluate_tunnel_readiness(db, resource, online_connector, s)
 
     preferred = (resource.preferred_access_mode or "auto").lower()

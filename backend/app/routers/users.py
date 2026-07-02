@@ -17,6 +17,7 @@ from ..services.identity_signal_service import (
     get_mock_identity_signals,
 )
 from ..services.azure_signal_service import collect_azure_signals
+from ..services.signal_rules import get_signal_rules
 from .trust_policy import get_or_create_policy
 
 
@@ -392,8 +393,9 @@ def get_user_identity_signals(
         for k, v in azure.identity_kwargs().items():
             setattr(signals, k, v)
 
-    identity_score, breakdown = score_identity_signals(
+    identity_score, breakdown, _hard_fails = score_identity_signals(
         signals, include_azure=include_azure, na_reasons=na_reasons,
+        rules=get_signal_rules(db, "identity"),
     )
     return {
         "user_id": str(user.user_id),

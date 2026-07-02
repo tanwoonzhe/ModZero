@@ -702,6 +702,8 @@ def introspect_access_session(
         )
         if latest_score is None:
             return schemas.AccessIntrospectResponse(active=False, reason="no_trust_score")
+        if getattr(latest_score, "hard_denied_resources", False):
+            return schemas.AccessIntrospectResponse(active=False, reason="hard_denied_by_policy")
         if latest_score.total_score < resource.minimum_trust_score:
             return schemas.AccessIntrospectResponse(active=False, reason="trust_score_below_required")
 

@@ -24,6 +24,7 @@ from ..services.azure_signal_service import AzureSignals, collect_azure_signals
 from ..services.context_analysis_service import score_context_default
 from ..services.identity_signal_service import signals_from_local_user, get_mock_identity_signals, score_identity_signals
 from ..services.posture_scoring import score_posture, weighted_total
+from ..services.signal_rules import get_signal_rules
 from ..settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -39,6 +40,139 @@ def _maybe_collect_azure(policy: TrustPolicyConfig, user: User, device: Device) 
     if not getattr(policy, "entra_enabled", False):
         return None
     return collect_azure_signals(user, device, getattr(policy, "valid_role_ids", None))
+
+
+def _enforce_hard_fails(db: Session, user: User, hard_fails: list[dict]) -> tuple[bool, Optional[str]]:
+    """Apply the consequence of every signal configured with a hard failure_action.
+
+    deny_immediately_client  → disables User.client_access_enabled, blocking
+                                the next client-app login attempt until an
+                                admin manually re-enables it (routers/auth.py
+                                already checks this flag).
+    deny_immediately_resources → returned as (True, reason) so the caller can
+                                stamp DeviceTrustScore.hard_denied_resources;
+                                access.py's resource gate then refuses every
+                                request against this score until the next
+                                passing device check.
+
+    Returns (hard_denied_resources, hard_deny_reason).
+    """
+    client_fails = [f for f in hard_fails if f["failure_action"] == "deny_immediately_client"]
+    resource_fails = [f for f in hard_fails if f["failure_action"] == "deny_immediately_resources"]
+
+    if client_fails and user.client_access_enabled:
+        user.client_access_enabled = False
+        db.add(user)
+        log.warning(
+            "Disabling client_access_enabled for %s — failed hard-gate signal(s): %s",
+            user.username, [f["signal"] for f in client_fails],
+        )
+
+    if not resource_fails:
+        return False, None
+    labels = ", ".join(f["signal"] for f in resource_fails)
+    return True, f"hard_denied_by_policy: {labels}"
+
+
+def _score_and_persist(
+    db: Session,
+    policy: TrustPolicyConfig,
+    current_user: User,
+    device: Device,
+    report: PostureReport,
+    source_ip: Optional[str],
+    settings,
+) -> dict:
+    """Run posture + context + identity scoring, enforce hard-fail signals, and
+    persist the resulting DeviceTrustScore.
+
+    Shared by submit_posture_report and client_posture_report so both
+    endpoints score and enforce identically — a signal-rule change (or a new
+    deny_immediately_* action) can't behave differently depending on which
+    route the client happened to call.
+    """
+    azure = _maybe_collect_azure(policy, current_user, device)
+
+    device_rules = get_signal_rules(db, "device")
+    context_rules = get_signal_rules(db, "context")
+    identity_rules = get_signal_rules(db, "identity")
+
+    posture_score, posture_breakdown, device_hard_fails = score_posture(
+        report, azure.device_overrides() if azure else None, rules=device_rules,
+    )
+
+    is_known_device = device.device_id is not None
+    ctx_score, ctx_breakdown, context_hard_fails = score_context_default(
+        source_ip=source_ip,
+        known_device=is_known_device,
+        failed_attempt_count=0,
+        allowed_start_hour=policy.allowed_start_hour,
+        allowed_end_hour=policy.allowed_end_hour,
+        max_failed_attempts=policy.max_failed_attempts,
+        include_azure=bool(azure),
+        na_reasons=azure.na_reasons if azure else None,
+        rules=context_rules,
+        **(azure.context_kwargs() if azure else {}),
+    )
+    ctx_source = "backend_realtime"
+
+    if settings.graph_mode == "real":
+        id_signals = signals_from_local_user(current_user)
+    else:
+        id_signals = get_mock_identity_signals(current_user)
+    if azure:
+        for k, v in azure.identity_kwargs().items():
+            setattr(id_signals, k, v)
+    identity_score, id_breakdown, identity_hard_fails = score_identity_signals(
+        id_signals, include_azure=bool(azure),
+        na_reasons=azure.na_reasons if azure else None,
+        rules=identity_rules,
+    )
+    identity_source = "entra" if azure else f"local_{settings.graph_mode}"
+
+    total = weighted_total(
+        posture_score, ctx_score, identity_score,
+        device_weight=policy.device_weight,
+        context_weight=policy.context_weight,
+        identity_weight=policy.identity_weight,
+    )
+
+    threshold = policy.default_threshold
+    decision = "ALLOW" if total >= threshold else "DENY"
+    reason = "score_meets_policy" if decision == "ALLOW" else "trust_score_below_threshold"
+
+    full_breakdown = posture_breakdown + ctx_breakdown + id_breakdown
+    all_hard_fails = device_hard_fails + context_hard_fails + identity_hard_fails
+    hard_denied_resources, hard_deny_reason = _enforce_hard_fails(db, current_user, all_hard_fails)
+    if hard_denied_resources:
+        decision = "DENY"
+        reason = hard_deny_reason
+
+    trust = DeviceTrustScore(
+        device_id=device.device_id,
+        report_id=report.report_id,
+        posture_score=posture_score,
+        context_score=ctx_score,
+        identity_score=identity_score,
+        total_score=total,
+        breakdown=full_breakdown,
+        hard_denied_resources=hard_denied_resources,
+        hard_deny_reason=hard_deny_reason,
+    )
+    db.add(trust)
+    db.commit()
+    db.refresh(report)
+    db.refresh(trust)
+
+    return {
+        "azure": azure,
+        "posture_score": posture_score, "posture_breakdown": posture_breakdown,
+        "ctx_score": ctx_score, "ctx_breakdown": ctx_breakdown, "ctx_source": ctx_source,
+        "identity_score": identity_score, "id_breakdown": id_breakdown, "identity_source": identity_source,
+        "total": total, "threshold": threshold, "decision": decision, "reason": reason,
+        "full_breakdown": full_breakdown, "trust": trust,
+        "hard_denied_resources": hard_denied_resources, "hard_deny_reason": hard_deny_reason,
+    }
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -168,86 +302,22 @@ def submit_posture_report(
     db.add(report)
     db.flush()
 
-    # ── Entra overlay (only when admin enabled it) ─────────────────────────────
-    azure = _maybe_collect_azure(policy, current_user, device)
+    # ── 3–9. Score all three modules, enforce hard-fail signals, persist ───────
+    result = _score_and_persist(db, policy, current_user, device, report, source_ip, settings)
+    trust = result["trust"]
 
-    # ── 3. Device Posture Score ────────────────────────────────────────────────
-    posture_score, posture_breakdown = score_posture(
-        report, azure.device_overrides() if azure else None,
-    )
-
-    # ── 4. Context Score (using DB policy config + request metadata) ───────────
-    is_known_device = device.device_id is not None  # device is registered
-    ctx_score, ctx_breakdown = score_context_default(
-        source_ip=source_ip,
-        known_device=is_known_device,
-        failed_attempt_count=0,  # posture check is not an access attempt
-        allowed_start_hour=policy.allowed_start_hour,
-        allowed_end_hour=policy.allowed_end_hour,
-        max_failed_attempts=policy.max_failed_attempts,
-        include_azure=bool(azure),
-        na_reasons=azure.na_reasons if azure else None,
-        **(azure.context_kwargs() if azure else {}),
-    )
-    ctx_source = "backend_realtime"
-
-    # ── 5. Identity Score (from local user record or Graph mock) ──────────────
-    if settings.graph_mode == "real":
-        id_signals = signals_from_local_user(current_user)
-    else:
-        id_signals = get_mock_identity_signals(current_user)
-    if azure:
-        for k, v in azure.identity_kwargs().items():
-            setattr(id_signals, k, v)
-    identity_score, id_breakdown = score_identity_signals(
-        id_signals, include_azure=bool(azure),
-        na_reasons=azure.na_reasons if azure else None,
-    )
-    identity_source = "entra" if azure else f"local_{settings.graph_mode}"
-
-    # ── 6. Weighted total using DB-stored weights ──────────────────────────────
-    total = weighted_total(
-        posture_score, ctx_score, identity_score,
-        device_weight=policy.device_weight,
-        context_weight=policy.context_weight,
-        identity_weight=policy.identity_weight,
-    )
-
-    # ── 7. Access decision ─────────────────────────────────────────────────────
-    threshold = policy.default_threshold
-    decision = "ALLOW" if total >= threshold else "DENY"
-    reason = "score_meets_policy" if decision == "ALLOW" else "trust_score_below_threshold"
-
-    # ── 8. Combined breakdown (posture + context + identity) ───────────────────
-    full_breakdown = posture_breakdown + ctx_breakdown + id_breakdown
-
-    # ── 9. Persist DeviceTrustScore ───────────────────────────────────────────
-    trust = DeviceTrustScore(
-        device_id=device.device_id,
-        report_id=report.report_id,
-        posture_score=posture_score,
-        context_score=ctx_score,
-        identity_score=identity_score,
-        total_score=total,
-        breakdown=full_breakdown,
-    )
-    db.add(trust)
-    db.commit()
-    db.refresh(report)
-    db.refresh(trust)
-
-    device_contrib = round(posture_score  * policy.device_weight,   1)
-    context_contrib = round(ctx_score     * policy.context_weight,  1)
-    identity_contrib = round(identity_score * policy.identity_weight, 1)
+    device_contrib = round(result["posture_score"]  * policy.device_weight,   1)
+    context_contrib = round(result["ctx_score"]      * policy.context_weight,  1)
+    identity_contrib = round(result["identity_score"] * policy.identity_weight, 1)
 
     return {
         # ── Scores ──────────────────────────────────────────────────────────
-        "device_posture_score": posture_score,
-        "posture_score":        posture_score,   # kept for client-app compatibility
-        "context_score":        ctx_score,
-        "identity_score":       identity_score,
-        "total_score":          total,
-        "total_trust_score":    total,           # kept for client-app compatibility
+        "device_posture_score": result["posture_score"],
+        "posture_score":        result["posture_score"],   # kept for client-app compatibility
+        "context_score":        result["ctx_score"],
+        "identity_score":       result["identity_score"],
+        "total_score":          result["total"],
+        "total_trust_score":    result["total"],           # kept for client-app compatibility
 
         # ── Weights (from DB policy) ────────────────────────────────────────
         "weights": {
@@ -257,9 +327,10 @@ def submit_posture_report(
         },
 
         # ── Decision ────────────────────────────────────────────────────────
-        "threshold": threshold,
-        "decision":  decision,
-        "reason":    reason,
+        "threshold": result["threshold"],
+        "decision":  result["decision"],
+        "reason":    result["reason"],
+        "hard_denied_resources": result["hard_denied_resources"],
 
         # ── Contributions ───────────────────────────────────────────────────
         "breakdown_summary": {
@@ -269,16 +340,16 @@ def submit_posture_report(
         },
 
         # ── Per-signal breakdown (for UI cards) ─────────────────────────────
-        "breakdown": posture_breakdown,     # device posture factors (for client-app cards)
-        "context_breakdown":  ctx_breakdown,
-        "identity_breakdown": id_breakdown,
+        "breakdown": result["posture_breakdown"],     # device posture factors (for client-app cards)
+        "context_breakdown":  result["ctx_breakdown"],
+        "identity_breakdown": result["id_breakdown"],
 
         # ── Source metadata ─────────────────────────────────────────────────
         "intune_source":    intune_source,
-        "context_source":   ctx_source,
-        "identity_source":  identity_source,
+        "context_source":   result["ctx_source"],
+        "identity_source":  result["identity_source"],
         "graph_mode":       settings.graph_mode,
-        "entra_enabled":    azure is not None,
+        "entra_enabled":    result["azure"] is not None,
 
         # ── Report meta ─────────────────────────────────────────────────────
         "report_id":     str(report.report_id),
@@ -382,59 +453,11 @@ def client_posture_report(
     db.add(report)
     db.flush()
 
-    azure = _maybe_collect_azure(policy, current_user, device)
-
-    posture_score, posture_breakdown = score_posture(
-        report, azure.device_overrides() if azure else None,
-    )
-
-    ctx_score, ctx_breakdown = score_context_default(
-        source_ip=source_ip,
-        known_device=device.device_id is not None,
-        failed_attempt_count=0,
-        allowed_start_hour=policy.allowed_start_hour,
-        allowed_end_hour=policy.allowed_end_hour,
-        max_failed_attempts=policy.max_failed_attempts,
-        include_azure=bool(azure),
-        na_reasons=azure.na_reasons if azure else None,
-        **(azure.context_kwargs() if azure else {}),
-    )
-
-    if settings.graph_mode == "real":
-        id_signals = signals_from_local_user(current_user)
-    else:
-        id_signals = get_mock_identity_signals(current_user)
-    if azure:
-        for k, v in azure.identity_kwargs().items():
-            setattr(id_signals, k, v)
-    identity_score, id_breakdown = score_identity_signals(
-        id_signals, include_azure=bool(azure),
-        na_reasons=azure.na_reasons if azure else None,
-    )
-
-    total = weighted_total(
-        posture_score, ctx_score, identity_score,
-        device_weight=policy.device_weight,
-        context_weight=policy.context_weight,
-        identity_weight=policy.identity_weight,
-    )
-    threshold = policy.default_threshold
-    decision = "ALLOW" if total >= threshold else "DENY"
-    reason = "score_meets_policy" if decision == "ALLOW" else "trust_score_below_threshold"
-
-    full_breakdown = posture_breakdown + ctx_breakdown + id_breakdown
-    trust = DeviceTrustScore(
-        device_id=device.device_id,
-        report_id=report.report_id,
-        posture_score=posture_score,
-        context_score=ctx_score,
-        identity_score=identity_score,
-        total_score=total,
-        breakdown=full_breakdown,
-    )
-    db.add(trust)
-    db.commit()
-    db.refresh(trust)
+    result = _score_and_persist(db, policy, current_user, device, report, source_ip, settings)
+    trust = result["trust"]
+    posture_score, ctx_score, identity_score = result["posture_score"], result["ctx_score"], result["identity_score"]
+    total, threshold, decision, reason = result["total"], result["threshold"], result["decision"], result["reason"]
+    posture_breakdown, ctx_breakdown, id_breakdown = result["posture_breakdown"], result["ctx_breakdown"], result["id_breakdown"]
 
     if total >= 80:
         ps_status = "healthy"
@@ -469,6 +492,7 @@ def client_posture_report(
         "threshold": threshold,
         "decision":  decision,
         "reason":    reason,
+        "hard_denied_resources": result["hard_denied_resources"],
 
         # ── Contributions ───────────────────────────────────────────────────
         "breakdown_summary": {
@@ -486,9 +510,9 @@ def client_posture_report(
         "status":    ps_status,
         "message":   message,
         "graph_mode": settings.graph_mode,
-        "entra_enabled": azure is not None,
+        "entra_enabled": result["azure"] is not None,
         "intune_source":   intune_source,
-        "identity_source": f"local_{settings.graph_mode}",
+        "identity_source": result["identity_source"],
 
         # ── Report meta ─────────────────────────────────────────────────────
         "report_id":     str(report.report_id),
