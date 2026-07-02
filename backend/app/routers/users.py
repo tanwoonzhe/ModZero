@@ -15,6 +15,8 @@ from ..services.identity_signal_service import (
     signals_from_local_user,
     get_mock_identity_signals,
 )
+from ..services.azure_signal_service import collect_azure_signals
+from .trust_policy import get_or_create_policy
 
 
 class UserPatch(BaseModel):
@@ -136,6 +138,28 @@ def get_user_details(
         for r in db.query(models.ProtectedResource).filter(models.ProtectedResource.id.in_(resource_ids)).all():
             resources[r.id] = r.name
 
+    # Latest DeviceTrustScore per device — module breakdown (posture/context/identity)
+    # from the most recent device check, so admins can see how each device's trust
+    # score is composed, not just the final number.
+    policy = get_or_create_policy(db)
+    latest_trust_by_device = {}
+    for d in devices:
+        trust = (
+            db.query(models.DeviceTrustScore)
+            .filter(models.DeviceTrustScore.device_id == d.device_id)
+            .order_by(models.DeviceTrustScore.calculated_at.desc())
+            .first()
+        )
+        if trust:
+            latest_trust_by_device[str(d.device_id)] = {
+                "posture_score": trust.posture_score,
+                "context_score": trust.context_score,
+                "identity_score": trust.identity_score,
+                "total_score": trust.total_score,
+                "breakdown": trust.breakdown,
+                "calculated_at": trust.calculated_at.isoformat() if trust.calculated_at else None,
+            }
+
     return {
         "user": {
             "user_id": str(user.user_id),
@@ -155,9 +179,15 @@ def get_user_details(
                 "os_version": d.os_version,
                 "fingerprint": d.fingerprint,
                 "registered_at": d.registered_at.isoformat() if d.registered_at else None,
+                "latest_trust_score": latest_trust_by_device.get(str(d.device_id)),
             }
             for d in devices
         ],
+        "current_weights": {
+            "device": policy.device_weight,
+            "context": policy.context_weight,
+            "identity": policy.identity_weight,
+        },
         "recent_attempts": [
             {
                 "attempt_id": str(l.id),
@@ -275,7 +305,14 @@ def get_user_identity_signals(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> Any:
-    """Return per-signal identity breakdown for trust scoring (GRAPH_MODE aware)."""
+    """Return per-signal identity breakdown for trust scoring.
+
+    When the admin has enabled Entra (TrustPolicyConfig.entra_enabled), this
+    calls collect_azure_signals() — the same Graph resolver used by the real
+    device-check flow (POST /api/posture/report) — so this endpoint reflects
+    a user's actual Account Enabled / Role Valid / MFA / Risk / CA state
+    instead of a static placeholder.
+    """
     settings = get_settings()
 
     if current_user.role != models.RoleEnum.ADMIN and str(current_user.user_id) != user_id:
@@ -285,20 +322,34 @@ def get_user_identity_signals(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if settings.graph_mode == "real":
-        # Placeholder: real Graph call would go here
-        signals = signals_from_local_user(user)
-    elif settings.graph_mode == "mock":
+    if settings.graph_mode == "mock":
         signals = get_mock_identity_signals(user)
     else:
         signals = signals_from_local_user(user)
 
-    identity_score, breakdown = score_identity_signals(signals)
+    policy = get_or_create_policy(db)
+    include_azure = bool(getattr(policy, "entra_enabled", False))
+    azure = None
+    entra_matched = None
+    na_reasons: dict = {}
+    if include_azure:
+        azure = collect_azure_signals(user, None)
+        entra_matched = "user not found in Entra" not in azure.notes
+        na_reasons = azure.na_reasons
+        for k, v in azure.identity_kwargs().items():
+            setattr(signals, k, v)
+
+    identity_score, breakdown = score_identity_signals(
+        signals, include_azure=include_azure, na_reasons=na_reasons,
+    )
     return {
         "user_id": str(user.user_id),
         "username": user.username,
         "identity_score": identity_score,
         "graph_mode": settings.graph_mode,
         "source": signals.source,
+        "entra_enabled": include_azure,
+        "linked_entra_upn": getattr(user, "linked_entra_upn", None),
+        "entra_matched": entra_matched,
         "breakdown": breakdown,
     }

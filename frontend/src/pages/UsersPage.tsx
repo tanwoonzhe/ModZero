@@ -13,8 +13,6 @@ const UsersPage: React.FC = () => {
   const [azureLoading, setAzureLoading] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<AzureConnectionTest | null>(null);
   const [syncing, setSyncing] = useState<string | null>(null);
-  const [roleModal, setRoleModal] = useState<{ userId: string; current: string } | null>(null);
-  const [roleUpdating, setRoleUpdating] = useState(false);
   const [userDetails, setUserDetails] = useState<Record<string, { lastLogin: string | null; avgScore: number | null }>>({});
   const [mfaStatus, setMfaStatus] = useState<Record<string, { mfa_registered: boolean | null; mfa_methods: string[] }>>({});
   const [mfaLoading, setMfaLoading] = useState(false);
@@ -29,6 +27,8 @@ const UsersPage: React.FC = () => {
   const [newUser, setNewUser] = useState({ username: "", email: "", password: "", role: "employee" });
   const [addingUser, setAddingUser] = useState(false);
   const [addUserError, setAddUserError] = useState<string | null>(null);
+  const [identitySignals, setIdentitySignals] = useState<Record<string, any>>({});
+  const [identitySignalsLoading, setIdentitySignalsLoading] = useState(false);
 
   useEffect(() => {
     api.get("/trust-policy/active")
@@ -67,6 +67,32 @@ const UsersPage: React.FC = () => {
       fetchMfaStatus();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'identity' && localUsers.length > 0 && Object.keys(identitySignals).length === 0 && !identitySignalsLoading) {
+      fetchIdentitySignals();
+    }
+  }, [activeTab, localUsers]);
+
+  const fetchIdentitySignals = async () => {
+    setIdentitySignalsLoading(true);
+    try {
+      const results: Record<string, any> = {};
+      await Promise.allSettled(
+        localUsers.map(async (u) => {
+          try {
+            const res = await api.get(`/users/${u.user_id}/identity-signals`);
+            results[u.user_id] = res.data;
+          } catch {
+            results[u.user_id] = null;
+          }
+        })
+      );
+      setIdentitySignals(results);
+    } finally {
+      setIdentitySignalsLoading(false);
+    }
+  };
 
   const fetchLocalUsers = async () => {
     try {
@@ -201,19 +227,6 @@ const UsersPage: React.FC = () => {
     }
   };
 
-  const assignRole = async (userId: string, newRole: string) => {
-    setRoleUpdating(true);
-    try {
-      await api.patch(`/users/${userId}`, { role: newRole });
-      await fetchLocalUsers();
-      setRoleModal(null);
-    } catch {
-      alert("Failed to update role");
-    } finally {
-      setRoleUpdating(false);
-    }
-  };
-
   const toggleClientAccess = async (userId: string, current: boolean) => {
     setTogglingAccess(userId);
     try {
@@ -271,34 +284,6 @@ const UsersPage: React.FC = () => {
 
   return (
     <div>
-      {/* Role Assignment Modal */}
-      {roleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 w-80">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Assign Role</h3>
-            <p className="text-sm text-gray-500 mb-4">Current role: <strong className="capitalize">{roleModal.current}</strong></p>
-            <div className="flex flex-col gap-2">
-              {[{ value: "admin", label: "Admin" }, { value: "employee", label: "Employee" }].map(r => (
-                <button
-                  key={r.value}
-                  disabled={roleUpdating || r.value === roleModal.current}
-                  onClick={() => assignRole(roleModal.userId, r.value)}
-                  className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-sm font-medium hover:bg-indigo-50 dark:hover:bg-indigo-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {r.value === roleModal.current ? `${r.label} (current)` : `Set as ${r.label}`}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setRoleModal(null)}
-              className="mt-4 w-full px-4 py-2 text-sm text-gray-500 hover:text-gray-700"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
       {deleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 w-80">
@@ -606,18 +591,6 @@ const UsersPage: React.FC = () => {
                               Details
                             </button>
                             <button
-                              onClick={() => setRoleModal({ userId: user.user_id, current: user.role })}
-                              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                            >
-                              Role
-                            </button>
-                            <button
-                              onClick={() => navigate(`/logs?user=${user.username}`)}
-                              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                            >
-                              Logs
-                            </button>
-                            <button
                               onClick={() => setDeleteModal({ userId: user.user_id, username: user.username })}
                               className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
                             >
@@ -772,14 +745,14 @@ const UsersPage: React.FC = () => {
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Per-user identity checks that feed into the Trust Scoring Engine.
               Local signals (max 50): Recent Login(+15) + Low Failed Logins(+25) + Not Locked(+10).
-              Entra signals (Entra only): Account Enabled(+30) + Role Valid(+20) + MFA Registered(+25) + Identity Risk Low(+20) + CA OK(+15).
+              Entra signals (require Entra enabled + user linked): Account Enabled(+30) + Role Valid(+20) + MFA Registered(+25) + Identity Risk Low(+20) + CA OK(+15).
               Score = min(earned, 100) — local-only users cap at 50/100.
             </p>
           </div>
 
           {/* Local auth explanation banner */}
           <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-sm text-amber-800 dark:text-amber-300">
-            <strong>Local Auth note:</strong> Account Enabled and Role Valid are <strong>Entra-only</strong> — local auth cannot verify these without Graph. Local users earn at most 50/100 (Recent Login + Low Failed Logins + Not Locked). Linking an Entra account unlocks the remaining 50 pts. A disabled Entra account triggers a hard gate regardless of score.
+            <strong>Local Auth note:</strong> Account Enabled, Role Valid, MFA, Risk, and CA are resolved live from Microsoft Graph — local auth alone cannot verify these. A user shows real pass/fail values here only when Entra is enabled (Settings → Azure AD Integration) <em>and</em> that user has a linked Entra account (Entra Users tab). Unlinked users cap at 50/100 (Recent Login + Low Failed Logins + Not Locked). A disabled Entra account triggers a hard gate regardless of score.
           </div>
 
           {/* Local users signals */}
@@ -787,6 +760,7 @@ const UsersPage: React.FC = () => {
             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
               <span className="px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">Local</span>
               Local User Identity Signals
+              {identitySignalsLoading && <span className="text-xs text-gray-400 font-normal normal-case">refreshing…</span>}
             </h3>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
@@ -798,38 +772,60 @@ const UsersPage: React.FC = () => {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Not Locked <span className="text-gray-400 normal-case font-normal">(+10)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Enabled <span className="text-gray-400 normal-case font-normal">(+30)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role Valid <span className="text-gray-400 normal-case font-normal">(+20)</span></th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MFA Registered <span className="text-gray-400 normal-case font-normal">(+25)</span></th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Identity Risk Low <span className="text-gray-400 normal-case font-normal">(+20)</span></th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">CA OK <span className="text-gray-400 normal-case font-normal">(+15)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Identity Score</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                   {localUsers.map((user) => {
-                    // Local signals only — Account Enabled and Role Valid are Entra-only.
-                    // Local max = 15 + 25 + 10 = 50 pts (capped denominator stays 100).
-                    const identityScore = 50;
+                    const data = identitySignals[user.user_id];
+                    const score = data?.identity_score;
+                    const scoreColor = score == null ? 'text-gray-400' : score >= 80 ? 'text-green-600 dark:text-green-400' : score >= 60 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400';
+                    const renderCell = (signalKey: string) => {
+                      if (identitySignalsLoading && !data) {
+                        return <span className="text-xs text-gray-400">…</span>;
+                      }
+                      const item = data?.breakdown?.find((b: any) => b.signal === signalKey);
+                      if (!item) {
+                        return <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500" title="Enable Entra in Settings → Azure AD Integration to evaluate this signal">Entra disabled</span>;
+                      }
+                      if (item.passed === null) {
+                        const linked = !!data.linked_entra_upn;
+                        const label = !linked ? 'Not linked' : data.entra_matched === false ? 'Not matched' : 'N/A';
+                        const title = !linked
+                          ? 'This local user has no linked Entra account (link one in the Entra Users tab)'
+                          : data.entra_matched === false
+                            ? 'No matching user found in the Entra directory for this UPN'
+                            : (item.note || 'Not available');
+                        return <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400" title={title}>{label}</span>;
+                      }
+                      if (item.passed) {
+                        return <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" title={item.note || ''}>Pass +{item.points}</span>;
+                      }
+                      return <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200" title={item.note || ''}>Fail +0</span>;
+                    };
                     return (
                       <tr key={user.user_id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                         <td className="px-4 py-3">
                           <div className="font-medium text-gray-900 dark:text-white">{user.username}</div>
                           <div className="text-xs text-gray-500">{user.email}</div>
+                          {data?.linked_entra_upn && (
+                            <div className="text-xs text-purple-600 dark:text-purple-400 mt-0.5">↔ {data.linked_entra_upn}</div>
+                          )}
                         </td>
+                        <td className="px-4 py-3">{renderCell('recent_login')}</td>
+                        <td className="px-4 py-3">{renderCell('low_failed_logins')}</td>
+                        <td className="px-4 py-3">{renderCell('not_locked')}</td>
+                        <td className="px-4 py-3">{renderCell('account_enabled')}</td>
+                        <td className="px-4 py-3">{renderCell('role_valid')}</td>
+                        <td className="px-4 py-3">{renderCell('mfa_registered')}</td>
+                        <td className="px-4 py-3">{renderCell('identity_risk_low')}</td>
+                        <td className="px-4 py-3">{renderCell('conditional_access_ok')}</td>
                         <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" title="Active JWT proves recent authentication">Pass +15</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200" title="No failed-login tracking in local DB — assumed clean">Clean +25</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200" title="No account-lock field in local DB — assumed unlocked">Pass +10</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400" title="Entra only — requires Microsoft Graph">Entra only</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400" title="Entra only — requires Microsoft Graph">Entra only</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="font-semibold text-base text-amber-600 dark:text-amber-400">{identityScore}</span>
+                          <span className={`font-semibold text-base ${scoreColor}`}>{score ?? '—'}</span>
                           <span className="text-xs text-gray-400 ml-1">/ 100</span>
                         </td>
                         <td className="px-4 py-3">
@@ -839,14 +835,14 @@ const UsersPage: React.FC = () => {
                     );
                   })}
                   {localUsers.length === 0 && !loading && (
-                    <tr><td colSpan={8} className="px-4 py-6 text-center text-gray-400">No local users found.</td></tr>
+                    <tr><td colSpan={11} className="px-4 py-6 text-center text-gray-400">No local users found.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
           </div>
 
-          {/* Entra (Microsoft Graph) identity signals — gated by the single Settings toggle */}
+          {/* Entra (Microsoft Graph) identity signals — signal reference / definitions */}
           <div className="mb-6">
             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
               <span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">Entra</span>
@@ -857,7 +853,7 @@ const UsersPage: React.FC = () => {
             </h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
               {entraEnabled
-                ? 'These signals are evaluated live per user at scoring time and contribute to the Identity Score. Per-evaluation results appear in the client app Device Check breakdown.'
+                ? 'These signals are evaluated live per user at scoring time and contribute to the Identity Score. Real per-user pass/fail values for linked Entra accounts are shown in the Local User Identity Signals table above.'
                 : 'Enable Entra in Settings → Azure AD Integration to activate these signals. While off they are N/A and never affect the score.'}
             </p>
             <div className="overflow-x-auto">
