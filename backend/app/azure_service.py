@@ -389,7 +389,13 @@ class AzureGraphService:
             if hasattr(e, 'response') and e.response is not None:
                 if e.response.status_code == 403:
                     logger.warning("Missing IdentityRiskyUser.Read.All permission")
-                    return []
+                    # Must raise, not return [] — the caller (azure_signal_service.py)
+                    # reads an empty list as "confirmed zero risky users" and scores
+                    # identity/sign-in risk as a genuine Pass. Silently returning []
+                    # on a permission error would produce that same false Pass for
+                    # every user, every time, with no way to tell it apart from a
+                    # real "nobody is flagged" result.
+                    raise Exception("missing_permission: IdentityRiskyUser.Read.All")
             raise Exception(f"Failed to fetch risky users: {str(e)}")
     
     def get_conditional_access_policies(self) -> List[Dict]:

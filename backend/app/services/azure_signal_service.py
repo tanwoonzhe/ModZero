@@ -46,9 +46,17 @@ def _latest_signin(upn: str) -> Optional[dict]:
     """Return this user's most recent sign-in record, best-effort with caching.
 
     Cache is checked first; on a miss, Graph is fetched synchronously with a
-    15s timeout. The client-app device-check HTTP timeout is 45s so waiting up
-    to 15s here is safe. Once fetched the record is cached for 15 min so every
+    20s timeout. The client-app device-check HTTP timeout is 45s so waiting up
+    to 20s here is safe. Once fetched the record is cached for 15 min so every
     subsequent device check within that window is instant.
+
+    Confirmed on at least one real tenant: this endpoint can exceed even 15s,
+    despite Microsoft's own docs not calling out unusual latency for it — so
+    even 20s is not a guarantee, just a better empirical fit than the 5s this
+    was previously (and incorrectly) set to. On a tenant that's consistently
+    slower than this, Conditional Access OK / Trusted Location will keep
+    showing "Not Configured" — a real Graph-side latency characteristic, not
+    a bug in this function.
     """
     key = upn.lower()
     now = time.time()
@@ -56,7 +64,7 @@ def _latest_signin(upn: str) -> Optional[dict]:
     if hit is not None and (now - hit[0]) < _SIGNIN_TTL:
         return hit[1]
     try:
-        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=15)
+        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=20)
     except Exception as exc:  # noqa: BLE001
         log.warning("Sign-in fetch failed for %s: %s", upn, exc)
         logs = []
@@ -134,12 +142,24 @@ _BULK_TTL = 300  # seconds (5 min)
 _bulk_cache: dict = {}  # key -> (fetched_at, value)
 
 
-def _cached_bulk(key: str, fetch):
+_UNSET = object()
+
+
+def _cached_bulk(key: str, fetch, error_default=_UNSET):
     """Return a cached bulk Graph result, refreshing it past the TTL.
 
     On a fetch error the stale cached value (if any) is reused rather than
     dropped, so a transient Graph hiccup doesn't blank out matched signals.
+
+    error_default: value returned instead of a stale value when there's no
+    cache yet and the fetch failed. Defaults to [] so existing `for x in
+    _cached_bulk(...)` call sites keep working unchanged. Pass None
+    explicitly when the caller needs to tell "fetch failed" apart from "Graph
+    returned a genuinely empty list" — e.g. risky_users: a 403 (missing
+    permission) must not be read the same as "confirmed zero risky users",
+    or every user silently scores a false Pass on identity/sign-in risk.
     """
+    default = [] if error_default is _UNSET else error_default
     now = time.time()
     hit = _bulk_cache.get(key)
     if hit is not None and (now - hit[0]) < _BULK_TTL:
@@ -148,7 +168,7 @@ def _cached_bulk(key: str, fetch):
         value = fetch()
     except Exception as exc:  # noqa: BLE001
         log.warning("Bulk Graph fetch '%s' failed: %s", key, exc)
-        return hit[1] if hit is not None else []
+        return hit[1] if hit is not None else default
     _bulk_cache[key] = (now, value)
     return value
 
@@ -279,20 +299,30 @@ def collect_azure_signals(
         except Exception as exc:  # noqa: BLE001
             log.warning("MFA lookup failed: %s", exc)
 
-        # Identity Protection risk
+        # Identity Protection risk. error_default=None (not []) is deliberate:
+        # a 403 (missing IdentityRiskyUser.Read.All) must not be read the
+        # same as "Graph confirmed zero risky users" — that previously
+        # produced a false Pass on identity/sign-in risk for every user,
+        # every time, whenever the app registration lacked this permission.
+        match = None
+        risky_users_available = False
         try:
-            risky = _cached_bulk("risky_users", lambda: azure_service.get_risky_users())
-            upn = (azure_user.get("userPrincipalName") or "").lower()
-            match = next(
-                (r for r in risky if (r.get("userPrincipalName") or "").lower() == upn),
-                None,
-            )
-            if match is None:
-                # Risk endpoint returned a list and this user is not flagged → low risk.
-                sig.identity_risk_low = True
+            risky = _cached_bulk("risky_users", lambda: azure_service.get_risky_users(), error_default=None)
+            if risky is not None:
+                risky_users_available = True
+                upn = (azure_user.get("userPrincipalName") or "").lower()
+                match = next(
+                    (r for r in risky if (r.get("userPrincipalName") or "").lower() == upn),
+                    None,
+                )
+                if match is None:
+                    # Risk endpoint returned a list and this user is not flagged → low risk.
+                    sig.identity_risk_low = True
+                else:
+                    level = (match.get("riskLevel") or "").lower()
+                    sig.identity_risk_low = level in ("none", "low", "")
             else:
-                level = (match.get("riskLevel") or "").lower()
-                sig.identity_risk_low = level in ("none", "low", "")
+                sig.na_reasons["identity_risk_low"] = "not_configured"
         except Exception as exc:  # noqa: BLE001
             log.warning("Risky-user lookup failed: %s", exc)
 
@@ -304,7 +334,9 @@ def collect_azure_signals(
         # diverge when a specific session was flagged but the user's aggregate risk
         # wasn't raised — an edge case not worth a 15s+ Graph call.
         try:
-            if match is None:
+            if not risky_users_available:
+                sig.na_reasons["signin_risk_low"] = "not_configured"
+            elif match is None:
                 sig.signin_risk_low = True   # not in risky users → low risk
             else:
                 level = (match.get("riskLevel") or "").lower()

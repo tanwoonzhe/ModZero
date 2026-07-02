@@ -95,7 +95,7 @@ if ($null -eq $o.antivirus) {
 # be on (mirrors Windows Security's "Virus & threat protection settings"
 # page). Only Defender-specific — N/A on third-party AV or if any one of the
 # four properties can't be read (never guesses; unreadable = N/A, not Fail).
-# Dev Drive protection is a newer Defender preference (PerformanceModeStatusForDevDrive)
+# Dev Drive protection is a newer Defender preference (PerformanceModeStatus)
 # not present on all Windows builds — that sub-check safely no-ops via try/catch.
 try {
   $rtp = $mpStatus.RealTimeProtectionEnabled
@@ -103,9 +103,14 @@ try {
   if ($null -ne $mpPref.MAPSReporting) { $cloud = [bool]($mpPref.MAPSReporting -ne 0) }
   $sample = $null
   if ($null -ne $mpPref.SubmitSamplesConsent) { $sample = [bool]($mpPref.SubmitSamplesConsent -eq 1 -or $mpPref.SubmitSamplesConsent -eq 3) }
+  # Confirmed via Get-MpPreference | Get-Member on real hardware: the
+  # property is PerformanceModeStatus (byte), not PerformanceModeStatusForDevDrive
+  # as originally guessed — that name doesn't exist on any tested build and
+  # silently read as $null forever. 0 = performance mode off (full Dev Drive
+  # scanning/protection active), 1 = performance mode on (scanning reduced).
   $devDrive = $null
   try {
-    if ($null -ne $mpPref.PerformanceModeStatusForDevDrive) { $devDrive = [bool]($mpPref.PerformanceModeStatusForDevDrive -eq 0) }
+    if ($null -ne $mpPref.PerformanceModeStatus) { $devDrive = [bool]($mpPref.PerformanceModeStatus -eq 0) }
   } catch {}
   if (($null -ne $rtp) -and ($null -ne $cloud) -and ($null -ne $sample) -and ($null -ne $devDrive)) {
     $o.avAdvanced = [bool]($rtp -and $cloud -and $sample -and $devDrive)
