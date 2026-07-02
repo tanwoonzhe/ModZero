@@ -1,7 +1,27 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { FaArrowLeft, FaUser, FaDesktop, FaHistory, FaCheck, FaTimes, FaSpinner, FaExclamationTriangle } from "react-icons/fa";
+import toast from "react-hot-toast";
 import api from "../api";
+
+interface TrustBreakdownItem {
+  signal: string;
+  passed: boolean | null;
+  points: number;
+  max: number;
+  module: string;
+  source?: string;
+  note?: string;
+}
+
+interface LatestTrustScore {
+  posture_score: number;
+  context_score: number;
+  identity_score: number;
+  total_score: number;
+  breakdown: TrustBreakdownItem[] | null;
+  calculated_at: string | null;
+}
 
 interface UserDetails {
   user: {
@@ -21,6 +41,7 @@ interface UserDetails {
     os_version: string | null;
     fingerprint: string | null;
     registered_at: string | null;
+    latest_trust_score: LatestTrustScore | null;
   }[];
   recent_attempts: {
     attempt_id: string;
@@ -38,7 +59,27 @@ interface UserDetails {
     allowed_attempts: number;
     denied_attempts: number;
   };
+  current_weights: {
+    device: number;
+    context: number;
+    identity: number;
+  };
 }
+
+const MODULE_LABELS: Record<string, string> = {
+  device_posture: "Device",
+  context: "Context",
+  identity: "Identity",
+};
+
+const getBreakdownModule = (item: TrustBreakdownItem): string =>
+  item.module === "context_analysis" ? "context" : item.module === "identity" ? "identity" : "device_posture";
+
+const getBreakdownKey = (item: TrustBreakdownItem): string =>
+  (item as any).signal ?? (item as any).factor ?? "unknown";
+
+const formatLabel = (key: string): string =>
+  key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 const UserDetailPage: React.FC = () => {
   const { userId } = useParams<{ userId: string }>();
@@ -46,12 +87,27 @@ const UserDetailPage: React.FC = () => {
   const [details, setDetails] = useState<UserDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [roleUpdating, setRoleUpdating] = useState(false);
 
   useEffect(() => {
     if (userId) {
       fetchUserDetails();
     }
   }, [userId]);
+
+  const updateRole = async (newRole: string) => {
+    if (!userId || !details) return;
+    setRoleUpdating(true);
+    try {
+      await api.patch(`/users/${userId}`, { role: newRole });
+      toast.success(`Role updated to ${newRole}`);
+      await fetchUserDetails();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || "Failed to update role");
+    } finally {
+      setRoleUpdating(false);
+    }
+  };
 
   const fetchUserDetails = async () => {
     setLoading(true);
@@ -96,7 +152,7 @@ const UserDetailPage: React.FC = () => {
     return null;
   }
 
-  const { user, devices, recent_attempts, stats } = details;
+  const { user, devices, recent_attempts, stats, current_weights } = details;
 
   return (
     <div className="space-y-6">
@@ -171,8 +227,24 @@ const UserDetailPage: React.FC = () => {
               <dd className="text-sm text-gray-900 dark:text-white">{user.email}</dd>
             </div>
             <div>
-              <dt className="text-sm text-gray-500 dark:text-gray-400">Role</dt>
-              <dd className="text-sm text-gray-900 dark:text-white capitalize">{user.role}</dd>
+              <dt className="text-sm text-gray-500 dark:text-gray-400 mb-1">Role</dt>
+              <dd className="flex items-center gap-2">
+                {[{ value: "admin", label: "Admin" }, { value: "employee", label: "Employee" }].map((r) => (
+                  <button
+                    key={r.value}
+                    disabled={roleUpdating || r.value === user.role}
+                    onClick={() => updateRole(r.value)}
+                    className={`px-3 py-1 text-xs font-semibold rounded-full border transition-colors disabled:cursor-default ${
+                      r.value === user.role
+                        ? 'bg-indigo-600 border-indigo-600 text-white'
+                        : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 disabled:opacity-50'
+                    }`}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+                {roleUpdating && <FaSpinner className="animate-spin text-gray-400" size={12} />}
+              </dd>
             </div>
             <div>
               <dt className="text-sm text-gray-500 dark:text-gray-400">Auth Provider</dt>
@@ -230,47 +302,109 @@ const UserDetailPage: React.FC = () => {
             Associated Devices ({devices.length})
           </h2>
         </div>
-        <div className="p-4">
-          {devices.length === 0 ? (
-            <p className="text-gray-500 dark:text-gray-400 text-center py-4">No devices registered</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                <thead>
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Device Name</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">OS Version</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fingerprint</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Registered</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                  {devices.map((device) => (
-                    <tr key={device.device_id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <FaDesktop className="text-gray-400" />
-                          <span className="text-sm font-medium text-gray-900 dark:text-white">
-                            {device.device_name}
-                          </span>
+        {devices.length === 0 ? (
+          <p className="text-gray-500 dark:text-gray-400 text-center py-4">No devices registered</p>
+        ) : (
+          <div className="divide-y divide-gray-200 dark:divide-gray-700">
+            {devices.map((device) => {
+              const trust = device.latest_trust_score;
+              const scoreColor = (s: number) => s >= 80 ? 'text-green-600 dark:text-green-400' : s >= 60 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400';
+              const deviceContrib = trust ? Math.round(trust.posture_score * current_weights.device * 10) / 10 : 0;
+              const contextContrib = trust ? Math.round(trust.context_score * current_weights.context * 10) / 10 : 0;
+              const identityContrib = trust ? Math.round(trust.identity_score * current_weights.identity * 10) / 10 : 0;
+              return (
+                <div key={device.device_id} className="p-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                    <div className="flex items-center gap-2">
+                      <FaDesktop className="text-gray-400" />
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">{device.device_name}</span>
+                      <span className="text-xs text-gray-400">{device.os_version || 'OS unknown'}</span>
+                      <span className="text-xs text-gray-400 font-mono">{device.fingerprint ? device.fingerprint.substring(0, 12) + '…' : ''}</span>
+                    </div>
+                    <span className="text-xs text-gray-400">
+                      Registered {device.registered_at ? new Date(device.registered_at).toLocaleDateString() : '-'}
+                    </span>
+                  </div>
+
+                  {!trust ? (
+                    <p className="text-sm text-gray-400 italic">No device check run yet for this device.</p>
+                  ) : (
+                    <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          Last device check: {trust.calculated_at ? new Date(trust.calculated_at).toLocaleString() : '-'}
+                        </span>
+                        <span className={`text-lg font-bold ${scoreColor(trust.total_score)}`}>
+                          Total Trust Score: {trust.total_score.toFixed(1)} / 100
+                        </span>
+                      </div>
+
+                      {/* 3-module weighted formula */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                        {[
+                          { label: 'Device Posture', score: trust.posture_score, weight: current_weights.device, contrib: deviceContrib },
+                          { label: 'Context', score: trust.context_score, weight: current_weights.context, contrib: contextContrib },
+                          { label: 'Identity', score: trust.identity_score, weight: current_weights.identity, contrib: identityContrib },
+                        ].map((m) => (
+                          <div key={m.label} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+                            <div className="text-xs text-gray-500 dark:text-gray-400">{m.label}</div>
+                            <div className={`text-xl font-bold ${scoreColor(m.score)}`}>{m.score.toFixed(1)}</div>
+                            <div className="text-xs text-gray-400 mt-1">
+                              × {Math.round(m.weight * 100)}% weight = <span className="font-medium text-gray-600 dark:text-gray-300">{m.contrib.toFixed(1)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs font-mono text-gray-500 dark:text-gray-400 mb-4">
+                        {deviceContrib.toFixed(1)} + {contextContrib.toFixed(1)} + {identityContrib.toFixed(1)} = {trust.total_score.toFixed(1)}
+                        <span className="text-gray-400"> (weights shown are the current policy — may differ from those used at check time if since changed)</span>
+                      </p>
+
+                      {/* Per-check breakdown */}
+                      {trust.breakdown && trust.breakdown.length > 0 && (
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full text-xs">
+                            <thead>
+                              <tr className="text-left text-gray-400 uppercase">
+                                <th className="px-3 py-2">Module</th>
+                                <th className="px-3 py-2">Check</th>
+                                <th className="px-3 py-2">Result</th>
+                                <th className="px-3 py-2">Points</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                              {trust.breakdown.map((item, idx) => {
+                                const mod = getBreakdownModule(item);
+                                const key = getBreakdownKey(item);
+                                const isNA = item.passed === null;
+                                return (
+                                  <tr key={`${key}-${idx}`}>
+                                    <td className="px-3 py-2 text-gray-400">{MODULE_LABELS[mod]}</td>
+                                    <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{formatLabel(key)}</td>
+                                    <td className="px-3 py-2">
+                                      <span className={`inline-flex px-1.5 py-0.5 rounded-full font-semibold ${
+                                        isNA ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                                          : item.passed ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                                          : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
+                                      }`}>
+                                        {isNA ? 'N/A' : item.passed ? 'Pass' : 'Fail'}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 font-mono text-gray-500">{isNA ? '—' : `+${item.points} / ${item.max}`}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                        {device.os_version || '-'}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 font-mono text-xs">
-                        {device.fingerprint ? device.fingerprint.substring(0, 16) + '...' : '-'}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                        {device.registered_at ? new Date(device.registered_at).toLocaleDateString() : '-'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Recent Access Attempts */}

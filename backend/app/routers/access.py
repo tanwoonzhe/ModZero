@@ -607,7 +607,7 @@ def request_access(
 
     # ── Allow path — write rich AccessRequestLog row directly ────────────────
     decision = "allow"
-    reason = "all_checks_passed"
+    reason = f"trust_score_meets_minimum ({score.total_score} >= {resource.minimum_trust_score})"
     log = AccessRequestLog(
         user_id=current_user.user_id,
         device_id=score.device_id,
@@ -697,7 +697,7 @@ def request_access(
 
     return schemas.AccessDecisionOut(
         decision=decision,
-        reason="All checks passed",
+        reason=f"Trust score {score.total_score} meets required {resource.minimum_trust_score}",
         trust_score=score.total_score,
         required_score=resource.minimum_trust_score,
         resource=resource_out,
