@@ -74,6 +74,20 @@ def _recent_signins(upn: str) -> list[dict]:
     except Exception as exc:  # noqa: BLE001
         log.warning("Sign-in fetch failed for %s: %s", upn, exc)
         logs = []
+    # Deliberately logged at WARNING (not the module's usual INFO/success
+    # path) so this shows up even when the deployment's root logger level
+    # swallows INFO — diagnosing "signals stuck at Not Configured" otherwise
+    # requires guessing whether the fetch returned 0 records, 1 record
+    # missing fields, or genuinely errored, none of which are distinguishable
+    # from silence alone.
+    if logs:
+        first = logs[0]
+        log.warning(
+            "Sign-in fetch for %s: %d record(s). newest: ipAddress=%r networkLocationDetails=%r location=%r",
+            upn, len(logs), first.get("ipAddress"), first.get("networkLocationDetails"), first.get("location"),
+        )
+    else:
+        log.warning("Sign-in fetch for %s: 0 records returned (no error raised)", upn)
     _signin_cache[key] = (now, logs)
     return logs
 
