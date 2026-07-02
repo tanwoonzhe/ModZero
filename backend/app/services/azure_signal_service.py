@@ -360,7 +360,21 @@ def collect_azure_signals(
                 elif ca == "failure":
                     sig.conditional_access_ok = False
                 else:
-                    sig.na_reasons["conditional_access_ok"] = "not_configured"
+                    # conditionalAccessStatus only reflects ENFORCED policies —
+                    # it stays "notApplied" when every applicable policy is in
+                    # Report-only mode, even though Graph evaluated them and
+                    # recorded a real result per-policy. That per-policy result
+                    # lives in appliedConditionalAccessPolicies[].result as
+                    # "reportOnlySuccess"/"reportOnlyFailure" — check there
+                    # before giving up and calling it Not Configured.
+                    applied = latest.get("appliedConditionalAccessPolicies") or []
+                    results = {(p.get("result") or "").lower() for p in applied if isinstance(p, dict)}
+                    if "reportonlyfailure" in results:
+                        sig.conditional_access_ok = False
+                    elif "reportonlysuccess" in results:
+                        sig.conditional_access_ok = True
+                    else:
+                        sig.na_reasons["conditional_access_ok"] = "not_configured"
 
                 loc = latest.get("networkLocationDetails")
                 if isinstance(loc, list) and loc:

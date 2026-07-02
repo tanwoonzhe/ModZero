@@ -332,7 +332,7 @@ class AzureGraphService:
         url = "https://graph.microsoft.com/beta/auditLogs/signIns"
         params = {
             '$top': top,
-            '$select': 'id,createdDateTime,userDisplayName,userPrincipalName,appDisplayName,ipAddress,clientAppUsed,conditionalAccessStatus,isInteractive,riskDetail,riskLevelAggregated,riskLevelDuringSignIn,riskState,deviceDetail,location,status,networkLocationDetails',
+            '$select': 'id,createdDateTime,userDisplayName,userPrincipalName,appDisplayName,ipAddress,clientAppUsed,conditionalAccessStatus,appliedConditionalAccessPolicies,isInteractive,riskDetail,riskLevelAggregated,riskLevelDuringSignIn,riskState,deviceDetail,location,status,networkLocationDetails',
             '$orderby': 'createdDateTime desc'
         }
         if upn:
