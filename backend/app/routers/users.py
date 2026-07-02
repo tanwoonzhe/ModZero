@@ -318,12 +318,19 @@ def unlock_user(
     db: Session = Depends(get_db),
     current_admin: models.User = Depends(get_current_admin),
 ) -> Any:
-    """Unlock a user's account and reset their failed-login counter (admin only)."""
+    """Unlock a user's account (admin only).
+
+    Only clears the block (locked_until) — failed_login_count is left as
+    the real historical record and is reset only by a successful login
+    (see routers/auth.py). This keeps "Low Failed Logins" honest: an admin
+    override lets the user try again, it doesn't erase the fact that they
+    failed 5+ times. If they fail once more post-unlock, they hit the
+    threshold again immediately.
+    """
     user = db.query(models.User).filter(models.User.user_id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.locked_until = None
-    user.failed_login_count = 0
     db.commit()
     db.refresh(user)
     return user
