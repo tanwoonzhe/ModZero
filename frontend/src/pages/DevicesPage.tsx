@@ -108,7 +108,10 @@ const DevicesPage: React.FC = () => {
       await Promise.allSettled(
         devs.map(async (d: any) => {
           try {
-            const r = await api.get(`/devices/${d.device_id}/posture`);
+            // trust-contribution returns the full persisted DeviceTrustScore:
+            // device + context + identity (incl. Entra signals) + total, not
+            // just the device module that /posture alone gave us.
+            const r = await api.get(`/devices/${d.device_id}/trust-contribution`);
             if (r.data?.posture_score != null) {
               postureMap[d.device_id] = r.data;
             }
@@ -268,12 +271,14 @@ const DevicesPage: React.FC = () => {
       )}
 
       {activeTab === "posture" ? (
-        /* Device Posture Checks Tab — real-time signals from registered devices */
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+        /* Device Posture Checks Tab — real-time device + context + identity
+           signals from registered devices, styled to match the Users page's
+           Identity Signals tab (colored module/source pills, Pass/Fail/N/A badges). */
+        <div className="space-y-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow px-6 py-4">
             <h3 className="text-base font-semibold text-gray-900 dark:text-white">Device Posture Checks</h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Per-device signals submitted by the ModZero Client App. Windows-only checks (Firewall, AV, Disk Encryption, Screen Lock) show N/A on non-Windows — they are excluded from the score denominator, not counted as failures.
+              Full per-device trust breakdown submitted by the ModZero Client App: Device Posture, Context, and Identity (including linked Entra signals) — the same three modules and weights used by the Trust Scoring Engine. Windows-only device checks (Firewall, AV, Disk Encryption, Screen Lock) show N/A on non-Windows — excluded from the score denominator, not counted as failures.
             </p>
           </div>
           {postureLoading ? (
@@ -281,15 +286,16 @@ const DevicesPage: React.FC = () => {
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
             </div>
           ) : Object.keys(postureByDevice).length === 0 ? (
-            <div className="px-6 py-10 text-center">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow px-6 py-10 text-center">
               <FaShieldAlt className="mx-auto text-gray-300 dark:text-gray-600 mb-3" size={36} />
               <p className="text-gray-500 text-sm font-medium">No posture reports found.</p>
               <p className="text-xs text-gray-400 mt-1">Install the ModZero Client App and run a Device Check to see data here.</p>
             </div>
           ) : (
-            Object.entries(postureByDevice).map(([deviceId, posture]) => {
+            Object.entries(postureByDevice).map(([deviceId, trust]) => {
               const device = localDevices.find(d => d.device_id === deviceId);
-              const FACTOR_LABELS: Record<string, string> = {
+
+              const CHECK_LABELS: Record<string, string> = {
                 firewall_enabled:        "Firewall Enabled",
                 antivirus_enabled:       "Antivirus Enabled",
                 disk_encryption_enabled: "Disk Encryption",
@@ -301,8 +307,26 @@ const DevicesPage: React.FC = () => {
                 entra_registered:        "Entra Registered",
                 intune_managed:          "Intune Managed",
                 intune_encrypted:        "Intune Encrypted",
+                known_device:               "Known Device",
+                normal_access_time:         "Normal Access Time",
+                no_repeated_failed_login:   "No Repeated Failed Login",
+                normal_ip:                  "Normal IP",
+                known_user_device_pair:     "Known User-Device Pair",
+                resource_pattern_normal:    "Normal Resource Pattern",
+                gateway_online:              "Gateway Online",
+                signin_risk_low:             "Sign-in Risk Low",
+                trusted_location:            "Trusted Location",
+                low_failed_logins:          "Low Failed Logins",
+                not_locked:                  "Not Locked",
+                entra_linked:                "Entra Linked",
+                password_changed_recently:  "Password Changed Recently",
+                account_enabled:             "Account Enabled",
+                role_valid:                  "Role Valid",
+                mfa_registered:              "MFA Registered",
+                identity_risk_low:           "Identity Risk Low",
+                conditional_access_ok:       "Conditional Access OK",
               };
-              const FACTOR_DESCRIPTIONS: Record<string, string> = {
+              const CHECK_DESCRIPTIONS: Record<string, string> = {
                 firewall_enabled:        "Windows Firewall is enabled on at least one network profile",
                 antivirus_enabled:       "Windows Defender or registered antivirus is active and up to date",
                 disk_encryption_enabled: "BitLocker system drive is fully encrypted with protection on",
@@ -314,84 +338,151 @@ const DevicesPage: React.FC = () => {
                 entra_registered:        "Device is registered in Entra ID directory",
                 intune_managed:          "Device is enrolled and managed by Intune MDM",
                 intune_encrypted:        "Intune reports the device disk as encrypted",
+                known_device:               "This device has been seen before and is registered with ModZero",
+                normal_access_time:         "Request occurred within the admin-configured allowed hours window",
+                no_repeated_failed_login:   "Login attempts are within the configured failure threshold",
+                normal_ip:                  "Request did not originate from a flagged/suspicious IP address",
+                known_user_device_pair:     "This user has used this device before",
+                resource_pattern_normal:    "Requested resource matches this user's typical access pattern",
+                gateway_online:              "The connector/gateway serving this request is reachable",
+                signin_risk_low:             "Entra ID Protection reports low risk for this sign-in",
+                trusted_location:            "Sign-in originated from an Entra-recognized trusted network location",
+                low_failed_logins:          "Fewer than the configured failed-login limit in the current window",
+                not_locked:                  "Account is not currently locked out",
+                entra_linked:                "Local account is linked to an Entra identity",
+                password_changed_recently:  "Password was changed within the max-age policy window",
+                account_enabled:             "Entra account is enabled (not disabled by an admin)",
+                role_valid:                  "User belongs to the Entra group/role required by policy",
+                mfa_registered:              "User has at least one MFA method registered in Entra",
+                identity_risk_low:           "Entra ID Protection reports low identity risk for this user",
+                conditional_access_ok:       "User satisfies all applicable Entra Conditional Access policies",
               };
-              const FACTOR_SOURCE: Record<string, string> = {
-                firewall_enabled:        "Client App (Windows)",
-                antivirus_enabled:       "Client App (Windows)",
-                disk_encryption_enabled: "Client App (Windows)",
-                screen_lock_enabled:     "Client App (Windows)",
-                os_supported:            "Client App",
-                client_healthy:          "Client App",
-                recent_check:            "Client App",
-                intune_compliant:        "Microsoft Graph / Intune",
-                entra_registered:        "Microsoft Graph / Entra",
-                intune_managed:          "Microsoft Graph / Intune",
-                intune_encrypted:        "Microsoft Graph / Intune",
+              const MODULE_META: Record<string, { label: string; pill: string }> = {
+                device:   { label: "Device",   pill: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300" },
+                context:  { label: "Context",  pill: "bg-sky-100 text-sky-700 dark:bg-sky-900 dark:text-sky-300" },
+                identity: { label: "Identity", pill: "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300" },
               };
+              const getModule = (item: any): "device" | "context" | "identity" =>
+                item.module === "context_analysis" ? "context" : item.module === "identity" ? "identity" : "device";
+              const getKey = (item: any): string => item.signal ?? item.factor ?? "unknown";
+              const formatKey = (key: string) => key.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+
+              const scoreColor = (s: number | null | undefined) =>
+                s == null ? "text-gray-400" : s >= 80 ? "text-green-600 dark:text-green-400" : s >= 60 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400";
+
+              const breakdown: any[] = trust.breakdown || [];
+
               return (
-                <div key={deviceId}>
-                  <div className="px-6 py-3 bg-gray-50 dark:bg-gray-900/40 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                <div key={deviceId} className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+                  <div className="px-6 py-3 bg-gray-50 dark:bg-gray-900/40 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center gap-2">
                       <FaDesktop className="text-indigo-500" size={13} />
                       <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
                         {device?.device_name ?? deviceId}
                       </span>
                       <span className="text-xs text-gray-500 dark:text-gray-400">
-                        · Last checked: {posture.reported_at ? new Date(posture.reported_at).toLocaleString() : "—"}
+                        · Last checked: {trust.calculated_at ? new Date(trust.calculated_at).toLocaleString() : "—"}
                       </span>
                     </div>
                     <span className={`text-sm font-bold px-3 py-1 rounded-full ${
-                      posture.posture_score >= 80 ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                      : posture.posture_score >= 60 ? "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
+                      trust.total_score >= 80 ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                      : trust.total_score >= 60 ? "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
                       : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
                     }`}>
-                      Posture Score: {Math.round(posture.posture_score)} / 100
+                      Total Trust Score: {Math.round(trust.total_score)} / 100 (threshold {trust.threshold ?? "—"})
                     </span>
                   </div>
+
+                  {(trust.hard_denied_client || trust.hard_denied_resources) && (
+                    <div className="px-6 py-2 space-y-1 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-700">
+                      {trust.hard_denied_client && (
+                        <p className="text-xs text-red-700 dark:text-red-300">
+                          <strong>Client login blocked:</strong> {trust.hard_deny_client_reason || "a deny_immediately_client signal failed on this check"}. Clears automatically on the next passing check — does not change this user's Client/Web-Only access setting.
+                        </p>
+                      )}
+                      {trust.hard_denied_resources && (
+                        <p className="text-xs text-red-700 dark:text-red-300">
+                          <strong>Resource access blocked:</strong> {trust.hard_deny_reason || "a deny_immediately_resources signal failed on this check"}. Clears automatically on the next passing check.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 3-module weighted formula, same layout as the user detail page */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4 bg-gray-50 dark:bg-gray-900/40 border-b border-gray-100 dark:border-gray-700">
+                    {[
+                      { key: "device",   label: "Device Posture", score: trust.posture_score,  weight: trust.posture_weight,  contrib: trust.trust_contribution },
+                      { key: "context",  label: "Context",        score: trust.context_score,   weight: trust.context_weight,  contrib: trust.context_contribution },
+                      { key: "identity", label: "Identity",       score: trust.identity_score,  weight: trust.identity_weight, contrib: trust.identity_contribution },
+                    ].map((m) => (
+                      <div key={m.key} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+                        <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${MODULE_META[m.key].pill}`}>{m.label}</span>
+                        </div>
+                        <div className={`text-xl font-bold mt-1 ${scoreColor(m.score)}`}>{m.score != null ? m.score.toFixed(1) : "—"}</div>
+                        <div className="text-xs text-gray-400 mt-1">
+                          × {m.weight != null ? Math.round(m.weight * 100) : "—"}% weight = <span className="font-medium text-gray-600 dark:text-gray-300">{m.contrib != null ? m.contrib.toFixed(1) : "—"}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                       <thead className="bg-gray-50 dark:bg-gray-800">
                         <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Module</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Check</th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Result</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Points</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Note</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                        {(posture.breakdown || []).map((item: any) => {
-                          const label = FACTOR_LABELS[item.factor] ?? item.factor?.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
-                          const description = FACTOR_DESCRIPTIONS[item.factor];
-                          const source = FACTOR_SOURCE[item.factor] ?? "Client App";
+                        {breakdown.length === 0 && (
+                          <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-400 text-sm">No breakdown available for this check.</td></tr>
+                        )}
+                        {breakdown.map((item: any, idx: number) => {
+                          const mod = getModule(item);
+                          const key = getKey(item);
+                          const label = CHECK_LABELS[key] ?? formatKey(key);
+                          const description = CHECK_DESCRIPTIONS[key];
+                          const isEntra = item.source === "entra";
                           const isNA = item.passed == null;
-                          const resultLabel = isNA ? "N/A" : item.passed ? "Pass" : "Fail";
+                          const resultLabel = isNA ? "N/A" : item.passed ? `Pass +${item.points ?? 0}` : "Fail +0";
                           const resultClass = isNA
                             ? "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400"
                             : item.passed
                               ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
                               : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200";
                           const noteText = isNA
-                            ? (item.source === "entra"
-                                ? "Device not matched in Entra/Intune"
+                            ? (isEntra
+                                ? "N/A — requires Entra (not linked, not matched, or not configured)"
                                 : item.note === "not configured"
                                   ? "Not configured (requires Intune)"
-                                  : "Not collected on this platform")
+                                  : item.note || "Not collected on this platform")
                             : (item.note ?? "");
                           return (
-                            <tr key={item.factor} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                            <tr key={`${key}-${idx}`} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                               <td className="px-4 py-3">
-                                <div className="text-sm font-medium text-gray-900 dark:text-white">{label}</div>
+                                <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded ${MODULE_META[mod].pill}`}>{MODULE_META[mod].label}</span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-sm font-medium text-gray-900 dark:text-white">{label}</span>
+                                  {isEntra && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">Entra</span>
+                                  )}
+                                </div>
                                 {description && <div className="text-xs text-gray-400 mt-0.5">{description}</div>}
                               </td>
-                              <td className="px-4 py-3 text-xs text-gray-500">{source}</td>
                               <td className="px-4 py-3">
                                 <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${resultClass}`}>
                                   {resultLabel}
                                 </span>
                               </td>
                               <td className="px-4 py-3 text-xs font-mono text-gray-600 dark:text-gray-300">
-                                {isNA ? "—" : `+${item.points ?? 0} / ${item.max ?? "—"}`}
+                                {isNA ? "—" : `${item.points ?? 0} / ${item.max ?? "—"}`}
                               </td>
                               <td className="px-4 py-3 text-xs text-gray-400 italic">{noteText}</td>
                             </tr>
@@ -448,7 +539,7 @@ const DevicesPage: React.FC = () => {
                             )}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-500">
-                            {posture?.reported_at ? new Date(posture.reported_at).toLocaleString() : "—"}
+                            {posture?.calculated_at ? new Date(posture.calculated_at).toLocaleString() : "—"}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-500">
                             {device.registered_at ? new Date(device.registered_at).toLocaleString() : "—"}

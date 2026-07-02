@@ -647,9 +647,9 @@ const ZeroTrustPoliciesPage: React.FC = () => {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Min Trust Score</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Intune Required</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Entra Required</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Affects Access</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
@@ -657,7 +657,7 @@ const ZeroTrustPoliciesPage: React.FC = () => {
                     <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                       <td className="px-4 py-3">
                         <div className="text-sm font-medium text-gray-900 dark:text-white">{r.name}</div>
-                        <div className="text-xs text-gray-500">{r.target_host}:{r.target_port}</div>
+                        <div className="text-xs text-gray-500">{r.internal_address || r.public_name || '—'}</div>
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
@@ -683,6 +683,15 @@ const ZeroTrustPoliciesPage: React.FC = () => {
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          r.require_entra_linked
+                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300'
+                            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                        }`}>
+                          {r.require_entra_linked ? 'Yes' : 'No'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                           r.enabled
                             ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
                             : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
@@ -690,12 +699,7 @@ const ZeroTrustPoliciesPage: React.FC = () => {
                           {r.enabled ? 'Active' : 'Disabled'}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-xs text-gray-500">Local / Connector</td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">
-                          Yes
-                        </span>
-                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{r.connector_resource_id ? 'Connector' : 'Local'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -704,8 +708,8 @@ const ZeroTrustPoliciesPage: React.FC = () => {
           )}
           <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
             <p className="text-xs text-gray-400">
-              Access is denied if the device trust score is below the resource's minimum, or if Intune compliance is required but not met.
-              These checks run on every proxied request via the ModZero connector.
+              Access is denied if the device trust score is below the resource's minimum, if Intune compliance is required but not met, if an Entra-linked identity is required but the user has none linked, or if the resource itself is disabled.
+              These checks run on every access request (see <code>POST /api/access/request</code>) — edit them from the Connectors page's Resources tab.
             </p>
           </div>
         </div>
@@ -903,7 +907,7 @@ const ContextRulesTab: React.FC = () => {
         )}
         {row(
           'Require Known Device',
-          'If enabled, access from a device not previously registered penalizes the "known_device" check.',
+          'If enabled (default), an unrecognised device fails the "known_device" check and loses its points. If disabled, "known_device" is skipped entirely (shown N/A) and never penalizes the score.',
           <button
             onClick={() => setRequireKnownDevice(!requireKnownDevice)}
             className={`w-10 h-5 rounded-full transition-colors ${requireKnownDevice ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
@@ -923,7 +927,7 @@ const ContextRulesTab: React.FC = () => {
         )}
         {row(
           'Suspicious IP Score Penalty',
-          'Points deducted from the "normal_ip" signal when the request comes from a blocked IP.',
+          'Points the "normal_ip" signal is worth when it fails. Note: there is currently no admin-managed IP blocklist feature, so this signal always passes in practice until one is added.',
           <div className="flex items-center gap-2">
             <input type="number" min={0} max={100} value={suspiciousIpPenalty}
               onChange={e => setSuspiciousIpPenalty(Number(e.target.value))}

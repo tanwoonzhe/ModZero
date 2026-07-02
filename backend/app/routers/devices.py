@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..deps import get_db, get_current_user, get_current_admin
 from ..azure_service import azure_service
+from ..routers.trust_policy import get_or_create_policy
 from ..services.posture_scoring import score_posture, weighted_total
 from ..services.signal_rules import get_signal_rules
 
@@ -194,6 +195,8 @@ def get_device_trust_contribution(
     if current_user.role != models.RoleEnum.ADMIN and device.user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Not your device")
 
+    policy = get_or_create_policy(db)
+
     trust = (
         db.query(models.DeviceTrustScore)
         .filter(models.DeviceTrustScore.device_id == device_id)
@@ -204,7 +207,9 @@ def get_device_trust_contribution(
         return {
             "device_id": device_id,
             "posture_score": None,
-            "posture_weight": 0.40,
+            "posture_weight": policy.device_weight,
+            "context_weight": policy.context_weight,
+            "identity_weight": policy.identity_weight,
             "trust_contribution": None,
             "context_score": None,
             "identity_score": None,
@@ -212,16 +217,27 @@ def get_device_trust_contribution(
             "message": "No trust score found for this device.",
         }
 
-    posture_contribution = round(trust.posture_score * 0.40, 1) if trust.posture_score else None
+    posture_contribution = round(trust.posture_score * policy.device_weight, 1) if trust.posture_score is not None else None
+    context_contribution = round(trust.context_score * policy.context_weight, 1) if trust.context_score is not None else None
+    identity_contribution = round(getattr(trust, "identity_score", None) * policy.identity_weight, 1) if getattr(trust, "identity_score", None) is not None else None
     return {
         "device_id": str(device.device_id),
         "device_name": device.device_name,
         "posture_score": trust.posture_score,
-        "posture_weight": 0.40,
+        "posture_weight": policy.device_weight,
+        "context_weight": policy.context_weight,
+        "identity_weight": policy.identity_weight,
         "trust_contribution": posture_contribution,
+        "context_contribution": context_contribution,
+        "identity_contribution": identity_contribution,
         "context_score": trust.context_score,
         "identity_score": getattr(trust, "identity_score", None),
         "total_score": trust.total_score,
+        "threshold": policy.default_threshold,
         "calculated_at": trust.calculated_at.isoformat() if trust.calculated_at else None,
+        "hard_denied_resources": bool(getattr(trust, "hard_denied_resources", False)),
+        "hard_deny_reason": getattr(trust, "hard_deny_reason", None),
+        "hard_denied_client": bool(getattr(trust, "hard_denied_client", False)),
+        "hard_deny_client_reason": getattr(trust, "hard_deny_client_reason", None),
         "breakdown": trust.breakdown,
     }

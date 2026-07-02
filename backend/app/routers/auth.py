@@ -69,6 +69,13 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     source = request.headers.get("X-ModZero-Source", "web")
     if source == "client" and not getattr(user, "client_access_enabled", True):
         raise HTTPException(status_code=403, detail="client_access_disabled")
+    # Note: a deny_immediately_client signal is intentionally NOT enforced
+    # here. Login itself always succeeds once credentials + client_access_enabled
+    # check out; the client app runs an immediate device check right after
+    # (see main.ts's modzero:save-and-connect) and bounces back to onboarding
+    # if that check is hard-denied. Blocking here instead would deadlock: the
+    # only way to clear a hard-deny is a fresh passing device check, which
+    # requires a logged-in session to submit.
 
     user.failed_login_count = 0
     db.commit()

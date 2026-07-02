@@ -43,45 +43,57 @@ def _maybe_collect_azure(policy: TrustPolicyConfig, user: User, device: Device) 
     return collect_azure_signals(user, device, getattr(policy, "valid_role_ids", None))
 
 
-async def _enforce_hard_fails(db: Session, user: User, hard_fails: list[dict]) -> tuple[bool, Optional[str]]:
+async def _enforce_hard_fails(
+    db: Session, user: User, hard_fails: list[dict]
+) -> tuple[bool, Optional[str], bool, Optional[str]]:
     """Apply the consequence of every signal configured with a hard failure_action.
 
-    deny_immediately_client  → disables User.client_access_enabled (blocking
-                                this user's next client-app request — deps.py
-                                re-checks this on every client-sourced call,
-                                not just login) and pushes a force_logout
-                                Socket.IO event so an already-open client app
-                                logs out within seconds instead of waiting for
-                                its next request.
+    deny_immediately_client  → pushes a force_logout Socket.IO event so an
+                                already-open client app logs out within
+                                seconds, and stamps DeviceTrustScore.hard_denied_client
+                                so the client app's own post-login device check
+                                (see main.ts's modzero:save-and-connect) bounces
+                                back to onboarding instead of connecting. This
+                                is deliberately NOT the same thing as
+                                User.client_access_enabled (the admin's manual,
+                                persistent switch) — it's ephemeral, tied to the
+                                MOST RECENT check, and clears itself automatically
+                                the moment a later check passes. No admin action
+                                is needed to "undo" it, and it never touches the
+                                Client/Web-Only badge in the Users page. Login
+                                itself is never blocked server-side for this
+                                reason — see auth.py's login() for why that
+                                would deadlock.
     deny_immediately_resources → returned as (True, reason) so the caller can
                                 stamp DeviceTrustScore.hard_denied_resources;
                                 access.py's resource gate and connectors.py's
                                 introspect both refuse every request against
                                 this score until the next passing device check.
 
-    Returns (hard_denied_resources, hard_deny_reason).
+    Returns (hard_denied_resources, hard_deny_reason, hard_denied_client, hard_deny_client_reason).
     """
     client_fails = [f for f in hard_fails if f["failure_action"] == "deny_immediately_client"]
     resource_fails = [f for f in hard_fails if f["failure_action"] == "deny_immediately_resources"]
 
+    hard_denied_client = False
+    hard_deny_client_reason = None
     if client_fails:
         labels = ", ".join(f["signal"] for f in client_fails)
-        if user.client_access_enabled:
-            user.client_access_enabled = False
-            db.add(user)
-            log.warning(
-                "Disabling client_access_enabled for %s — failed hard-gate signal(s): %s",
-                user.username, [f["signal"] for f in client_fails],
-            )
+        hard_denied_client = True
+        hard_deny_client_reason = f"hard_denied_by_policy: {labels}"
+        log.warning(
+            "Blocking client-app connect for %s until next passing check — failed hard-gate signal(s): %s",
+            user.username, [f["signal"] for f in client_fails],
+        )
         try:
-            await notify_force_logout(str(user.user_id), f"hard_denied_by_policy: {labels}")
+            await notify_force_logout(str(user.user_id), hard_deny_client_reason)
         except Exception as exc:  # noqa: BLE001
             log.warning("force_logout notification failed for %s: %s", user.username, exc)
 
     if not resource_fails:
-        return False, None
+        return False, None, hard_denied_client, hard_deny_client_reason
     labels = ", ".join(f["signal"] for f in resource_fails)
-    return True, f"hard_denied_by_policy: {labels}"
+    return True, f"hard_denied_by_policy: {labels}", hard_denied_client, hard_deny_client_reason
 
 
 async def _score_and_persist(
@@ -115,10 +127,13 @@ async def _score_and_persist(
     ctx_score, ctx_breakdown, context_hard_fails = score_context_default(
         source_ip=source_ip,
         known_device=is_known_device,
-        failed_attempt_count=0,
+        failed_attempt_count=current_user.failed_login_count or 0,
         allowed_start_hour=policy.allowed_start_hour,
         allowed_end_hour=policy.allowed_end_hour,
         max_failed_attempts=policy.max_failed_attempts,
+        require_known_device=policy.require_known_device,
+        unknown_device_penalty=policy.unknown_device_penalty,
+        suspicious_ip_penalty=policy.suspicious_ip_penalty,
         include_azure=bool(azure),
         na_reasons=azure.na_reasons if azure else None,
         rules=context_rules,
@@ -153,10 +168,29 @@ async def _score_and_persist(
 
     full_breakdown = posture_breakdown + ctx_breakdown + id_breakdown
     all_hard_fails = device_hard_fails + context_hard_fails + identity_hard_fails
-    hard_denied_resources, hard_deny_reason = await _enforce_hard_fails(db, current_user, all_hard_fails)
+    hard_denied_resources, hard_deny_reason, hard_denied_client, hard_deny_client_reason = (
+        await _enforce_hard_fails(db, current_user, all_hard_fails)
+    )
+    # block_outside_hours (Trust Policies → Context Rules): unlike
+    # normal_access_time's own signal_rules failure_action, this is a
+    # separate, policy-level "deny regardless of trust score" toggle — so it
+    # hard-denies resource access rather than just costing normal_access_time's
+    # points, mirroring exactly what its own UI copy promises.
+    if policy.block_outside_hours and not hard_denied_resources:
+        outside_hours = any(
+            item.get("signal") == "normal_access_time" and item.get("passed") is False
+            for item in ctx_breakdown
+        )
+        if outside_hours:
+            hard_denied_resources = True
+            hard_deny_reason = "outside_allowed_hours (policy: block_outside_hours)"
+
     if hard_denied_resources:
         decision = "DENY"
         reason = hard_deny_reason
+    elif hard_denied_client:
+        decision = "DENY"
+        reason = hard_deny_client_reason
 
     trust = DeviceTrustScore(
         device_id=device.device_id,
@@ -168,6 +202,8 @@ async def _score_and_persist(
         breakdown=full_breakdown,
         hard_denied_resources=hard_denied_resources,
         hard_deny_reason=hard_deny_reason,
+        hard_denied_client=hard_denied_client,
+        hard_deny_client_reason=hard_deny_client_reason,
     )
     db.add(trust)
     db.commit()
@@ -189,6 +225,7 @@ async def _score_and_persist(
         "total": total, "threshold": threshold, "decision": decision, "reason": reason,
         "full_breakdown": full_breakdown, "trust": trust,
         "hard_denied_resources": hard_denied_resources, "hard_deny_reason": hard_deny_reason,
+        "hard_denied_client": hard_denied_client, "hard_deny_client_reason": hard_deny_client_reason,
     }
 
 
@@ -239,6 +276,10 @@ def _score_dict(score: DeviceTrustScore) -> dict:
         "total_score": score.total_score,
         "breakdown": score.breakdown,
         "calculated_at": score.calculated_at,
+        "hard_denied_resources": bool(getattr(score, "hard_denied_resources", False)),
+        "hard_deny_reason": getattr(score, "hard_deny_reason", None),
+        "hard_denied_client": bool(getattr(score, "hard_denied_client", False)),
+        "hard_deny_client_reason": getattr(score, "hard_deny_client_reason", None),
     }
 
 
@@ -348,6 +389,8 @@ async def submit_posture_report(
         "decision":  result["decision"],
         "reason":    result["reason"],
         "hard_denied_resources": result["hard_denied_resources"],
+        "hard_denied_client": result["hard_denied_client"],
+        "hard_deny_client_reason": result["hard_deny_client_reason"],
 
         # ── Contributions ───────────────────────────────────────────────────
         "breakdown_summary": {
@@ -510,6 +553,8 @@ async def client_posture_report(
         "decision":  decision,
         "reason":    reason,
         "hard_denied_resources": result["hard_denied_resources"],
+        "hard_denied_client": result["hard_denied_client"],
+        "hard_deny_client_reason": result["hard_deny_client_reason"],
 
         # ── Contributions ───────────────────────────────────────────────────
         "breakdown_summary": {

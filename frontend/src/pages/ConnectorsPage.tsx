@@ -191,6 +191,14 @@ const BLANK_RESOURCE = {
   required_group: "", minimum_trust_score: 0,
   require_intune_compliant: false, require_entra_linked: false, enabled: true,
   connector_resource_id: "",
+  preferred_access_mode: "auto" as "auto" | "http_proxy" | "wireguard_tunnel",
+  require_tunnel: false, allow_http_fallback: true,
+};
+
+const ACCESS_MODE_LABELS: Record<string, string> = {
+  auto: "Auto (tunnel when available, else HTTP proxy)",
+  http_proxy: "HTTP proxy only",
+  wireguard_tunnel: "WireGuard tunnel only",
 };
 
 // ─── Resource Form Modal ─────────────────────────────────────────────
@@ -228,6 +236,9 @@ const ResourceFormModal: React.FC<{
       require_entra_linked: form.require_entra_linked,
       enabled: form.enabled,
       connector_resource_id: form.connector_resource_id || null,
+      preferred_access_mode: form.preferred_access_mode,
+      require_tunnel: form.require_tunnel,
+      allow_http_fallback: form.allow_http_fallback,
     };
     try {
       if (isEdit) {
@@ -324,6 +335,39 @@ const ResourceFormModal: React.FC<{
             <p className="text-xs text-gray-400 mt-1">
               When set, access is denied if the connector is offline or degraded.
             </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Preferred Access Mode</label>
+            <select
+              value={form.preferred_access_mode}
+              onChange={(e) => set("preferred_access_mode", e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+            >
+              {Object.entries(ACCESS_MODE_LABELS).map(([v, label]) => (
+                <option key={v} value={v}>{label}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400 mt-1">
+              Controls how an allowed session reaches this resource: through the connector's HTTP proxy, a WireGuard tunnel, or whichever is ready.
+            </p>
+          </div>
+          <div className="flex items-center gap-6">
+            <label className="flex items-center gap-2 cursor-pointer select-none" title="Deny access outright if a WireGuard tunnel isn't ready and fallback isn't allowed, instead of silently falling back to HTTP proxy">
+              <input
+                type="checkbox" checked={form.require_tunnel}
+                onChange={(e) => set("require_tunnel", e.target.checked)}
+                className="w-4 h-4 text-indigo-600 rounded"
+              />
+              <span className="text-sm text-gray-700 dark:text-gray-300">Require Tunnel</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer select-none" title="If the tunnel isn't ready, allow falling back to the HTTP proxy instead of denying access">
+              <input
+                type="checkbox" checked={form.allow_http_fallback}
+                onChange={(e) => set("allow_http_fallback", e.target.checked)}
+                className="w-4 h-4 text-indigo-600 rounded"
+              />
+              <span className="text-sm text-gray-700 dark:text-gray-300">Allow HTTP Fallback</span>
+            </label>
           </div>
           <div className="flex items-center gap-6">
             <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -525,6 +569,28 @@ const ConnectorsPage: React.FC = () => {
       await fetchData();
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to delete");
+    }
+  };
+
+  const handleRevokeToken = async (id: string) => {
+    if (!confirm("Revoke this enrollment token? It can no longer be used to enroll a connector.")) return;
+    try {
+      await api.post(`/admin/connectors/tokens/${id}/revoke`);
+      toast.success("Token revoked");
+      await fetchData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to revoke token");
+    }
+  };
+
+  const handleDeleteRoute = async (id: string, name: string) => {
+    if (!confirm(`Delete route "${name}"? Any protected resource pinned to it will fall back to network-wide matching.`)) return;
+    try {
+      await api.delete(`/admin/connectors/resources/${id}`);
+      toast.success("Route deleted");
+      await fetchData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to delete route");
     }
   };
 
@@ -791,6 +857,7 @@ const ConnectorsPage: React.FC = () => {
                   <th className="px-4 py-3 text-left">Created</th>
                   <th className="px-4 py-3 text-left">Expires</th>
                   <th className="px-4 py-3 text-left">Used</th>
+                  <th className="px-4 py-3 text-left">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -802,6 +869,7 @@ const ConnectorsPage: React.FC = () => {
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                         t.status === "active" ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" :
                         t.status === "used" ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200" :
+                        t.status === "revoked" ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200" :
                         "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
                       }`}>
                         {t.status}
@@ -810,6 +878,19 @@ const ConnectorsPage: React.FC = () => {
                     <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{timeAgo(t.created_at)}</td>
                     <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{new Date(t.expires_at).toLocaleString()}</td>
                     <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{t.used_at ? timeAgo(t.used_at) : "-"}</td>
+                    <td className="px-4 py-3">
+                      {t.status === "active" ? (
+                        <button
+                          onClick={() => handleRevokeToken(t.token_id)}
+                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                          title="Revoke token"
+                        >
+                          <FaBan size={12} />
+                        </button>
+                      ) : (
+                        <span className="text-gray-300 dark:text-gray-600 text-xs">—</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -847,6 +928,7 @@ const ConnectorsPage: React.FC = () => {
                   <th className="px-4 py-3 text-left">Target</th>
                   <th className="px-4 py-3 text-left">Path Prefix</th>
                   <th className="px-4 py-3 text-left">Active</th>
+                  <th className="px-4 py-3 text-left">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -863,6 +945,15 @@ const ConnectorsPage: React.FC = () => {
                     <td className="px-4 py-3 font-mono text-xs text-gray-500 dark:text-gray-400">{r.path_prefix || "/"}</td>
                     <td className="px-4 py-3">
                       {r.is_active ? <FaCheck className="text-green-500" /> : <FaTimes className="text-red-500" />}
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => handleDeleteRoute(r.resource_id, r.name)}
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                        title="Delete route"
+                      >
+                        <FaTrash size={12} />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -963,6 +1054,20 @@ const ConnectorsPage: React.FC = () => {
                             </div>
                           ) : (
                             <span className="text-gray-400 text-xs">None</span>
+                          )}
+                          {r.preferred_access_mode && r.preferred_access_mode !== "auto" && (
+                            <div className="mt-1">
+                              <span className="inline-flex px-1.5 py-0.5 text-[10px] rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 font-medium" title={ACCESS_MODE_LABELS[r.preferred_access_mode]}>
+                                {r.preferred_access_mode === "wireguard_tunnel" ? "Tunnel only" : "HTTP only"}
+                              </span>
+                            </div>
+                          )}
+                          {r.require_tunnel && (
+                            <div className="mt-1">
+                              <span className="inline-flex px-1.5 py-0.5 text-[10px] rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-medium" title={r.allow_http_fallback ? "Falls back to HTTP proxy if tunnel unavailable" : "Denies access outright if tunnel unavailable"}>
+                                Tunnel required{!r.allow_http_fallback ? ' (no fallback)' : ''}
+                              </span>
+                            </div>
                           )}
                         </td>
                         <td className="px-5 py-4">

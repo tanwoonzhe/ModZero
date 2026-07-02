@@ -496,7 +496,7 @@ function updateTrayMenu(): void {
 ipcMain.handle("modzero:get-config", () => readConfig());
 
 ipcMain.handle("modzero:save-and-connect", async (_evt, payload: ConnectPayload) => {
-  if (!payload || !payload.url) return false;
+  if (!payload || !payload.url) return { ok: false };
   const next: SavedConfig = {
     url: payload.url,
     mode: payload.mode,
@@ -509,13 +509,34 @@ ipcMain.handle("modzero:save-and-connect", async (_evt, payload: ConnectPayload)
     enrolledAt: Date.now(),
   };
   writeConfig(next);
+
+  // Login mode only (enroll mode has no user token to check): run one device
+  // check with the fresh token before committing to "Connected". If the
+  // user's device/identity currently trips a deny_immediately_client signal,
+  // bounce back to onboarding instead of connecting. This achieves the same
+  // "blocks login" outcome as a server-side login gate, but without one —
+  // a server-side gate would deadlock, since the ONLY way to clear this is
+  // a fresh passing device check, which needs a logged-in session to submit.
+  if (next.accessToken) {
+    try {
+      const { result } = await runDeviceCheckNow();
+      const data = result.data as Record<string, unknown> | null;
+      if (result.ok && data && data.hard_denied_client) {
+        writeConfig({});
+        return { ok: false, blocked: true, reason: String(data.hard_deny_client_reason || "Blocked by policy.") };
+      }
+    } catch {
+      /* best-effort — an unrelated failure here shouldn't block connecting */
+    }
+  }
+
   session.connectedSince = next.enrolledAt!;
   session.healthy = true;
   session.lastHeartbeat = Date.now();
   showConnected();
   startHeartbeat();
   updateTrayMenu();
-  return true;
+  return { ok: true };
 });
 
 ipcMain.handle("modzero:snapshot", () => {

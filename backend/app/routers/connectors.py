@@ -541,6 +541,23 @@ def list_enroll_tokens(
     ]
 
 
+@router.post("/admin/connectors/tokens/{token_id}/revoke", status_code=204,
+             tags=["connectors-admin"])
+def revoke_enroll_token(
+    token_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """Revoke an active enrollment token before it's used or expires (e.g. it leaked)."""
+    token = db.query(EnrollToken).filter(EnrollToken.token_id == token_id).first()
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    if token.status != EnrollTokenStatusEnum.ACTIVE:
+        raise HTTPException(status_code=409, detail=f"Token is already {token.status.value if hasattr(token.status, 'value') else token.status}")
+    token.status = EnrollTokenStatusEnum.REVOKED
+    db.commit()
+
+
 # ?�?�?� Admin: connector resources ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 @router.post("/admin/connectors/resources", response_model=ResourceOut,
@@ -630,6 +647,29 @@ def list_connector_resources(
         )
         for r in deduped
     ]
+
+
+@router.delete("/admin/connectors/resources/{resource_id}", status_code=204,
+               tags=["connectors-admin"])
+async def delete_connector_resource(
+    resource_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """Delete a connector route. Any ProtectedResource pinned to it (via
+    connector_resource_id) falls back to network-wide matching automatically —
+    the FK is ON DELETE SET NULL, not a blocking constraint."""
+    resource = db.query(ConnectorResource).filter(
+        ConnectorResource.resource_id == resource_id
+    ).first()
+    if not resource:
+        raise HTTPException(status_code=404, detail="Route not found")
+    db.delete(resource)
+    db.commit()
+    try:
+        await notify_connector_change()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 @router.delete("/admin/connectors/{connector_id}", status_code=204,
