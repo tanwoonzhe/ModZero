@@ -103,14 +103,16 @@ try {
   if ($null -ne $mpPref.MAPSReporting) { $cloud = [bool]($mpPref.MAPSReporting -ne 0) }
   $sample = $null
   if ($null -ne $mpPref.SubmitSamplesConsent) { $sample = [bool]($mpPref.SubmitSamplesConsent -eq 1 -or $mpPref.SubmitSamplesConsent -eq 3) }
-  # Confirmed via Get-MpPreference | Get-Member on real hardware: the
-  # property is PerformanceModeStatus (byte), not PerformanceModeStatusForDevDrive
-  # as originally guessed — that name doesn't exist on any tested build and
-  # silently read as $null forever. 0 = performance mode off (full Dev Drive
-  # scanning/protection active), 1 = performance mode on (scanning reduced).
+  # Property confirmed via Get-MpPreference | Get-Member on real hardware:
+  # PerformanceModeStatus (byte), not PerformanceModeStatusForDevDrive as
+  # originally guessed — that name doesn't exist on any tested build.
+  # Polarity confirmed against real ground truth: a machine with "Dev Drive
+  # protection" toggled ON in Windows Security reported PerformanceModeStatus=1,
+  # not 0 as first assumed — so 1 means the protection/performance mode IS
+  # active (matches the toggle being on), not that scanning is reduced.
   $devDrive = $null
   try {
-    if ($null -ne $mpPref.PerformanceModeStatus) { $devDrive = [bool]($mpPref.PerformanceModeStatus -eq 0) }
+    if ($null -ne $mpPref.PerformanceModeStatus) { $devDrive = [bool]($mpPref.PerformanceModeStatus -eq 1) }
   } catch {}
   # Raw sub-values always recorded (even on partial/total failure) so a
   # report of "AV Advanced Protection shows Fail/N/A" is diagnosable from
