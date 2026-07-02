@@ -266,7 +266,6 @@ const SettingsPage: React.FC = () => {
             <ul className="text-sm text-blue-800 dark:text-blue-300 grid sm:grid-cols-3 gap-x-6 gap-y-1 list-disc list-inside">
               <li>Identity: MFA Registered</li>
               <li>Identity: Identity Risk Low</li>
-              <li>Identity: Conditional Access OK</li>
               <li>Device: Entra Registered</li>
               <li>Device: Intune Managed</li>
               <li>Device: Intune Encrypted</li>

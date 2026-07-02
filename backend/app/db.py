@@ -119,6 +119,11 @@ def _run_migrations() -> None:
         ALTER TABLE posture_reports
           ADD COLUMN IF NOT EXISTS client_version varchar(32)
         """,
+        # Admin-managed IP blocklist backing the "Normal IP" context signal.
+        """
+        ALTER TABLE trust_policy_config
+          ADD COLUMN IF NOT EXISTS blocked_ips json
+        """,
     ]
     with engine.connect() as conn:
         for stmt in migrations:
@@ -160,15 +165,24 @@ def _seed_signal_rules() -> None:
 
 
 def _cleanup_retired_signal_rules() -> None:
-    """Remove the recent_check device signal (deleted from the scoring engine
-    — it always reported Pass, see posture_scoring.py's history) and relabel
-    the two signals whose meaning changed, but only rows still holding their
-    original default label so an admin's own edit is never clobbered."""
+    """Remove signals deleted from the scoring engine because they always
+    reported Pass with no real data behind them, or (conditional_access_ok)
+    could never resolve on a tenant running Conditional Access in Report-only
+    mode. Also relabel two signals whose meaning changed, but only rows still
+    holding their original default label so an admin's own edit is never
+    clobbered."""
     from sqlalchemy import text
 
     with engine.connect() as conn:
         conn.execute(text(
             "DELETE FROM signal_rules WHERE module = 'device' AND signal_key = 'recent_check'"
+        ))
+        conn.execute(text(
+            "DELETE FROM signal_rules WHERE module = 'identity' AND signal_key = 'conditional_access_ok'"
+        ))
+        conn.execute(text(
+            "DELETE FROM signal_rules WHERE module = 'context' AND signal_key IN "
+            "('known_user_device_pair', 'resource_pattern_normal')"
         ))
         conn.execute(text(
             "UPDATE signal_rules SET label = 'OS Recently Patched' "
@@ -177,5 +191,9 @@ def _cleanup_retired_signal_rules() -> None:
         conn.execute(text(
             "UPDATE signal_rules SET label = 'Client Version Supported' "
             "WHERE module = 'device' AND signal_key = 'client_healthy' AND label = 'Client App Healthy'"
+        ))
+        conn.execute(text(
+            "UPDATE signal_rules SET label = 'Gateway / Connector Online' "
+            "WHERE module = 'context' AND signal_key = 'gateway_online' AND label = 'Gateway / Resource Online'"
         ))
         conn.commit()

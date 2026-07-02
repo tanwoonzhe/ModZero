@@ -745,7 +745,7 @@ const UsersPage: React.FC = () => {
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Per-user identity checks that feed into the Trust Scoring Engine.
               Local signals (max 50): Low Failed Logins(+15) + Not Locked(+10) + Entra Linked(+10) + Password Changed Recently(+15) — all backed by real per-user account data, not assumptions.
-              Entra signals (require Entra enabled + user linked): Account Enabled(+30) + Role Valid(+20) + MFA Registered(+25) + Identity Risk Low(+20) + CA OK(+15).
+              Entra signals (require Entra enabled + user linked): Account Enabled(+30) + Role Valid(+20) + MFA Registered(+25) + Identity Risk Low(+20).
               Score = min(earned, 100) — local-only users cap at 50/100.
             </p>
           </div>
@@ -781,7 +781,6 @@ const UsersPage: React.FC = () => {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role Valid <span className="text-gray-400 normal-case font-normal">(+20)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MFA Registered <span className="text-gray-400 normal-case font-normal">(+25)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Identity Risk Low <span className="text-gray-400 normal-case font-normal">(+20)</span></th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">CA OK <span className="text-gray-400 normal-case font-normal">(+15)</span></th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Identity Score</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust</th>
                   </tr>
@@ -835,7 +834,6 @@ const UsersPage: React.FC = () => {
                         <td className="px-4 py-3">{renderCell('role_valid')}</td>
                         <td className="px-4 py-3">{renderCell('mfa_registered')}</td>
                         <td className="px-4 py-3">{renderCell('identity_risk_low')}</td>
-                        <td className="px-4 py-3">{renderCell('conditional_access_ok')}</td>
                         <td className="px-4 py-3">
                           <span className={`font-semibold text-base ${scoreColor}`}>{score ?? '—'}</span>
                           <span className="text-xs text-gray-400 ml-1">/ 100</span>
@@ -847,7 +845,7 @@ const UsersPage: React.FC = () => {
                     );
                   })}
                   {localUsers.length === 0 && !loading && (
-                    <tr><td colSpan={12} className="px-4 py-6 text-center text-gray-400">No local users found.</td></tr>
+                    <tr><td colSpan={11} className="px-4 py-6 text-center text-gray-400">No local users found.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -885,7 +883,6 @@ const UsersPage: React.FC = () => {
                     { name: 'Role Valid', pts: 20, note: 'User has at least one Entra group/role membership' },
                     { name: 'MFA Registered', pts: 25, note: 'Multi-factor authentication method registered in Entra (Authenticator App, FIDO2, etc.)' },
                     { name: 'Identity Risk Low', pts: 20, note: 'Entra Identity Protection risk level is none or low for this user' },
-                    { name: 'Conditional Access OK', pts: 15, note: 'Sign-in passed all applicable Conditional Access policies' },
                   ].map((s) => (
                     <tr key={s.name} className={entraEnabled ? '' : 'opacity-60'}>
                       <td className="px-4 py-3">

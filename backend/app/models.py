@@ -1039,6 +1039,13 @@ class TrustPolicyConfig(Base):
     unknown_device_penalty:   int  = Column(Integer, nullable=False, default=20)
     suspicious_ip_penalty:    int  = Column(Integer, nullable=False, default=15)
 
+    # Admin-managed IP blocklist backing the "Normal IP" context signal.
+    # Stored as a JSON list of strings (exact IPs; CIDR ranges are not
+    # matched, only exact string equality against the request's source IP).
+    # Empty/null = no blocklist configured — normal_ip always passes, same
+    # as before this field existed.
+    blocked_ips: Optional[list] = Column(JSON, nullable=True)
+
     # Client app auto device-check interval, in hours. Pure scheduling
     # config — does NOT feed into the trust score (unlike everything else
     # in this table). 0 = disabled: the client only checks on manual click,

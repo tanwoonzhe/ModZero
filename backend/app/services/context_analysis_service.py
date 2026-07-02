@@ -1,18 +1,26 @@
-"""Context Analysis Module — 7-signal scoring.
+"""Context Analysis Module — 5-signal scoring.
 
 Which signals exist, their point values, whether they're enabled, and what
 happens when one fails are all read from the signal_rules table (admin
 editable via /api/signal-rules) — this module only supplies the fallback
 defaults below, used if a rule row is somehow missing.
 
-  Known device                    20
-  Normal access time              15
-  No repeated failed login        20
-  Normal IP / not blocked         15
-  Known user-device pair          15
-  Resource access pattern normal  10
-  Backend gateway/resource online  5
-  Total                          100
+  Known device               20
+  Normal access time         15
+  No repeated failed login   20
+  Normal IP / not blocked    15
+  Gateway / Connector online  5
+  Total                      75
+
+(known_user_device_pair and resource_pattern_normal were removed — neither
+was ever wired to real data by any caller, so they silently scored a
+hardcoded Pass on every check, no matter what. known_user_device_pair was
+also redundant with known_device in this data model, since a Device
+belongs to exactly one User permanently — there's no separate "pairing" to
+track. resource_pattern_normal would need real historical-access anomaly
+detection, which doesn't exist anywhere in this codebase and is evaluated
+at the wrong point in the flow anyway — a device check has no specific
+resource to compare a "pattern" against.)
 
 Caller supplies the signals; this service computes the score + breakdown.
 """
@@ -30,8 +38,6 @@ _SIGNALS = [
     {"signal": "normal_access_time",        "max": 15},
     {"signal": "no_repeated_failed_login",  "max": 20},
     {"signal": "normal_ip",                 "max": 15},
-    {"signal": "known_user_device_pair",    "max": 15},
-    {"signal": "resource_pattern_normal",   "max": 10},
     {"signal": "gateway_online",            "max":  5},
 ]
 
@@ -60,8 +66,6 @@ class ContextSignals:
         failed_attempt_count: int = 0,
         source_ip: Optional[str] = None,
         blocked_ips: Optional[list[str]] = None,
-        known_user_device_pair: Optional[bool] = None,
-        resource_pattern_normal: Optional[bool] = None,
         gateway_online: Optional[bool] = None,
         # Optional Entra sign-in context (None = not collected → N/A)
         signin_risk_low: Optional[bool] = None,
@@ -72,8 +76,6 @@ class ContextSignals:
         self.failed_attempt_count = failed_attempt_count
         self.source_ip = source_ip
         self.blocked_ips: list[str] = blocked_ips or []
-        self.known_user_device_pair = known_user_device_pair
-        self.resource_pattern_normal = resource_pattern_normal
         self.gateway_online = gateway_online
         self.signin_risk_low = signin_risk_low
         self.trusted_location = trusted_location
@@ -128,8 +130,6 @@ def score_context_signals(
         "normal_access_time":       normal_time,
         "no_repeated_failed_login": no_failed_login,
         "normal_ip":                normal_ip,
-        "known_user_device_pair":   signals.known_user_device_pair if signals.known_user_device_pair is not None else True,
-        "resource_pattern_normal":  signals.resource_pattern_normal if signals.resource_pattern_normal is not None else True,
         "gateway_online":           signals.gateway_online if signals.gateway_online is not None else True,
     }
 
@@ -232,6 +232,7 @@ def score_context_default(
     unknown_device_penalty: Optional[int] = None,
     suspicious_ip_penalty: Optional[int] = None,
     blocked_ips: Optional[list[str]] = None,
+    gateway_online: Optional[bool] = None,
     signin_risk_low: Optional[bool] = None,
     trusted_location: Optional[bool] = None,
     include_azure: bool = False,
@@ -250,6 +251,7 @@ def score_context_default(
         source_ip=source_ip,
         failed_attempt_count=failed_attempt_count,
         blocked_ips=blocked_ips,
+        gateway_online=gateway_online,
         signin_risk_low=signin_risk_low,
         trusted_location=trusted_location,
     )

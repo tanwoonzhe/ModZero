@@ -25,7 +25,6 @@ import toast from 'react-hot-toast';
 import {
   useZeroTrustStore,
   selectIsAdmin,
-  selectWeightConfig,
 } from '../store/zeroTrustStore';
 import api from '../api';
 
@@ -65,7 +64,12 @@ const SIGNAL_DESCRIPTIONS: Record<string, string> = {
   role_valid:             'User belongs to a qualifying Entra group or directory role — any membership by default, or a specific admin-configured set (see "Configure")',
   mfa_registered:        'Multi-factor authentication method registered in Entra (Authenticator App, FIDO2, etc.)',
   identity_risk_low:     'Entra Identity Protection risk level is none or low for this user',
-  conditional_access_ok: 'Sign-in passed all applicable Conditional Access policies in this tenant',
+  // Context — local
+  known_device:               'The reporting device already existed in the database before this check — i.e. not its first-ever check-in',
+  normal_access_time:         'Request hour falls within the Allowed Start/End Hour window below',
+  no_repeated_failed_login:   'User.failed_login_count is below Max Failed Login Attempts below (shared with the Identity module\'s Low Failed Logins, evaluated against a different threshold here)',
+  normal_ip:                  'Request source IP is not on the admin-managed blocklist — empty list (default) always passes (see "Configure")',
+  gateway_online:             'At least one Connector is currently online — a coarse "is the backend reachable" system-health check, not tied to a specific resource',
   // Context — entra
   signin_risk_low:  'User is not flagged by Entra Identity Protection as a risky sign-in',
   trusted_location: 'Sign-in originated from a Named Location configured as trusted in this tenant',
@@ -199,6 +203,110 @@ const RoleValidConfigModal: React.FC<{ onClose: () => void }> = ({ onClose }) =>
             >
               Reset to default
             </button>
+            <button
+              onClick={onClose}
+              disabled={saving}
+              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || loading}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const IPBlocklistConfigModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const [ips, setIps] = useState<string[]>([]);
+  const [newIp, setNewIp] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get('/trust-policy/active')
+      .then(r => setIps((r.data.blocked_ips || []) as string[]))
+      .catch(() => toast.error('Failed to load IP blocklist'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const addIp = () => {
+    const v = newIp.trim();
+    if (!v) return;
+    if (ips.includes(v)) { toast.error('Already in the list'); return; }
+    setIps(prev => [...prev, v]);
+    setNewIp('');
+  };
+  const removeIp = (ip: string) => setIps(prev => prev.filter(x => x !== ip));
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/trust-policy/active', { blocked_ips: ips });
+      api.post('/signal-rules/notify-check').catch(() => {});
+      toast.success(ips.length === 0 ? 'Blocklist cleared — Normal IP will always pass' : `Saved — ${ips.length} blocked IP(s)`);
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col">
+        <div className="p-5 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="font-semibold text-gray-900 dark:text-white">Configure IP Blocklist</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            The "Normal IP" signal fails when a device check's source IP exactly matches one of these entries.
+            Empty list = always passes (no blocklist configured). CIDR ranges aren't matched — exact IP strings only.
+          </p>
+        </div>
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex gap-2">
+          <input
+            type="text"
+            value={newIp}
+            onChange={e => setNewIp(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addIp(); } }}
+            placeholder="e.g., 203.0.113.42"
+            className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          <button
+            onClick={addIp}
+            className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+          >
+            Add
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
+            </div>
+          ) : ips.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-6">No blocked IPs configured.</p>
+          ) : (
+            <div className="space-y-1">
+              {ips.map(ip => (
+                <div key={ip} className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700">
+                  <span className="text-sm font-mono text-gray-900 dark:text-white">{ip}</span>
+                  <button onClick={() => removeIp(ip)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
+          <span className="text-xs text-gray-400">{ips.length} blocked</span>
+          <div className="flex gap-3">
             <button
               onClick={onClose}
               disabled={saving}
@@ -440,10 +548,8 @@ const EntraSignalsCard: React.FC<{ module: EntraModule }> = ({ module }) => {
 
 const ZeroTrustPoliciesPage: React.FC = () => {
   const isAdmin = useZeroTrustStore(selectIsAdmin);
-  const weightConfig = useZeroTrustStore(selectWeightConfig);
 
-  const { resetAllWeights } = useZeroTrustStore();
-
+  const [resettingAll, setResettingAll] = useState(false);
   const [activeTab, setActiveTab] = useState<'resource-policies' | 'device-rules' | 'identity-rules' | 'context-rules' | 'weights'>('resource-policies');
 
   // Resources state for Resource Policies tab
@@ -483,10 +589,21 @@ const ZeroTrustPoliciesPage: React.FC = () => {
     }
   }, [activeTab]);
 
-  const handleResetAll = () => {
-    if (window.confirm('Reset all weights to defaults? This action will be logged.')) {
-      resetAllWeights();
-      toast.success('All weights reset to defaults');
+  const handleResetAll = async () => {
+    if (!window.confirm('Reset Device/Context/Identity weights to 40/30/30 and the access threshold to 60? This writes to the backend immediately and affects every trust score calculation.')) return;
+    setResettingAll(true);
+    try {
+      const r = await api.patch('/trust-policy/active', {
+        device_weight: 0.40, context_weight: 0.30, identity_weight: 0.30,
+        default_threshold: 60,
+      });
+      setPolicyConfig(r.data);
+      api.post('/signal-rules/notify-check').catch(() => {});
+      toast.success('Weights and threshold reset to defaults');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to reset');
+    } finally {
+      setResettingAll(false);
     }
   };
   
@@ -508,10 +625,11 @@ const ZeroTrustPoliciesPage: React.FC = () => {
           {isAdmin && (
             <button
               onClick={handleResetAll}
-              className="flex items-center gap-2 px-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+              disabled={resettingAll}
+              className="flex items-center gap-2 px-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
             >
               <FaUndo size={14} />
-              Reset All
+              {resettingAll ? 'Resetting…' : 'Reset Weights'}
             </button>
           )}
         </div>
@@ -553,9 +671,9 @@ const ZeroTrustPoliciesPage: React.FC = () => {
           <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700">
             <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide font-medium mb-1">Last Modified</p>
             <p className="text-lg font-semibold text-gray-900 dark:text-white">
-              {policyConfig.updated_at ? new Date(policyConfig.updated_at).toLocaleDateString() : new Date(weightConfig.updatedAt).toLocaleDateString()}
+              {policyConfig.updated_at ? new Date(policyConfig.updated_at).toLocaleDateString() : '—'}
             </p>
-            <p className="text-xs text-gray-400 mt-1">by {weightConfig.updatedBy}</p>
+            <p className="text-xs text-gray-400 mt-1">TrustPolicyConfig.updated_at — this row has no per-change "who" attribution yet</p>
           </div>
         </div>
       ) : (
@@ -649,7 +767,6 @@ const ZeroTrustPoliciesPage: React.FC = () => {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Intune Required</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Entra Required</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
@@ -699,7 +816,6 @@ const ZeroTrustPoliciesPage: React.FC = () => {
                           {r.enabled ? 'Active' : 'Disabled'}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-xs text-gray-500">{r.connector_resource_id ? 'Connector' : 'Local'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -727,7 +843,7 @@ const ZeroTrustPoliciesPage: React.FC = () => {
 
       {/* Context Rules Tab */}
       {activeTab === 'context-rules' && (
-        <><ContextRulesTab /><EntraSignalsCard module="context" /></>
+        <><ContextLocalSignalsTab /><EntraSignalsCard module="context" /><ContextRulesTab /></>
       )}
 
       {/* Trust Score Weights Tab */}
@@ -770,6 +886,38 @@ const IdentityRulesTab: React.FC = () => (
     sourceLabel="Local Auth"
   />
 );
+
+/* ------------------------------------------------------------------ */
+/*  Context Rules — local signal list (Enabled/Max Points/Failure       */
+/*  Action per signal, same table style as Device/Identity Rules).      */
+/*  The scheduling/threshold panel below (ContextRulesTab) configures   */
+/*  the *values* a couple of these signals check against — this table   */
+/*  is what actually turns each individual signal on/off and scores it. */
+/* ------------------------------------------------------------------ */
+
+const ContextLocalSignalsTab: React.FC = () => {
+  const [ipModalOpen, setIpModalOpen] = useState(false);
+  return (
+    <>
+      <SignalRulesTable
+        module="context"
+        source="local"
+        title="Context Rules"
+        subtitle="Real-time request context checks. Known Device now reflects whether this device had a prior check-in (not just whether it's registered); Normal IP checks against an admin-managed blocklist (empty by default); Gateway/Connector Online reflects real Connector status."
+        sourceLabel="Backend (real-time)"
+        extraRowAction={(row) => row.signal_key === 'normal_ip' ? (
+          <button
+            onClick={() => setIpModalOpen(true)}
+            className="text-xs px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30"
+          >
+            Configure
+          </button>
+        ) : null}
+      />
+      {ipModalOpen && <IPBlocklistConfigModal onClose={() => setIpModalOpen(false)} />}
+    </>
+  );
+};
 
 /* ------------------------------------------------------------------ */
 /*  Context Rules Tab                                                   */
@@ -852,9 +1000,9 @@ const ContextRulesTab: React.FC = () => {
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Context Rules</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Context Rules — Thresholds &amp; Scheduling</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Time window, login attempt limits, and access context penalties — stored in the backend and used by every trust score calculation.
+            Values referenced by the Context Rules signals above (which one is toggled on/off and worth how many points), plus the client app's auto-check interval. Stored in the backend and used by every trust score calculation.
           </p>
         </div>
         <button
@@ -927,7 +1075,7 @@ const ContextRulesTab: React.FC = () => {
         )}
         {row(
           'Suspicious IP Score Penalty',
-          'Points the "normal_ip" signal is worth when it fails. Note: there is currently no admin-managed IP blocklist feature, so this signal always passes in practice until one is added.',
+          'Points the "normal_ip" signal is worth when it fails against the admin-managed IP blocklist (Context Rules signal list above → Normal IP → Configure).',
           <div className="flex items-center gap-2">
             <input type="number" min={0} max={100} value={suspiciousIpPenalty}
               onChange={e => setSuspiciousIpPenalty(Number(e.target.value))}
