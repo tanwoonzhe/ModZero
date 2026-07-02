@@ -120,6 +120,8 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let heartbeatTimer: NodeJS.Timeout | null = null;
 let clientSocket: Socket | null = null;
+let autoCheckTimer: NodeJS.Timeout | null = null;
+let autoCheckIntervalHours = 0;
 
 const session = {
   connectedSince: 0,
@@ -294,6 +296,25 @@ function stopHeartbeat(): void {
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   heartbeatTimer = null;
   disconnectSocket();
+  if (autoCheckTimer) clearInterval(autoCheckTimer);
+  autoCheckTimer = null;
+  autoCheckIntervalHours = 0;
+}
+
+// Admin-configured "run every N hours regardless" schedule (Trust Policies →
+// Context Rules → Auto Device Check Interval). Pure scheduling, not a trust
+// score signal — reconciled against the live backend value on every
+// heartbeat so a change takes effect within 30s without restarting the app.
+function applyAutoCheckInterval(hours: number): void {
+  if (hours === autoCheckIntervalHours) return;
+  autoCheckIntervalHours = hours;
+  if (autoCheckTimer) clearInterval(autoCheckTimer);
+  autoCheckTimer = null;
+  if (hours > 0) {
+    autoCheckTimer = setInterval(() => {
+      runDeviceCheckNow().catch((e) => console.error("auto device check failed:", e));
+    }, hours * 3_600_000);
+  }
 }
 
 // ── Real-time channel (Trust Policies pushes) ────────────────────────────
@@ -383,6 +404,19 @@ async function doHeartbeat(): Promise<void> {
           }
         }
         // 404 = no device registered yet — leave trustScore as-is (null until device check runs)
+      } catch {
+        /* ignore */
+      }
+      try {
+        const r = await httpJson(cfg.url + "/api/trust-policy/client-settings", {
+          headers: { Authorization: `Bearer ${cfg.accessToken}` },
+          timeoutMs: 3500,
+        });
+        if (r.status >= 200 && r.status < 300) {
+          const data = JSON.parse(r.body || "{}");
+          const hours = Number(data.auto_check_interval_hours ?? 0);
+          if (!Number.isNaN(hours)) applyAutoCheckInterval(hours);
+        }
       } catch {
         /* ignore */
       }

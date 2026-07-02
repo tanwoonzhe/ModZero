@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from .. import schemas
-from ..deps import get_db, get_current_admin
+from ..deps import get_db, get_current_admin, get_current_user
 from ..models import TrustPolicyConfig, User
 
 router = APIRouter()
@@ -80,6 +80,21 @@ def get_active_policy(
     return _policy_out(get_or_create_policy(db))
 
 
+@router.get("/trust-policy/client-settings", tags=["trust-policy"])
+def get_client_settings(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Slim, non-admin endpoint exposing only what the client app needs.
+
+    The client app runs as a regular employee, not an admin, so it cannot
+    call GET /trust-policy/active (which leaks weights/thresholds/Entra
+    group IDs). This just hands back the auto device-check interval.
+    """
+    cfg = get_or_create_policy(db)
+    return {"auto_check_interval_hours": cfg.auto_check_interval_hours}
+
+
 @router.patch("/trust-policy/active", response_model=schemas.TrustPolicyConfigOut, tags=["trust-policy"])
 def update_active_policy(
     update: schemas.TrustPolicyConfigUpdate,
@@ -133,6 +148,9 @@ def update_active_policy(
         val = getattr(update, hour_field)
         if val is not None and not (0 <= val <= 23):
             raise HTTPException(status_code=422, detail=f"{hour_field} must be 0–23.")
+
+    if update.auto_check_interval_hours is not None and not (0 <= update.auto_check_interval_hours <= 168):
+        raise HTTPException(status_code=422, detail="auto_check_interval_hours must be 0–168 (0 = disabled, max 1 week).")
 
     # Apply updates
     for field, value in update.model_dump(exclude_none=True).items():

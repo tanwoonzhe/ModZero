@@ -1,10 +1,10 @@
 import React from "react";
 import { FaHistory, FaCircle } from "react-icons/fa";
 import AccessDecisionsLog from "../components/AccessDecisionsLog";
-import { useSocket } from "../hooks/useSocket";
+import { useSocketConnection } from "../hooks/useSocket";
 
 const LogsPage: React.FC = () => {
-  const { isConnected } = useSocket("access_attempt", () => {});
+  const { isConnected } = useSocketConnection();
 
   return (
     <div className="space-y-6">

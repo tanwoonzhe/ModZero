@@ -1039,6 +1039,12 @@ class TrustPolicyConfig(Base):
     unknown_device_penalty:   int  = Column(Integer, nullable=False, default=20)
     suspicious_ip_penalty:    int  = Column(Integer, nullable=False, default=15)
 
+    # Client app auto device-check interval, in hours. Pure scheduling
+    # config — does NOT feed into the trust score (unlike everything else
+    # in this table). 0 = disabled: the client only checks on manual click,
+    # app startup, and Trust Policies push (force_device_check).
+    auto_check_interval_hours: int = Column(Integer, nullable=False, default=0)
+
     updated_at: datetime = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

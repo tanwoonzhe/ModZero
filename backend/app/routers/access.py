@@ -38,6 +38,7 @@ from ..models import (
     User,
 )
 from ..settings import Settings, get_settings
+from ..sio_server import emit_threadsafe, sio
 
 router = APIRouter(prefix="/access", tags=["access"])
 
@@ -138,7 +139,9 @@ def _log(
     reason: str,
     trust_score: Optional[float],
 ) -> UUID:
-    """Create an AccessRequestLog entry and return its id."""
+    """Create an AccessRequestLog entry, return its id, and best-effort push
+    a live-update event to any dashboard viewing the Access Logs page.
+    """
     log = AccessRequestLog(
         user_id=user_id,
         device_id=device_id,
@@ -149,6 +152,15 @@ def _log(
     )
     db.add(log)
     db.commit()
+    # request_access() is a sync `def` (runs in FastAPI's worker threadpool),
+    # so this can't just be `await sio.emit(...)` — emit_threadsafe schedules
+    # it onto the loop that's actually driving Socket.IO. The payload is
+    # intentionally minimal (a full row needs username/resource_name joins);
+    # AccessDecisionsLog just refetches its list on receipt.
+    try:
+        emit_threadsafe(sio.emit("access_attempt", {"decision": decision}, room="dashboard"))
+    except Exception:  # noqa: BLE001
+        pass
     return log.id
 
 
