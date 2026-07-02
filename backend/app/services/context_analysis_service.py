@@ -1,6 +1,9 @@
 """Context Analysis Module — 7-signal scoring.
 
-Scores a single access attempt based on contextual signals:
+Which signals exist, their point values, whether they're enabled, and what
+happens when one fails are all read from the signal_rules table (admin
+editable via /api/signal-rules) — this module only supplies the fallback
+defaults below, used if a rule row is somehow missing.
 
   Known device                    20
   Normal access time              15
@@ -18,7 +21,9 @@ from __future__ import annotations
 import datetime
 from typing import Optional
 
-# ── Signal weights ─────────────────────────────────────────────────────────────
+from .signal_rules import resolve_rule
+
+# ── Signal weights (fallback defaults; see signal_rules table) ─────────────────
 
 _SIGNALS = [
     {"signal": "known_device",              "max": 20},
@@ -82,13 +87,19 @@ def score_context_signals(
     max_failed_attempts: int = _MAX_FAILED_ATTEMPTS,
     include_azure: bool = False,
     na_reasons: Optional[dict] = None,
-) -> tuple[float, list[dict]]:
-    """Compute context score (0–100) and per-signal breakdown.
+    rules: Optional[dict] = None,
+) -> tuple[float, list[dict], list[dict]]:
+    """Compute context score (0–100), per-signal breakdown, and hard-fail signals.
 
-    Returns (context_score, breakdown).
+    Returns (context_score, breakdown, hard_fails).
     Optional keyword overrides let the posture endpoint pass DB-stored rules.
     na_reasons: optional {signal: "not_configured"} from the Entra overlay so the UI
     can tell a benign "not configured in Entra" apart from a transient collection miss.
+    rules: {signal_key: SignalRule} for module="context" (from
+    signal_rules.get_signal_rules). A disabled rule excludes that signal
+    entirely. Missing rows fall back to the shipped defaults.
+    hard_fails: [{module, signal, label, failure_action}] for every FAILED
+    (not N/A) signal whose rule has failure_action != reduce_score.
     """
     na_reasons = na_reasons or {}
     # Derive boolean results
@@ -120,10 +131,17 @@ def score_context_signals(
     earned = 0
     denominator = 0
     breakdown: list[dict] = []
+    hard_fails: list[dict] = []
 
     for item in _SIGNALS:
         sig = item["signal"]
-        max_pts = item["max"]
+        enabled, max_pts, failure_action = resolve_rule(rules, sig, item["max"])
+        if not enabled:
+            breakdown.append({
+                "signal": sig, "passed": None, "points": 0, "max": max_pts,
+                "module": "context_analysis", "note": "disabled by policy",
+            })
+            continue
         passed = bool(signal_values.get(sig, True))
         pts = max_pts if passed else 0
         earned += pts
@@ -135,11 +153,22 @@ def score_context_signals(
             "max":    max_pts,
             "module": "context_analysis",
         })
+        if not passed and failure_action != "reduce_score":
+            hard_fails.append({
+                "module": "context", "signal": sig, "label": sig,
+                "failure_action": failure_action,
+            })
 
     # Optional Entra context signals — only present when the overlay is active.
     for item in (_AZURE_SIGNALS if include_azure else []):
         sig = item["signal"]
-        max_pts = item["max"]
+        enabled, max_pts, failure_action = resolve_rule(rules, sig, item["max"])
+        if not enabled:
+            breakdown.append({
+                "signal": sig, "passed": None, "points": 0, "max": max_pts,
+                "module": "context_analysis", "source": "entra", "note": "disabled by policy",
+            })
+            continue
         val = azure_values.get(sig)
         if val is None:
             reason = na_reasons.get(sig, "not_collected")
@@ -158,12 +187,17 @@ def score_context_signals(
             "signal": sig, "passed": passed, "points": pts, "max": max_pts,
             "module": "context_analysis", "source": "entra",
         })
+        if not passed and failure_action != "reduce_score":
+            hard_fails.append({
+                "module": "context", "signal": sig, "label": sig,
+                "failure_action": failure_action,
+            })
 
     # Percentage of applicable points → 0–100 regardless of how many Azure
     # signals applied. Base signals always apply (default pass), so with no Azure
     # signals this equals the previous raw-earned value.
     context_score = round((earned / max(denominator, 1)) * 100, 1)
-    return context_score, breakdown
+    return context_score, breakdown, hard_fails
 
 
 def score_context_default(
@@ -178,13 +212,14 @@ def score_context_default(
     trusted_location: Optional[bool] = None,
     include_azure: bool = False,
     na_reasons: Optional[dict] = None,
-) -> tuple[float, list[dict]]:
+    rules: Optional[dict] = None,
+) -> tuple[float, list[dict], list[dict]]:
     """Compute context score from basic posture-report context.
 
     Called during posture check (not a full resource-access attempt).
     Uses current time + caller-supplied signals; other signals default to pass.
     Optional Entra sign-in signals are included when supplied.
-    Returns (score, breakdown).
+    Returns (score, breakdown, hard_fails).
     """
     signals = ContextSignals(
         known_device=known_device,
@@ -200,4 +235,5 @@ def score_context_default(
         max_failed_attempts=max_failed_attempts,
         include_azure=include_azure,
         na_reasons=na_reasons,
+        rules=rules,
     )

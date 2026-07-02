@@ -3,29 +3,27 @@
 The client reports raw boolean signals. The backend, not the client,
 computes the final score. Clients cannot set scores directly.
 
-8-factor formula (max 100 pts when all factors applicable)
------------------------------------------------------------
-  firewall_enabled          15  — Windows only; null → N/A
-  antivirus_enabled         15  — Windows only; null → N/A
-  disk_encryption_enabled   15  — Windows only; null → N/A
-  screen_lock_enabled       10  — Windows only; null → N/A
-  os_supported              10  — always reported
-  client_healthy            10  — always reported
-  recent_check              10  — derived from reported_at timestamp
-  intune_compliant          20  — excluded when Intune not configured (null)
+Which signals exist, their point values, whether they're enabled, and what
+happens when one fails are all read from the signal_rules table (admin
+editable via /api/signal-rules) — this module only supplies the fallback
+defaults used if a rule row is somehow missing. See services/signal_rules.py.
 
-Scoring denominator = sum of applicable factors only.
+Scoring denominator = sum of applicable (enabled, non-N/A) factor weights.
 N/A factors (null) are excluded from both earned and denominator so they
 neither reward nor penalise — only knowable signals affect the score.
 """
 from __future__ import annotations
 
 import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
+
+from .signal_rules import resolve_rule
 
 if TYPE_CHECKING:
     from ..models import PostureReport
 
+# Fallback defaults — used only when a signal has no corresponding
+# signal_rules row (should not happen once the table is seeded).
 _FACTORS: list[dict] = [
     {"factor": "firewall_enabled",        "max": 15},
     {"factor": "antivirus_enabled",       "max": 15},
@@ -51,19 +49,27 @@ _CONTEXT_WEIGHT:  float = 0.30
 _IDENTITY_WEIGHT: float = 0.30
 
 
-def score_posture(report: Any, azure_factors: dict | None = None) -> tuple[float, list[dict]]:
-    """Compute posture score and per-factor breakdown from a PostureReport row.
+def score_posture(
+    report: Any,
+    azure_factors: Optional[dict] = None,
+    rules: Optional[dict] = None,
+) -> tuple[float, list[dict], list[dict]]:
+    """Compute posture score, per-factor breakdown, and hard-fail signals.
 
-    Returns (posture_score 0–100, breakdown list).
+    Returns (posture_score 0–100, breakdown list, hard_fails list).
 
+    - rules: {signal_key: SignalRule} for module="device" (from
+      signal_rules.get_signal_rules). A disabled rule excludes that signal
+      entirely (no points, no denominator contribution, shown as
+      "disabled by policy"). Missing rows fall back to the shipped defaults.
+    - hard_fails: [{module, signal, label, failure_action}] for every FAILED
+      (not N/A) signal whose rule has failure_action != reduce_score. Callers
+      (posture.py) enforce these — deny_immediately_client disables the
+      user's client access, deny_immediately_resources hard-denies resource
+      access until the next passing check.
     - None value = signal not collected by client (e.g. Windows-only check on
       non-Windows). Treated as N/A: excluded from both earned and denominator.
     - intune_compliant = None means Intune is not configured; excluded entirely.
-    - Denominator is the sum of applicable (non-null, non-excluded) factor weights.
-      Falls back to 1 if everything is null (avoids division-by-zero).
-    - azure_factors: optional {factor: Optional[bool]} for Entra-sourced device
-      factors. None entries stay N/A (excluded). Only supplied when Entra is on
-      and the device matched in Entra/Intune.
     """
     azure_factors = azure_factors or {}
     intune_val = getattr(report, "intune_compliant", None)
@@ -90,10 +96,18 @@ def score_posture(report: Any, azure_factors: dict | None = None) -> tuple[float
     earned = 0
     denominator = 0
     breakdown: list[dict] = []
+    hard_fails: list[dict] = []
 
     for item in _FACTORS:
         factor = item["factor"]
-        max_pts = item["max"]
+        enabled, max_pts, failure_action = resolve_rule(rules, factor, item["max"])
+
+        if not enabled:
+            breakdown.append({
+                "factor": factor, "value": None, "passed": None,
+                "points": 0, "max": max_pts, "note": "disabled by policy",
+            })
+            continue
 
         # Intune: skip entirely when not configured
         if factor == "intune_compliant" and not intune_configured:
@@ -121,6 +135,11 @@ def score_posture(report: Any, azure_factors: dict | None = None) -> tuple[float
             "factor": factor, "value": value, "passed": passed,
             "points": pts, "max": max_pts,
         })
+        if not passed and failure_action != "reduce_score":
+            hard_fails.append({
+                "module": "device", "signal": factor, "label": factor,
+                "failure_action": failure_action,
+            })
 
     # Optional Entra device factors — only included when the Entra overlay ran
     # (azure_factors is a dict, even if its values are None for an unmatched
@@ -128,7 +147,15 @@ def score_posture(report: Any, azure_factors: dict | None = None) -> tuple[float
     # so the breakdown is identical to before.
     for item in (_AZURE_FACTORS if azure_factors else []):
         factor = item["factor"]
-        max_pts = item["max"]
+        enabled, max_pts, failure_action = resolve_rule(rules, factor, item["max"])
+
+        if not enabled:
+            breakdown.append({
+                "factor": factor, "value": None, "passed": None,
+                "points": 0, "max": max_pts, "source": "entra", "note": "disabled by policy",
+            })
+            continue
+
         value = azure_factors.get(factor)
         if value is None:
             breakdown.append({
@@ -144,9 +171,14 @@ def score_posture(report: Any, azure_factors: dict | None = None) -> tuple[float
             "factor": factor, "value": value, "passed": passed,
             "points": pts, "max": max_pts, "source": "entra",
         })
+        if not passed and failure_action != "reduce_score":
+            hard_fails.append({
+                "module": "device", "signal": factor, "label": factor,
+                "failure_action": failure_action,
+            })
 
     posture_score = round((earned / max(denominator, 1)) * 100, 1)
-    return posture_score, breakdown
+    return posture_score, breakdown, hard_fails
 
 
 def weighted_total(

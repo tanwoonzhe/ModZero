@@ -1,5 +1,10 @@
 """Identity Signal Module — scoring across local and Entra signals.
 
+Which signals exist, their point values, whether they're enabled, and what
+happens when one fails are all read from the signal_rules table (admin
+editable via /api/signal-rules) — this module only supplies the fallback
+defaults used if a rule row is somehow missing. See services/signal_rules.py.
+
 Local signals (always evaluated, backed by real per-user account data —
 no hardcoded always-pass stubs):
   Low Failed Login Count      15  — User.failed_login_count < MAX_FAILED_LOGIN_ATTEMPTS
@@ -27,13 +32,13 @@ import datetime
 from typing import Optional, TYPE_CHECKING
 
 from ..security import MAX_FAILED_LOGIN_ATTEMPTS, PASSWORD_MAX_AGE_DAYS
+from .signal_rules import resolve_rule
 
 if TYPE_CHECKING:
     from ..models import User
 
-# ── Signal weights ─────────────────────────────────────────────────────────────
+# ── Signal weights (fallback defaults; see signal_rules table) ─────────────────
 
-# Local signals — always evaluated against real per-user account data (4 signals, max 50 pts)
 _SIGNALS = [
     {"signal": "low_failed_logins",         "max": 15},
     {"signal": "not_locked",                "max": 10},
@@ -41,9 +46,6 @@ _SIGNALS = [
     {"signal": "password_changed_recently", "max": 15},
 ]
 
-# Entra (Microsoft Graph) signals — only scored when Entra is enabled and Graph
-# returns a usable value. All are N/A (None) for users with no matching Entra
-# account — excluded from both earned pts and denominator.
 _AZURE_SIGNALS = [
     {"signal": "account_enabled",       "max": 30},
     {"signal": "role_valid",            "max": 20},
@@ -95,15 +97,23 @@ def score_identity_signals(
     signals: IdentitySignals,
     include_azure: bool = False,
     na_reasons: Optional[dict] = None,
-) -> tuple[float, list[dict]]:
-    """Compute identity score (0–100) and per-signal breakdown.
+    rules: Optional[dict] = None,
+) -> tuple[float, list[dict], list[dict]]:
+    """Compute identity score (0–100), per-signal breakdown, and hard-fail signals.
 
     Uses a fixed denominator of TOTAL_MAX (100) so local-only users score 50/100 = 50%
     instead of 100%, reflecting the honest limit of what local auth can verify.
     Entra-linked users can reach 100% once all Entra signals are confirmed by Graph.
 
+    rules: {signal_key: SignalRule} for module="identity" (from
+    signal_rules.get_signal_rules). A disabled rule excludes that signal
+    entirely. Missing rows fall back to the shipped defaults.
+
     na_reasons: optional {signal: "not_configured"} from the Entra overlay so the UI
     can tell a benign "not configured in Entra" apart from a transient collection miss.
+
+    hard_fails: [{module, signal, label, failure_action}] for every FAILED
+    (not N/A) signal whose rule has failure_action != reduce_score.
     """
     na_reasons = na_reasons or {}
     low_failed = signals.failed_login_count < MAX_FAILED_LOGIN_ATTEMPTS
@@ -128,6 +138,7 @@ def score_identity_signals(
 
     earned = 0
     breakdown: list[dict] = []
+    hard_fails: list[dict] = []
 
     def _local_note(sig: str, passed: bool) -> Optional[str]:
         if sig == "low_failed_logins":
@@ -140,8 +151,16 @@ def score_identity_signals(
             return f"password last changed {signals.password_age_days} day(s) ago (limit {PASSWORD_MAX_AGE_DAYS})"
         return None
 
-    def _emit(sig: str, max_pts: int, val: Optional[bool], source: str) -> None:
+    def _emit(sig: str, default_max: int, val: Optional[bool], source: str) -> None:
         nonlocal earned
+        enabled, max_pts, failure_action = resolve_rule(rules, sig, default_max)
+        if not enabled:
+            breakdown.append({
+                "signal": sig, "passed": None, "points": 0, "max": max_pts,
+                "module": "identity", "source": source,
+                "status": "disabled", "note": "disabled by policy",
+            })
+            return
         if val is None:
             if source == "local":
                 reason = "not_collected"
@@ -167,6 +186,11 @@ def score_identity_signals(
             if note:
                 entry["note"] = note
         breakdown.append(entry)
+        if not passed and failure_action != "reduce_score":
+            hard_fails.append({
+                "module": "identity", "signal": sig, "label": sig,
+                "failure_action": failure_action,
+            })
 
     # Local signals — always evaluated against the real User row
     for item in _SIGNALS:
@@ -180,7 +204,7 @@ def score_identity_signals(
     # Fixed denominator = 100 (original 5-signal budget).
     # Local users earn ≤50 pts → score ≤50%. Entra users can reach 100%.
     identity_score = round(min(100.0, earned / TOTAL_MAX * 100), 1)
-    return identity_score, breakdown
+    return identity_score, breakdown, hard_fails
 
 
 def signals_from_local_user(user: "User") -> IdentitySignals:

@@ -9,6 +9,7 @@ from .. import models, schemas
 from ..deps import get_db, get_current_user, get_current_admin
 from ..azure_service import azure_service
 from ..services.posture_scoring import score_posture, weighted_total
+from ..services.signal_rules import get_signal_rules
 
 router = APIRouter()
 
@@ -167,7 +168,7 @@ def get_device_posture(
             "message": "No posture report found for this device.",
         }
 
-    posture_score, breakdown = score_posture(report)
+    posture_score, breakdown, _hard_fails = score_posture(report, rules=get_signal_rules(db, "device"))
     return {
         "device_id": str(device.device_id),
         "device_name": device.device_name,

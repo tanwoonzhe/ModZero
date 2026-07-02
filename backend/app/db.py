@@ -80,6 +80,16 @@ def _run_migrations() -> None:
         ALTER TABLE trust_policy_config
           ADD COLUMN IF NOT EXISTS valid_role_ids json
         """,
+        # Hard-deny flag set on a DeviceTrustScore when a signal configured with
+        # failure_action=deny_immediately_resources fails on that check.
+        """
+        ALTER TABLE device_trust_scores
+          ADD COLUMN IF NOT EXISTS hard_denied_resources boolean NOT NULL DEFAULT false
+        """,
+        """
+        ALTER TABLE device_trust_scores
+          ADD COLUMN IF NOT EXISTS hard_deny_reason varchar(256)
+        """,
     ]
     with engine.connect() as conn:
         for stmt in migrations:
@@ -88,4 +98,32 @@ def _run_migrations() -> None:
             except Exception:
                 conn.rollback()
                 raise
+        conn.commit()
+
+    _seed_signal_rules()
+
+
+def _seed_signal_rules() -> None:
+    """Insert default SignalRule rows the first time this deploys.
+
+    signal_rules is a brand-new table so Base.metadata.create_all() already
+    creates it — this only needs to populate it, and only for rows that
+    don't already exist (admins may have edited/deleted rows since).
+    """
+    import uuid as _uuid
+    from sqlalchemy import text
+    from .services.signal_rule_defaults import DEFAULT_SIGNAL_RULES
+
+    with engine.connect() as conn:
+        for module, key, source, label, max_points in DEFAULT_SIGNAL_RULES:
+            conn.execute(
+                text("""
+                    INSERT INTO signal_rules
+                        (id, module, signal_key, source, label, enabled, max_points, failure_action, created_at, updated_at)
+                    VALUES
+                        (:id, :module, :key, :source, :label, true, :max_points, 'reduce_score', now(), now())
+                    ON CONFLICT (module, signal_key) DO NOTHING
+                """),
+                {"id": str(_uuid.uuid4()), "module": module, "key": key, "source": source, "label": label, "max_points": max_points},
+            )
         conn.commit()

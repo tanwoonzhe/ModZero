@@ -29,43 +29,47 @@ import {
 } from '../store/zeroTrustStore';
 import api from '../api';
 
-type FailureAction = 'reduce_score' | 'deny_immediately';
-
-/* ------------------------------------------------------------------ */
-/*  Entra (Microsoft Graph) signals — editable per-module card          */
-/* ------------------------------------------------------------------ */
-
-interface EntraSignalRule {
-  key: string;
-  label: string;
-  description?: string;
-  pts: number;
-  enabled: boolean;
-  failureAction: FailureAction;
-}
-
+type FailureAction = 'reduce_score' | 'deny_immediately_client' | 'deny_immediately_resources';
 type EntraModule = 'identity' | 'device' | 'context';
 
-const DEFAULT_ENTRA_SIGNALS: Record<EntraModule, EntraSignalRule[]> = {
-  identity: [
-    { key: 'account_enabled',       label: 'Account Enabled',         description: 'Entra account is active — a disabled account is always denied access regardless of score', pts: 30, enabled: true,  failureAction: 'deny_immediately' },
-    { key: 'role_valid',            label: 'Role Valid',              description: 'User belongs to at least one Entra group or directory role (legitimate employees always do)', pts: 20, enabled: true,  failureAction: 'reduce_score' },
-    { key: 'mfa_registered',        label: 'MFA Registered',          description: 'Multi-factor authentication method registered in Entra (Authenticator App, FIDO2, etc.)', pts: 25, enabled: true,  failureAction: 'reduce_score' },
-    { key: 'identity_risk_low',     label: 'Identity Risk Low',       description: 'Entra Identity Protection risk level is none or low for this user', pts: 20, enabled: true,  failureAction: 'reduce_score' },
-    { key: 'conditional_access_ok', label: 'Conditional Access OK',   description: 'Sign-in passed all applicable Conditional Access policies in this tenant', pts: 15, enabled: true,  failureAction: 'reduce_score' },
-  ],
-  device: [
-    { key: 'entra_registered',  label: 'Entra Registered',   description: 'Device is registered in the Entra ID directory', pts: 10, enabled: true,  failureAction: 'reduce_score' },
-    { key: 'intune_managed',    label: 'Intune Managed',      description: 'Device is enrolled and actively managed by Intune MDM', pts: 10, enabled: true,  failureAction: 'reduce_score' },
-    { key: 'intune_encrypted',  label: 'Intune Encrypted',    description: 'Intune reports the device disk as encrypted', pts: 15, enabled: true,  failureAction: 'reduce_score' },
-  ],
-  context: [
-    { key: 'signin_risk_low',   label: 'Sign-in Risk Low',    description: 'User is not flagged by Entra Identity Protection as a risky sign-in', pts: 15, enabled: true,  failureAction: 'reduce_score' },
-    { key: 'trusted_location',  label: 'Trusted Location',    description: 'Sign-in originated from a Named Location configured as trusted in this tenant', pts: 10, enabled: true,  failureAction: 'reduce_score' },
-  ],
-};
+const FAILURE_ACTION_OPTIONS: { value: FailureAction; label: string }[] = [
+  { value: 'reduce_score', label: 'Reduce score only' },
+  { value: 'deny_immediately_client', label: 'Deny Immediately (Client)' },
+  { value: 'deny_immediately_resources', label: 'Deny Immediately (Resources)' },
+];
 
-const ENTRA_RULES_KEY = (module: EntraModule) => `modzero-entra-signals-${module}`;
+// Human-readable descriptions shown under each signal's label. Purely
+// cosmetic — the backend signal_rules table only stores a short `label`,
+// not a full description, so this stays a frontend-only lookup.
+const SIGNAL_DESCRIPTIONS: Record<string, string> = {
+  // Device — local
+  firewall_enabled:        'Windows Firewall is enabled on at least one network profile',
+  antivirus_enabled:       'Windows Defender or registered antivirus is active and up to date',
+  disk_encryption_enabled: 'BitLocker system drive is fully encrypted with protection on',
+  screen_lock_enabled:     'Secure screensaver or console-lock timeout is configured',
+  os_supported:            'Windows major version is 10 or later',
+  client_healthy:          'Client fingerprint file exists and is readable',
+  recent_check:            'Last posture report was submitted within 7 days',
+  intune_compliant:        'Device is marked compliant by Intune',
+  // Device — entra
+  entra_registered: 'Device is registered in the Entra ID directory',
+  intune_managed:   'Device is enrolled and actively managed by Intune MDM',
+  intune_encrypted: 'Intune reports the device disk as encrypted',
+  // Identity — local
+  low_failed_logins:         'User.failed_login_count is below the lockout threshold (5) — incremented on every failed login, reset on success',
+  not_locked:                'Account is not currently locked. Auto-locks for 15 minutes after 5 failed logins, or can be locked/unlocked manually from the user detail page',
+  entra_linked:               'User.linked_entra_upn is set. Linking unlocks the Entra identity signals below',
+  password_changed_recently: 'Password was changed within the last 90 days, from User.password_changed_at',
+  // Identity — entra
+  account_enabled:       'Entra account is active (accountEnabled field)',
+  role_valid:             'User belongs to a qualifying Entra group or directory role — any membership by default, or a specific admin-configured set (see "Configure")',
+  mfa_registered:        'Multi-factor authentication method registered in Entra (Authenticator App, FIDO2, etc.)',
+  identity_risk_low:     'Entra Identity Protection risk level is none or low for this user',
+  conditional_access_ok: 'Sign-in passed all applicable Conditional Access policies in this tenant',
+  // Context — entra
+  signin_risk_low:  'User is not flagged by Entra Identity Protection as a risky sign-in',
+  trusted_location: 'Sign-in originated from a Named Location configured as trusted in this tenant',
+};
 
 interface GroupOrRole {
   id: string;
@@ -215,145 +219,220 @@ const RoleValidConfigModal: React.FC<{ onClose: () => void }> = ({ onClose }) =>
   );
 };
 
-const EntraSignalsCard: React.FC<{ module: EntraModule }> = ({ module }) => {
-  const [globalEnabled, setGlobalEnabled] = useState<boolean | null>(null);
-  const [rules, setRules] = useState<EntraSignalRule[]>(() => {
-    try {
-      const saved = localStorage.getItem(ENTRA_RULES_KEY(module));
-      if (saved) {
-        const parsed = JSON.parse(saved) as EntraSignalRule[];
-        return DEFAULT_ENTRA_SIGNALS[module].map(def => {
-          const s = parsed.find(r => r.key === def.key);
-          return s ? { ...def, pts: s.pts, enabled: s.enabled, failureAction: s.failureAction } : def;
-        });
-      }
-    } catch {}
-    return DEFAULT_ENTRA_SIGNALS[module];
-  });
+interface SignalRuleRow {
+  id: string;
+  module: string;
+  signal_key: string;
+  source: string;
+  label: string;
+  enabled: boolean;
+  max_points: number;
+  failure_action: FailureAction;
+}
+
+const SignalRulesTable: React.FC<{
+  module: 'device' | 'identity' | 'context';
+  source: 'local' | 'entra';
+  title: string;
+  subtitle: string;
+  sourceLabel: string;
+  showGlobalBadge?: boolean;
+  footerNote?: string;
+  extraRowAction?: (row: SignalRuleRow) => React.ReactNode;
+}> = ({ module, source, title, subtitle, sourceLabel, showGlobalBadge, footerNote, extraRowAction }) => {
+  const [rules, setRules] = useState<SignalRuleRow[]>([]);
+  const [snapshot, setSnapshot] = useState<Record<string, SignalRuleRow>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [roleValidModalOpen, setRoleValidModalOpen] = useState(false);
+  const [globalEnabled, setGlobalEnabled] = useState<boolean | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    api.get('/signal-rules', { params: { module } })
+      .then(r => {
+        const filtered = (r.data as SignalRuleRow[]).filter(x => x.source === source);
+        setRules(filtered);
+        setSnapshot(Object.fromEntries(filtered.map(x => [x.id, x])));
+      })
+      .catch(() => toast.error(`Failed to load ${title}`))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [module, source]);
 
   useEffect(() => {
+    if (!showGlobalBadge) return;
     api.get('/trust-policy/active')
       .then(r => setGlobalEnabled(!!r.data.entra_enabled))
       .catch(() => setGlobalEnabled(false));
-  }, []);
+  }, [showGlobalBadge]);
 
-  const toggle = (key: string) =>
-    setRules(r => r.map(rule => rule.key === key ? { ...rule, enabled: !rule.enabled } : rule));
-  const setPts = (key: string, pts: number) =>
-    setRules(r => r.map(rule => rule.key === key ? { ...rule, pts: Math.max(0, Math.min(100, pts)) } : rule));
-  const setFailureAction = (key: string, action: FailureAction) =>
-    setRules(r => r.map(rule => rule.key === key ? { ...rule, failureAction: action } : rule));
+  const toggle = (id: string) =>
+    setRules(rs => rs.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r));
+  const setPts = (id: string, pts: number) =>
+    setRules(rs => rs.map(r => r.id === id ? { ...r, max_points: Math.max(0, Math.min(100, pts)) } : r));
+  const setAction = (id: string, action: FailureAction) =>
+    setRules(rs => rs.map(r => r.id === id ? { ...r, failure_action: action } : r));
 
-  const handleSave = () => {
-    localStorage.setItem(ENTRA_RULES_KEY(module), JSON.stringify(rules));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const changed = rules.filter(r => {
+        const o = snapshot[r.id];
+        return !o || o.enabled !== r.enabled || o.max_points !== r.max_points || o.failure_action !== r.failure_action;
+      });
+      if (changed.length > 0) {
+        await Promise.all(changed.map(r => api.patch(`/signal-rules/${r.id}`, {
+          enabled: r.enabled, max_points: r.max_points, failure_action: r.failure_action,
+        })));
+        setSnapshot(Object.fromEntries(rules.map(x => [x.id, x])));
+        toast.success(`Saved ${changed.length} rule${changed.length > 1 ? 's' : ''}`);
+      }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="mt-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-8 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
+      </div>
+    );
+  }
 
   return (
     <div className="mt-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-            Entra Identity Signals (Microsoft Graph)
-            <span className={`px-2 py-0.5 rounded text-xs ${globalEnabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
-              {globalEnabled === null ? '…' : globalEnabled ? 'Active' : 'Disabled'}
-            </span>
+            {title}
+            {showGlobalBadge && (
+              <span className={`px-2 py-0.5 rounded text-xs ${globalEnabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
+                {globalEnabled === null ? '…' : globalEnabled ? 'Active' : 'Disabled'}
+              </span>
+            )}
           </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {globalEnabled
-              ? 'Live signals contributing to the score while Entra is enabled. Evaluated per posture report; results show in the client app Device Check breakdown.'
-              : 'Unlocked by the global toggle in Settings → Azure AD Integration. While off, all signals are N/A and never affect the score.'}
-          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{subtitle}</p>
         </div>
         <button
           onClick={handleSave}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+          disabled={saving}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium disabled:opacity-50"
         >
           <FaSave size={13} />
-          {saved ? 'Saved!' : 'Save'}
+          {saving ? 'Saving…' : saved ? 'Saved!' : 'Save'}
         </button>
       </div>
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-          <thead className="bg-gray-50 dark:bg-gray-800">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Signal</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
-              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Enabled</th>
-              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Max Points</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failure Action</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-            {rules.map(s => (
-              <tr key={s.key} className={(!globalEnabled || !s.enabled) ? 'opacity-50' : ''}>
-                <td className="px-4 py-3">
-                  <div className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-2">
-                    {s.label}
-                    {s.key === 'role_valid' && (
-                      <button
-                        onClick={() => setRoleValidModalOpen(true)}
-                        className="text-xs px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30"
-                      >
-                        Configure
-                      </button>
-                    )}
-                  </div>
-                  {s.description && <div className="text-xs text-gray-400 mt-0.5">{s.description}</div>}
-                </td>
-                <td className="px-4 py-3 text-xs">
-                  <span className="inline-flex px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">Microsoft Graph</span>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <button
-                    onClick={() => toggle(s.key)}
-                    className={`w-10 h-5 rounded-full transition-colors flex-shrink-0 ${s.enabled ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
-                  >
-                    <span className={`block w-4 h-4 bg-white rounded-full shadow mx-0.5 transition-transform ${s.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <input
-                    type="number"
-                    min={0} max={100} value={s.pts}
-                    onChange={e => setPts(s.key, Number(e.target.value))}
-                    disabled={!s.enabled}
-                    className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  />
-                </td>
-                <td className="px-4 py-3">
-                  <select
-                    value={s.failureAction}
-                    onChange={e => setFailureAction(s.key, e.target.value as FailureAction)}
-                    disabled={!s.enabled}
-                    className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  >
-                    <option value="reduce_score">Reduce score only</option>
-                    <option value="deny_immediately">Deny immediately</option>
-                  </select>
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${globalEnabled && s.enabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
-                    {globalEnabled && s.enabled ? 'Active' : 'N/A'}
-                  </span>
-                </td>
+      {rules.length === 0 ? (
+        <div className="p-6 text-center text-sm text-gray-400">No signals configured for this module yet.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+            <thead className="bg-gray-50 dark:bg-gray-800">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Signal</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Enabled</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Max Points</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failure Action</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+              {rules.map(rule => {
+                const active = (showGlobalBadge ? !!globalEnabled : true) && rule.enabled;
+                return (
+                  <tr key={rule.id} className={rule.enabled ? '' : 'opacity-50'}>
+                    <td className="px-4 py-3">
+                      <div className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-2">
+                        {rule.label}
+                        {extraRowAction?.(rule)}
+                      </div>
+                      {SIGNAL_DESCRIPTIONS[rule.signal_key] && (
+                        <div className="text-xs text-gray-400 mt-0.5">{SIGNAL_DESCRIPTIONS[rule.signal_key]}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      <span className="inline-flex px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{sourceLabel}</span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <button
+                        onClick={() => toggle(rule.id)}
+                        className={`w-10 h-5 rounded-full transition-colors flex-shrink-0 ${rule.enabled ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                      >
+                        <span className={`block w-4 h-4 bg-white rounded-full shadow mx-0.5 transition-transform ${rule.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <input
+                        type="number"
+                        min={0} max={100} value={rule.max_points}
+                        onChange={e => setPts(rule.id, Number(e.target.value))}
+                        disabled={!rule.enabled}
+                        className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <select
+                        value={rule.failure_action}
+                        onChange={e => setAction(rule.id, e.target.value as FailureAction)}
+                        disabled={!rule.enabled}
+                        className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      >
+                        {FAILURE_ACTION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${active ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
+                        {active ? 'Active' : 'N/A'}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
         <p className="text-xs text-gray-400">
-          Changes saved here are UI display only — actual backend weights are in <code className="font-mono">azure_signal_service.py</code>.
-          Role Valid's "Configure" button is the exception — it saves for real.
+          {footerNote || 'Saved to the backend signal_rules table — takes effect on the next device check / access decision.'}
+          {' '}"Deny Immediately (Client)" disables the user's client app access until an admin re-enables it; "Deny Immediately (Resources)" hard-denies resource access until the next passing check.
         </p>
       </div>
-      {roleValidModalOpen && <RoleValidConfigModal onClose={() => setRoleValidModalOpen(false)} />}
     </div>
+  );
+};
+
+const EntraSignalsCard: React.FC<{ module: EntraModule }> = ({ module }) => {
+  const [roleValidModalOpen, setRoleValidModalOpen] = useState(false);
+
+  return (
+    <>
+      <SignalRulesTable
+        module={module}
+        source="entra"
+        title="Entra Identity Signals (Microsoft Graph)"
+        subtitle="Live signals contributing to the score while Entra is enabled (Settings → Azure AD Integration). While off, all signals are N/A and never affect the score."
+        sourceLabel="Microsoft Graph"
+        showGlobalBadge
+        extraRowAction={(row) => row.signal_key === 'role_valid' ? (
+          <button
+            onClick={() => setRoleValidModalOpen(true)}
+            className="text-xs px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30"
+          >
+            Configure
+          </button>
+        ) : null}
+      />
+      {roleValidModalOpen && <RoleValidConfigModal onClose={() => setRoleValidModalOpen(false)} />}
+    </>
   );
 };
 
@@ -661,341 +740,30 @@ export default ZeroTrustPoliciesPage;
 /* ------------------------------------------------------------------ */
 /*  Device Rules Tab                                                    */
 /* ------------------------------------------------------------------ */
+
+const DeviceRulesTab: React.FC = () => (
+  <SignalRulesTable
+    module="device"
+    source="local"
+    title="Device Rules"
+    subtitle="Client-app-collected device posture checks and their contribution to the Device Posture Score."
+    sourceLabel="Client App"
+  />
+);
+
+/* ------------------------------------------------------------------ */
 /*  Identity Rules Tab                                                  */
 /* ------------------------------------------------------------------ */
 
-const DEFAULT_IDENTITY_RULES = [
-  {
-    key:           'low_failed_logins',
-    label:         'Low Failed Login Count',
-    source:        'Local Auth',
-    maxPoints:     15,
-    enabled:       true,
-    failureAction: 'reduce_score' as const,
-    description:   'User.failed_login_count is below the lockout threshold (5). Incremented on every failed login and reset on success — real per-user counter, not assumed.',
-  },
-  {
-    key:           'not_locked',
-    label:         'Account Not Locked',
-    source:        'Local Auth',
-    maxPoints:     10,
-    enabled:       true,
-    failureAction: 'deny_immediately' as const,
-    description:   'Account is not currently locked. Auto-locks for 15 minutes after 5 failed logins, or can be locked/unlocked manually by an admin from the user detail page.',
-  },
-  {
-    key:           'entra_linked',
-    label:         'Entra Linked',
-    source:        'Local Auth',
-    maxPoints:     10,
-    enabled:       true,
-    failureAction: 'reduce_score' as const,
-    description:   'User.linked_entra_upn is set. Linking unlocks the Entra identity signals below and lets an admin configure which roles/groups count as valid.',
-  },
-  {
-    key:           'password_changed_recently',
-    label:         'Password Changed Recently',
-    source:        'Local Auth',
-    maxPoints:     15,
-    enabled:       true,
-    failureAction: 'reduce_score' as const,
-    description:   'Password was changed within the last 90 days, from User.password_changed_at.',
-  },
-  {
-    key:           'account_enabled',
-    label:         'Account Enabled',
-    source:        'Microsoft Graph',
-    maxPoints:     30,
-    enabled:       true,
-    failureAction: 'deny_immediately' as const,
-    description:   'Account is active in Azure AD (accountEnabled field). N/A for local-only users — only scored when Entra is connected. Disabled accounts are also hard-gated.',
-  },
-  {
-    key:           'role_valid',
-    label:         'Role Valid',
-    source:        'Microsoft Graph',
-    maxPoints:     20,
-    enabled:       true,
-    failureAction: 'deny_immediately' as const,
-    description:   'User belongs to a qualifying Entra group or directory role — any membership by default, or a specific admin-configured set (see "Configure" on this signal below). N/A for local-only users — only scored when Entra is connected.',
-  },
-];
-
-const IDENTITY_RULES_KEY = 'modzero-identity-rules';
-
-interface IdentityRule {
-  key: string;
-  label: string;
-  source: string;
-  maxPoints: number;
-  enabled: boolean;
-  failureAction: FailureAction;
-  description: string;
-}
-
-const IdentityRulesTab: React.FC = () => {
-  const [rules, setRules] = useState<IdentityRule[]>(() => {
-    try {
-      const saved = localStorage.getItem(IDENTITY_RULES_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as IdentityRule[];
-        return DEFAULT_IDENTITY_RULES.map(def => {
-          const s = parsed.find(r => r.key === def.key);
-          return s ? { ...def, maxPoints: s.maxPoints, enabled: s.enabled, failureAction: s.failureAction ?? def.failureAction } : def;
-        });
-      }
-    } catch {}
-    return DEFAULT_IDENTITY_RULES;
-  });
-  const [saved, setSaved] = useState(false);
-
-  const toggle = (key: string) =>
-    setRules(r => r.map(rule => rule.key === key ? { ...rule, enabled: !rule.enabled } : rule));
-
-  const setPoints = (key: string, pts: number) =>
-    setRules(r => r.map(rule => rule.key === key ? { ...rule, maxPoints: Math.max(0, Math.min(100, pts)) } : rule));
-
-  const setFailureActionIdentity = (key: string, action: FailureAction) =>
-    setRules(r => r.map(rule => rule.key === key ? { ...rule, failureAction: action } : rule));
-
-  const handleSave = () => {
-    localStorage.setItem(IDENTITY_RULES_KEY, JSON.stringify(rules));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  const total = rules.filter(r => r.enabled).reduce((s, r) => s + r.maxPoints, 0);
-
-  return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-      <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Identity Rules</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Identity signals evaluated server-side on every posture report. Fixed denominator = 100.
-            Local-only users score up to 50/100 (50%). Entra-linked users can reach 100/100.
-            Account Enabled and Role Valid are Entra-only — N/A for local auth, scored when Graph confirms them.
-          </p>
-        </div>
-        <button
-          onClick={handleSave}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
-        >
-          <FaSave size={13} />
-          {saved ? 'Saved!' : 'Save Rules'}
-        </button>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-          <thead className="bg-gray-50 dark:bg-gray-800">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Signal</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Enabled</th>
-              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Max Points</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failure Action</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-            {rules.map(sig => (
-              <tr key={sig.key} className={sig.enabled ? '' : 'opacity-50'}>
-                <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{sig.label}</td>
-                <td className="px-4 py-3 text-xs text-gray-500">
-                  <span className="inline-flex px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
-                    {sig.source}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs">{sig.description}</td>
-                <td className="px-4 py-3 text-center">
-                  <button
-                    onClick={() => toggle(sig.key)}
-                    className={`w-10 h-5 rounded-full transition-colors flex-shrink-0 ${sig.enabled ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
-                  >
-                    <span className={`block w-4 h-4 bg-white rounded-full shadow mx-0.5 transition-transform ${sig.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <input
-                    type="number"
-                    min={0} max={100} value={sig.maxPoints}
-                    onChange={e => setPoints(sig.key, Number(e.target.value))}
-                    disabled={!sig.enabled}
-                    className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  />
-                </td>
-                <td className="px-4 py-3">
-                  <select
-                    value={sig.failureAction}
-                    onChange={e => setFailureActionIdentity(sig.key, e.target.value as FailureAction)}
-                    disabled={!sig.enabled}
-                    className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  >
-                    <option value="reduce_score">Reduce score only</option>
-                    <option value="deny_immediately">Deny immediately</option>
-                  </select>
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${sig.enabled ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
-                    {sig.enabled ? 'Yes' : 'Disabled'}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
-        <p className="text-xs text-gray-400">
-          Total enabled points: <strong>{total}</strong>/100 · Local-only users score up to 50 (Account Enabled + Role Valid require Entra).
-          Source: <code className="font-mono">identity_signal_service.py</code>.
-        </p>
-        <p className="text-xs text-amber-600 dark:text-amber-400">
-          Changes saved here are UI display only — backend weights are in <code className="font-mono">identity_signal_service.py</code>.
-        </p>
-      </div>
-    </div>
-  );
-};
-
-/* ------------------------------------------------------------------ */
-
-const DEFAULT_DEVICE_RULES = [
-  { key: 'firewall_enabled',        label: 'Firewall Enabled',         description: 'Windows Firewall is enabled on at least one network profile',            source: 'Client App',               weight: 15, enabled: true,  failureAction: 'reduce_score'    as const },
-  { key: 'antivirus_enabled',       label: 'Antivirus Enabled',        description: 'Windows Defender or registered antivirus is active and up to date',      source: 'Client App',               weight: 15, enabled: true,  failureAction: 'reduce_score'    as const },
-  { key: 'disk_encryption_enabled', label: 'Disk Encryption Enabled',  description: 'BitLocker system drive is fully encrypted with protection on',           source: 'Client App',               weight: 15, enabled: true,  failureAction: 'reduce_score'    as const },
-  { key: 'screen_lock_enabled',     label: 'Screen Lock Enabled',      description: 'Secure screensaver or console-lock timeout is configured',               source: 'Client App',               weight: 10, enabled: true,  failureAction: 'reduce_score'    as const },
-  { key: 'os_supported',            label: 'OS Version Supported',     description: 'Windows major version is 10 or later',                                   source: 'Client App',               weight: 10, enabled: true,  failureAction: 'reduce_score'    as const },
-  { key: 'client_healthy',          label: 'Client App Healthy',       description: 'Client fingerprint file exists and is readable',                         source: 'Client App',               weight: 10, enabled: true,  failureAction: 'reduce_score'    as const },
-  { key: 'recent_posture_check',    label: 'Recent Posture Check',     description: 'Last posture report was submitted within 7 days',                        source: 'Client App',               weight: 10, enabled: true,  failureAction: 'reduce_score'    as const },
-  { key: 'intune_compliant',        label: 'Intune Compliant',         description: 'Device is marked compliant by Intune — non-compliance triggers immediate denial', source: 'Microsoft Graph / Intune', weight: 20, enabled: true,  failureAction: 'deny_immediately' as const },
-];
-
-interface DeviceRule {
-  key: string;
-  label: string;
-  description?: string;
-  source: string;
-  weight: number;
-  enabled: boolean;
-  failureAction: FailureAction;
-}
-
-const DEVICE_RULES_KEY = 'modzero-device-rules';
-
-const DeviceRulesTab: React.FC = () => {
-  const [rules, setRules] = useState<DeviceRule[]>(() => {
-    try {
-      const saved = localStorage.getItem(DEVICE_RULES_KEY);
-      if (saved) return JSON.parse(saved) as DeviceRule[];
-    } catch {}
-    return DEFAULT_DEVICE_RULES;
-  });
-  const [saved, setSaved] = useState(false);
-
-  const toggle = (key: string) =>
-    setRules(r => r.map(rule => rule.key === key ? { ...rule, enabled: !rule.enabled } : rule));
-
-  const setFailureAction = (key: string, action: FailureAction) =>
-    setRules(r => r.map(rule => rule.key === key ? { ...rule, failureAction: action } : rule));
-
-  const setWeight = (key: string, w: number) =>
-    setRules(r => r.map(rule => rule.key === key ? { ...rule, weight: Math.max(0, Math.min(100, w)) } : rule));
-
-  const handleSave = () => {
-    localStorage.setItem(DEVICE_RULES_KEY, JSON.stringify(rules));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-      <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Device Rules</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Configure which device posture checks are required and their contribution to the Device Posture Score.
-          </p>
-        </div>
-        <button
-          onClick={handleSave}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
-        >
-          <FaSave size={13} />
-          {saved ? 'Saved!' : 'Save Rules'}
-        </button>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-          <thead className="bg-gray-50 dark:bg-gray-800">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Check</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
-              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Enabled</th>
-              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Weight</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failure Action</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Affects Trust Score</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-            {rules.map(rule => (
-              <tr key={rule.key} className={rule.enabled ? '' : 'opacity-50'}>
-                <td className="px-4 py-3">
-                  <div className="text-sm font-medium text-gray-900 dark:text-white">{rule.label}</div>
-                  {rule.description && <div className="text-xs text-gray-400 mt-0.5">{rule.description}</div>}
-                </td>
-                <td className="px-4 py-3 text-xs text-gray-500">{rule.source}</td>
-                <td className="px-4 py-3 text-center">
-                  <button
-                    onClick={() => toggle(rule.key)}
-                    className={`w-10 h-5 rounded-full transition-colors flex-shrink-0 ${rule.enabled ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'}`}
-                  >
-                    <span className={`block w-4 h-4 bg-white rounded-full shadow mx-0.5 transition-transform ${rule.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <input
-                    type="number"
-                    min={0} max={100} value={rule.weight}
-                    onChange={e => setWeight(rule.key, Number(e.target.value))}
-                    className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    disabled={!rule.enabled}
-                  />
-                </td>
-                <td className="px-4 py-3">
-                  <select
-                    value={rule.failureAction}
-                    onChange={e => setFailureAction(rule.key, e.target.value as FailureAction)}
-                    disabled={!rule.enabled}
-                    className="text-xs border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  >
-                    <option value="reduce_score">Reduce score only</option>
-                    <option value="deny_immediately">Deny immediately</option>
-                  </select>
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${rule.enabled ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
-                    {rule.enabled ? 'Yes' : 'Disabled'}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
-        <p className="text-xs text-gray-400">
-          Total enabled weight: {rules.filter(r => r.enabled).reduce((s, r) => s + r.weight, 0)}/100 ·
-          "Deny immediately" stops evaluation on failure even if other checks pass.
-        </p>
-        <p className="text-xs text-amber-600 dark:text-amber-400">
-          Changes saved here are UI display only — actual backend weights are in <code className="font-mono">posture_scoring.py</code>.
-        </p>
-      </div>
-    </div>
-  );
-};
+const IdentityRulesTab: React.FC = () => (
+  <SignalRulesTable
+    module="identity"
+    source="local"
+    title="Identity Rules"
+    subtitle="Local-auth identity checks, backed by real per-user account data (login history, lock state, Entra link, password age)."
+    sourceLabel="Local Auth"
+  />
+);
 
 /* ------------------------------------------------------------------ */
 /*  Context Rules Tab                                                   */
