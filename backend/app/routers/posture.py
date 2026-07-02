@@ -38,7 +38,7 @@ def _maybe_collect_azure(policy: TrustPolicyConfig, user: User, device: Device) 
     """
     if not getattr(policy, "entra_enabled", False):
         return None
-    return collect_azure_signals(user, device)
+    return collect_azure_signals(user, device, getattr(policy, "valid_role_ids", None))
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

@@ -32,6 +32,9 @@ class UserOut(UserBase):
     auth_provider: str = "local"
     client_access_enabled: bool = True
     linked_entra_upn: Optional[str] = None
+    failed_login_count: int = 0
+    locked_until: Optional[datetime] = None
+    password_changed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -478,6 +481,9 @@ class TrustPolicyConfigOut(BaseModel):
     unknown_device_penalty:    int
     suspicious_ip_penalty:     int
     entra_enabled:             bool = False
+    # Entra group/directory-role object IDs that count for the Role Valid
+    # signal. Empty/null = any group or role membership qualifies.
+    valid_role_ids:            Optional[list] = None
     # Live (not persisted): whether a Microsoft Graph connection is currently usable.
     azure_connected:           Optional[bool] = None
     updated_at:                Optional[datetime] = None
@@ -499,6 +505,7 @@ class TrustPolicyConfigUpdate(BaseModel):
     unknown_device_penalty:    Optional[int]   = None
     suspicious_ip_penalty:     Optional[int]   = None
     entra_enabled:             Optional[bool]  = None
+    valid_role_ids:            Optional[list]  = None
 
 
 ## Protected Resource schemas

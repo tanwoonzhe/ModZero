@@ -1,6 +1,7 @@
 """Initialize superuser on application startup."""
 
 import os
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from .models import User, RoleEnum
@@ -39,6 +40,7 @@ def create_initial_superuser() -> None:
                 email=email,
                 password_hash=password_hash,
                 role=RoleEnum.ADMIN,
+                password_changed_at=datetime.now(timezone.utc),
             )
             db.add(superuser)
             db.commit()

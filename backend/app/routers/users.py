@@ -1,5 +1,6 @@
 """User management endpoints."""
 
+from datetime import datetime, timedelta, timezone
 from typing import List, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -58,6 +59,7 @@ def change_my_password(
     if len(payload.new_password) < 8:
         raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
     current_user.password_hash = get_password_hash(payload.new_password)
+    current_user.password_changed_at = datetime.now(timezone.utc)
     db.commit()
     return {"message": "Password changed successfully"}
 
@@ -169,6 +171,9 @@ def get_user_details(
             "auth_provider": getattr(user, "auth_provider", "local"),
             "client_access_enabled": getattr(user, "client_access_enabled", True),
             "linked_entra_upn": getattr(user, "linked_entra_upn", None),
+            "failed_login_count": getattr(user, "failed_login_count", 0) or 0,
+            "locked_until": user.locked_until.isoformat() if getattr(user, "locked_until", None) else None,
+            "password_changed_at": user.password_changed_at.isoformat() if getattr(user, "password_changed_at", None) else None,
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "updated_at": user.updated_at.isoformat() if user.updated_at else None,
         },
@@ -283,6 +288,47 @@ def unlink_entra(
     return user
 
 
+@router.post("/{user_id}/lock", response_model=schemas.UserOut)
+def lock_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(get_current_admin),
+) -> Any:
+    """Manually lock a user's account, blocking login until unlocked (admin only).
+
+    Unlike the automatic lockout (triggered by repeated failed logins and
+    expiring after LOCKOUT_DURATION_MINUTES), a manual lock has no
+    expiry — it stays locked until an admin calls /unlock.
+    """
+    user = db.query(models.User).filter(models.User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if str(user.user_id) == str(current_admin.user_id):
+        raise HTTPException(status_code=400, detail="You cannot lock your own account")
+    # Far-future timestamp — treated as "locked indefinitely" until an admin unlocks it.
+    user.locked_until = datetime.max.replace(tzinfo=timezone.utc) - timedelta(days=1)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.post("/{user_id}/unlock", response_model=schemas.UserOut)
+def unlock_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(get_current_admin),
+) -> Any:
+    """Unlock a user's account and reset their failed-login counter (admin only)."""
+    user = db.query(models.User).filter(models.User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.locked_until = None
+    user.failed_login_count = 0
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: str,
@@ -333,7 +379,7 @@ def get_user_identity_signals(
     entra_matched = None
     na_reasons: dict = {}
     if include_azure:
-        azure = collect_azure_signals(user, None)
+        azure = collect_azure_signals(user, None, getattr(policy, "valid_role_ids", None))
         entra_matched = "user not found in Entra" not in azure.notes
         na_reasons = azure.na_reasons
         for k, v in azure.identity_kwargs().items():

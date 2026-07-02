@@ -56,6 +56,30 @@ def _run_migrations() -> None:
           ADD COLUMN IF NOT EXISTS connector_resource_id uuid
           REFERENCES connector_resources(resource_id) ON DELETE SET NULL
         """,
+        # Login security fields backing the "Low Failed Logins" / "Not Locked"
+        # identity signals.
+        """
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS failed_login_count integer NOT NULL DEFAULT 0
+        """,
+        """
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS locked_until timestamptz
+        """,
+        """
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS password_changed_at timestamptz
+        """,
+        # Best-effort backfill: we don't know the true last-changed date for
+        # existing accounts, so assume it was set at account creation.
+        """
+        UPDATE users SET password_changed_at = created_at WHERE password_changed_at IS NULL
+        """,
+        # Admin-configured Entra group/directory-role IDs for the Role Valid signal.
+        """
+        ALTER TABLE trust_policy_config
+          ADD COLUMN IF NOT EXISTS valid_role_ids json
+        """,
     ]
     with engine.connect() as conn:
         for stmt in migrations:

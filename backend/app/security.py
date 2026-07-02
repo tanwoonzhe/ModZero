@@ -11,10 +11,19 @@ from .settings import get_settings
 
 # Configure passlib with bcrypt
 pwd_context = CryptContext(
-    schemes=["bcrypt"], 
+    schemes=["bcrypt"],
     deprecated="auto",
     bcrypt__rounds=12
 )
+
+# ── Shared auth-security thresholds ──────────────────────────────────────────
+# Used by both the login lockout logic (routers/auth.py) and the "Low Failed
+# Logins" / "Not Locked" / "Password Changed Recently" identity signals
+# (services/identity_signal_service.py) — kept in one place so the numbers
+# shown to admins always match what's actually enforced at login time.
+MAX_FAILED_LOGIN_ATTEMPTS = 5
+LOCKOUT_DURATION_MINUTES = 15
+PASSWORD_MAX_AGE_DAYS = 90
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
