@@ -31,6 +31,7 @@ import { execSync, spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { io, Socket } from "socket.io-client";
 
 import { collectPosture, getOrCreateFingerprint } from "./posture";
 import { detectTunnel } from "./tunnel-detect";
@@ -118,6 +119,7 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let heartbeatTimer: NodeJS.Timeout | null = null;
+let clientSocket: Socket | null = null;
 
 const session = {
   connectedSince: 0,
@@ -286,10 +288,77 @@ function startHeartbeat(): void {
   stopHeartbeat();
   doHeartbeat();
   heartbeatTimer = setInterval(doHeartbeat, 30_000);
+  connectSocket();
 }
 function stopHeartbeat(): void {
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   heartbeatTimer = null;
+  disconnectSocket();
+}
+
+// ── Real-time channel (Trust Policies pushes) ────────────────────────────
+// Complements the 30s heartbeat: when an admin saves a signal-rule change,
+// every connected client app re-runs its device check within seconds
+// instead of waiting for the next manual click. If that check hits a
+// deny_immediately_client signal, the backend also pushes force_logout so
+// the app signs out immediately rather than waiting for its next request.
+function pushEventToRenderer(payload: Record<string, unknown>): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("modzero:push-event", payload);
+  }
+}
+
+function connectSocket(): void {
+  const cfg = readConfig();
+  if (!cfg.url || !cfg.accessToken) return;
+  disconnectSocket();
+
+  clientSocket = io(cfg.url, {
+    path: "/socket.io/socket.io",
+    transports: ["websocket", "polling"],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 10_000,
+  });
+
+  clientSocket.on("connect", () => {
+    clientSocket?.emit("client_auth", { token: cfg.accessToken });
+  });
+
+  clientSocket.on("auth_result", (data: { status: string; detail?: string }) => {
+    if (data?.status !== "ok") {
+      console.warn("Socket client_auth failed:", data?.detail);
+    }
+  });
+
+  clientSocket.on("force_device_check", async (data: { reason?: string }) => {
+    console.log("force_device_check received:", data?.reason);
+    pushEventToRenderer({ type: "force_device_check", reason: data?.reason });
+    try {
+      const outcome = await runDeviceCheckNow();
+      pushEventToRenderer({ type: "device_check_result", ...outcome });
+    } catch (e) {
+      console.error("force_device_check run failed:", e);
+    }
+  });
+
+  clientSocket.on("force_logout", (data: { reason?: string }) => {
+    pushEventToRenderer({ type: "force_logout", reason: data?.reason });
+    forceReauth(`server pushed force_logout: ${data?.reason || "policy"}`);
+  });
+
+  clientSocket.on("connect_error", (err: Error) => {
+    console.warn("Socket connect_error:", err?.message || err);
+  });
+}
+
+function disconnectSocket(): void {
+  if (clientSocket) {
+    clientSocket.removeAllListeners();
+    clientSocket.disconnect();
+    clientSocket = null;
+  }
 }
 async function doHeartbeat(): Promise<void> {
   const cfg = readConfig();
@@ -486,6 +555,11 @@ function authedRequest(
   const url = cfg.url + apiPath;
   const headers: Record<string, string> = {
     Authorization: `Bearer ${cfg.accessToken}`,
+    // Lets the backend distinguish client-app requests from web dashboard
+    // requests, so client_access_enabled (and a deny_immediately_client
+    // signal) can gate this app specifically without also blocking the
+    // admin's own web dashboard session.
+    "X-ModZero-Source": "client",
   };
   let raw: string | undefined;
   if (body !== undefined) {
@@ -516,7 +590,9 @@ function authedRequest(
 // ── Posture / resources / access IPC ────────────────────────────────────
 ipcMain.handle("modzero:collect-posture", () => collectPosture());
 
-ipcMain.handle("modzero:run-device-check", async () => {
+// Shared by the "Run Device Check" button (IPC call below) and the
+// force_device_check Socket.IO push, so both paths behave identically.
+async function runDeviceCheckNow(): Promise<{ signals: unknown; result: Awaited<ReturnType<typeof authedRequest>> }> {
   const signals = await collectPosture();
   // Device check: PS script + Azure Graph on backend can take up to ~30s total
   const result = await authedRequest("POST", "/api/posture/report", signals, 45000);
@@ -529,7 +605,9 @@ ipcMain.handle("modzero:run-device-check", async () => {
     }
   }
   return { signals, result };
-});
+}
+
+ipcMain.handle("modzero:run-device-check", () => runDeviceCheckNow());
 
 ipcMain.handle("modzero:trust-latest", () => authedRequest("GET", "/api/trust/latest"));
 

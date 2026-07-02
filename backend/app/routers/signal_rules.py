@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..deps import get_db, get_current_admin, get_current_user
+from ..sio_server import notify_force_device_check
 
 router = APIRouter(prefix="/signal-rules", tags=["signal-rules"])
 
@@ -91,3 +92,17 @@ def update_signal_rule(
     db.commit()
     db.refresh(rule)
     return _serialize(rule)
+
+
+@router.post("/notify-check")
+async def notify_check(
+    _: models.User = Depends(get_current_admin),
+) -> Any:
+    """Broadcast force_device_check to every connected client app (admin only).
+
+    Called once by the Trust Policies UI after a batch of rule PATCHes
+    completes, so saving several changed rules in one click triggers one
+    device-check push instead of one per rule.
+    """
+    await notify_force_device_check("signal_rules_updated")
+    return {"status": "ok"}

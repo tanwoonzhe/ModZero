@@ -111,6 +111,7 @@ const RoleValidConfigModal: React.FC<{ onClose: () => void }> = ({ onClose }) =>
     setSaving(true);
     try {
       await api.patch('/trust-policy/active', { valid_role_ids: Array.from(selected) });
+      api.post('/signal-rules/notify-check').catch(() => {});
       toast.success(selected.size === 0 ? 'Reset to default: any group/role membership counts' : `Saved — ${selected.size} qualifying group(s)/role(s)`);
       onClose();
     } catch (err: any) {
@@ -287,7 +288,8 @@ const SignalRulesTable: React.FC<{
           enabled: r.enabled, max_points: r.max_points, failure_action: r.failure_action,
         })));
         setSnapshot(Object.fromEntries(rules.map(x => [x.id, x])));
-        toast.success(`Saved ${changed.length} rule${changed.length > 1 ? 's' : ''}`);
+        api.post('/signal-rules/notify-check').catch(() => {});
+        toast.success(`Saved ${changed.length} rule${changed.length > 1 ? 's' : ''} — connected client apps are re-checking now`);
       }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -812,6 +814,7 @@ const ContextRulesTab: React.FC = () => {
         suspicious_ip_penalty: suspiciousIpPenalty,
         require_known_device: requireKnownDevice,
       });
+      api.post('/signal-rules/notify-check').catch(() => {});
       setSavedOk(true);
       toast.success('Context rules saved to backend');
       setTimeout(() => setSavedOk(false), 2000);
@@ -978,6 +981,7 @@ const FypModuleWeightsCard: React.FC = () => {
         identity_weight: identityPct / 100,
         default_threshold: threshold,
       });
+      api.post('/signal-rules/notify-check').catch(() => {});
       setSavedOk(true);
       toast.success('Trust score weights saved to backend');
       setTimeout(() => setSavedOk(false), 2000);

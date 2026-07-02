@@ -26,6 +26,7 @@ from ..services.identity_signal_service import signals_from_local_user, get_mock
 from ..services.posture_scoring import score_posture, weighted_total
 from ..services.signal_rules import get_signal_rules
 from ..settings import get_settings
+from ..sio_server import notify_force_logout
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,31 +43,40 @@ def _maybe_collect_azure(policy: TrustPolicyConfig, user: User, device: Device) 
     return collect_azure_signals(user, device, getattr(policy, "valid_role_ids", None))
 
 
-def _enforce_hard_fails(db: Session, user: User, hard_fails: list[dict]) -> tuple[bool, Optional[str]]:
+async def _enforce_hard_fails(db: Session, user: User, hard_fails: list[dict]) -> tuple[bool, Optional[str]]:
     """Apply the consequence of every signal configured with a hard failure_action.
 
-    deny_immediately_client  → disables User.client_access_enabled, blocking
-                                the next client-app login attempt until an
-                                admin manually re-enables it (routers/auth.py
-                                already checks this flag).
+    deny_immediately_client  → disables User.client_access_enabled (blocking
+                                this user's next client-app request — deps.py
+                                re-checks this on every client-sourced call,
+                                not just login) and pushes a force_logout
+                                Socket.IO event so an already-open client app
+                                logs out within seconds instead of waiting for
+                                its next request.
     deny_immediately_resources → returned as (True, reason) so the caller can
                                 stamp DeviceTrustScore.hard_denied_resources;
-                                access.py's resource gate then refuses every
-                                request against this score until the next
-                                passing device check.
+                                access.py's resource gate and connectors.py's
+                                introspect both refuse every request against
+                                this score until the next passing device check.
 
     Returns (hard_denied_resources, hard_deny_reason).
     """
     client_fails = [f for f in hard_fails if f["failure_action"] == "deny_immediately_client"]
     resource_fails = [f for f in hard_fails if f["failure_action"] == "deny_immediately_resources"]
 
-    if client_fails and user.client_access_enabled:
-        user.client_access_enabled = False
-        db.add(user)
-        log.warning(
-            "Disabling client_access_enabled for %s — failed hard-gate signal(s): %s",
-            user.username, [f["signal"] for f in client_fails],
-        )
+    if client_fails:
+        labels = ", ".join(f["signal"] for f in client_fails)
+        if user.client_access_enabled:
+            user.client_access_enabled = False
+            db.add(user)
+            log.warning(
+                "Disabling client_access_enabled for %s — failed hard-gate signal(s): %s",
+                user.username, [f["signal"] for f in client_fails],
+            )
+        try:
+            await notify_force_logout(str(user.user_id), f"hard_denied_by_policy: {labels}")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("force_logout notification failed for %s: %s", user.username, exc)
 
     if not resource_fails:
         return False, None
@@ -74,7 +84,7 @@ def _enforce_hard_fails(db: Session, user: User, hard_fails: list[dict]) -> tupl
     return True, f"hard_denied_by_policy: {labels}"
 
 
-def _score_and_persist(
+async def _score_and_persist(
     db: Session,
     policy: TrustPolicyConfig,
     current_user: User,
@@ -143,7 +153,7 @@ def _score_and_persist(
 
     full_breakdown = posture_breakdown + ctx_breakdown + id_breakdown
     all_hard_fails = device_hard_fails + context_hard_fails + identity_hard_fails
-    hard_denied_resources, hard_deny_reason = _enforce_hard_fails(db, current_user, all_hard_fails)
+    hard_denied_resources, hard_deny_reason = await _enforce_hard_fails(db, current_user, all_hard_fails)
     if hard_denied_resources:
         decision = "DENY"
         reason = hard_deny_reason
@@ -252,7 +262,7 @@ def _lookup_intune_compliance(device_hostname: Optional[str]) -> Optional[bool]:
 # ── POST /api/posture/report ──────────────────────────────────────────────────
 
 @router.post("/posture/report", status_code=status.HTTP_201_CREATED)
-def submit_posture_report(
+async def submit_posture_report(
     payload: schemas.PostureReportIn,
     request: Request,
     db: Session = Depends(get_db),
@@ -303,7 +313,7 @@ def submit_posture_report(
     db.flush()
 
     # ── 3–9. Score all three modules, enforce hard-fail signals, persist ───────
-    result = _score_and_persist(db, policy, current_user, device, report, source_ip, settings)
+    result = await _score_and_persist(db, policy, current_user, device, report, source_ip, settings)
     trust = result["trust"]
 
     device_contrib = round(result["posture_score"]  * policy.device_weight,   1)
@@ -410,7 +420,7 @@ def get_device_trust_score(
 # ── POST /api/client/posture-report  (alias for client app) ──────────────────
 
 @router.post("/client/posture-report", status_code=status.HTTP_201_CREATED)
-def client_posture_report(
+async def client_posture_report(
     payload: schemas.PostureReportIn,
     request: Request,
     db: Session = Depends(get_db),
@@ -453,7 +463,7 @@ def client_posture_report(
     db.add(report)
     db.flush()
 
-    result = _score_and_persist(db, policy, current_user, device, report, source_ip, settings)
+    result = await _score_and_persist(db, policy, current_user, device, report, source_ip, settings)
     trust = result["trust"]
     posture_score, ctx_score, identity_score = result["posture_score"], result["ctx_score"], result["identity_score"]
     total, threshold, decision, reason = result["total"], result["threshold"], result["decision"], result["reason"]

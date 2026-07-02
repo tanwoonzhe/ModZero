@@ -2,7 +2,7 @@
 
 from typing import Generator, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
 from sqlalchemy.orm import Session
@@ -24,7 +24,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+    request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -40,6 +40,16 @@ def get_current_user(
     user = db.query(User).filter(User.user_id == user_id).first()
     if user is None:
         raise credentials_exception
+
+    # Re-check client_access_enabled on EVERY client-app request, not just at
+    # login. Without this, disabling a user's client access (manually, or via
+    # a deny_immediately_client signal) would only take effect once their
+    # existing JWT expires — up to ACCESS_TOKEN_EXPIRE_MINUTES (8h default).
+    # Web dashboard requests (no X-ModZero-Source header) are unaffected —
+    # client_access_enabled only ever gates the client app.
+    if request.headers.get("X-ModZero-Source") == "client" and not user.client_access_enabled:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="client_access_disabled")
+
     return user
 
 

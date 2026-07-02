@@ -1,4 +1,4 @@
-"""Socket.IO server for real-time communication between controller, dashboard, and connectors."""
+"""Socket.IO server for real-time communication between controller, dashboard, connectors, and the client app."""
 
 import logging
 from typing import Dict
@@ -24,6 +24,8 @@ sio = socketio.AsyncServer(
 _connector_sessions: Dict[str, str] = {}
 # Track connected dashboard sessions
 _dashboard_sessions: set = set()
+# Track connected client-app sessions: sid -> user_id
+_client_sessions: Dict[str, str] = {}
 
 
 @sio.event
@@ -44,6 +46,43 @@ async def disconnect(sid):
             "status": "disconnected",
         }, room="dashboard")
     _dashboard_sessions.discard(sid)
+    _client_sessions.pop(sid, None)
+
+
+@sio.on("client_auth")
+async def on_client_auth(sid, data):
+    """Authenticate a client-app (Electron desktop client) socket connection.
+
+    Joins two rooms: "clients" (every logged-in client-app instance, used to
+    broadcast "a signal rule changed, re-run your device check now") and
+    "client:{user_id}" (used to push a targeted force-logout to one user when
+    a deny_immediately_client signal fails on their next device check).
+    """
+    from .security import decode_access_token
+    from .db import SessionLocal
+    from .models import User
+
+    token = (data or {}).get("token", "")
+    payload = decode_access_token(token) if token else None
+    user_id = payload.get("sub") if payload else None
+    if not user_id:
+        await sio.emit("auth_result", {"status": "error", "detail": "invalid token"}, room=sid)
+        return
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+    finally:
+        db.close()
+    if not user:
+        await sio.emit("auth_result", {"status": "error", "detail": "user not found"}, room=sid)
+        return
+
+    _client_sessions[sid] = str(user.user_id)
+    await sio.enter_room(sid, "clients")
+    await sio.enter_room(sid, f"client:{user.user_id}")
+    await sio.emit("auth_result", {"status": "ok"}, room=sid)
+    logger.info("Client app authenticated for user %s (sid=%s)", user.username, sid)
 
 
 @sio.on("connector_auth")
@@ -96,6 +135,31 @@ async def notify_assessment_update():
     """Notify dashboard clients that assessment data has been updated."""
     await sio.emit("assessment_updated", {}, room="dashboard")
     logger.info("Assessment update event sent to dashboard")
+
+
+async def notify_force_device_check(reason: str = "signal_rules_updated"):
+    """Tell every connected client app to run a device check right now.
+
+    Fired when an admin saves a signal_rules change in Trust Policies, so a
+    new policy (including a fresh Deny Immediately rule) is evaluated against
+    every logged-in device within seconds instead of waiting for the next
+    manual check or 30s heartbeat.
+    """
+    await sio.emit("force_device_check", {"reason": reason}, room="clients")
+    logger.info("force_device_check broadcast to all connected client apps (reason=%s)", reason)
+
+
+async def notify_force_logout(user_id: str, reason: str):
+    """Push an immediate logout to one user's client app(s).
+
+    Fired when a signal configured with failure_action=deny_immediately_client
+    fails on that user's device check. The client app is also blocked at the
+    HTTP layer on its next request (deps.get_current_user re-checks
+    client_access_enabled for client-sourced requests) — this event just
+    removes the up-to-30s delay before that happens.
+    """
+    await sio.emit("force_logout", {"reason": reason}, room=f"client:{user_id}")
+    logger.info("force_logout pushed to user %s (reason=%s)", user_id, reason)
 
 
 def get_sio_app():

@@ -40,6 +40,14 @@ contextBridge.exposeInMainWorld("modzero", {
   tunnelDetect: (): Promise<unknown> => ipcRenderer.invoke("modzero:tunnel-detect"),
   tunnelEnrollment: (args?: { device_id?: string; node_name_hint?: string }): Promise<unknown> =>
     ipcRenderer.invoke("modzero:tunnel-enrollment", args || {}),
+
+  // Real-time push events (Socket.IO force_device_check / force_logout,
+  // relayed from the main process). Returns an unsubscribe function.
+  onPushEvent: (callback: (payload: unknown) => void): (() => void) => {
+    const listener = (_evt: unknown, payload: unknown) => callback(payload);
+    ipcRenderer.on("modzero:push-event", listener);
+    return () => ipcRenderer.removeListener("modzero:push-event", listener);
+  },
 });
 
 contextBridge.exposeInMainWorld("electronAPI", {
