@@ -750,18 +750,24 @@ const UsersPage: React.FC = () => {
             </p>
           </div>
 
-          {/* Local auth explanation banner */}
-          <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-sm text-amber-800 dark:text-amber-300">
-            <strong>Local Auth note:</strong> Account Enabled, Role Valid, MFA, Risk, and CA are resolved live from Microsoft Graph — local auth alone cannot verify these. A user shows real pass/fail values here only when Entra is enabled (Settings → Azure AD Integration) <em>and</em> that user has a linked Entra account (Entra Users tab). Unlinked users cap at 50/100 (Low Failed Logins + Not Locked + Entra Linked + Password Changed Recently). A disabled Entra account triggers a hard gate regardless of score. Accounts auto-lock for 15 minutes after 5 failed logins, or can be locked/unlocked manually from the user's detail page.
-          </div>
+          {/* Local auth explanation banner — only relevant while Entra is off */}
+          {!entraEnabled && (
+            <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-sm text-amber-800 dark:text-amber-300">
+              <strong>Local Auth note:</strong> Account Enabled, Role Valid, MFA, Risk, and CA are resolved live from Microsoft Graph — local auth alone cannot verify these. Enable Entra in Settings → Azure AD Integration and link a user's Entra account (Entra Users tab) to unlock real pass/fail values for these signals. Until then, all local users cap at 50/100 (Low Failed Logins + Not Locked + Entra Linked + Password Changed Recently). Accounts auto-lock for 15 minutes after 5 failed logins, or can be locked/unlocked manually from the user's detail page.
+            </div>
+          )}
 
           {/* Local users signals */}
           <div className="mb-6">
             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
               <span className="px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">Local</span>
               Local User Identity Signals
-              {identitySignalsLoading && <span className="text-xs text-gray-400 font-normal normal-case">refreshing…</span>}
             </h3>
+            {identitySignalsLoading && Object.keys(identitySignals).length === 0 ? (
+              <div className="flex items-center justify-center h-32">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+              </div>
+            ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
                 <thead className="bg-gray-50 dark:bg-gray-800">
@@ -786,8 +792,8 @@ const UsersPage: React.FC = () => {
                     const score = data?.identity_score;
                     const scoreColor = score == null ? 'text-gray-400' : score >= 80 ? 'text-green-600 dark:text-green-400' : score >= 60 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400';
                     const renderCell = (signalKey: string) => {
-                      if (identitySignalsLoading && !data) {
-                        return <span className="text-xs text-gray-400">…</span>;
+                      if (data === null) {
+                        return <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400" title="Failed to load this user's identity signals">Error</span>;
                       }
                       const item = data?.breakdown?.find((b: any) => b.signal === signalKey);
                       if (!item) {
@@ -846,6 +852,7 @@ const UsersPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            )}
           </div>
 
           {/* Entra (Microsoft Graph) identity signals — signal reference / definitions */}
