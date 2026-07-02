@@ -784,6 +784,27 @@
       if (btn && !btn.disabled) btn.click();
     }, 1500);
 
+    // ── Real-time policy pushes (Socket.IO, relayed via preload) ──
+    // force_device_check: an admin saved a Trust Policies change — the main
+    // process is already re-running the check; just tell the user and
+    // refresh once it's done.
+    // force_logout: a deny_immediately_client signal failed on this device's
+    // check — the main process already force-signed-out; this is only here
+    // to explain why the screen just changed.
+    if (M.onPushEvent) {
+      M.onPushEvent((payload) => {
+        if (!payload || typeof payload !== "object") return;
+        if (payload.type === "force_device_check") {
+          toast("warn", "Trust policy updated — running a new device check…");
+        } else if (payload.type === "device_check_result") {
+          tick();
+          toast("ok", "Device check complete — trust score updated");
+        } else if (payload.type === "force_logout") {
+          toast("err", "Signed out by policy: " + (payload.reason || "administrator action"));
+        }
+      });
+    }
+
     // ── Last Access Decision ──
     const LAST_DECISION_KEY = "modzero_last_decision";
 

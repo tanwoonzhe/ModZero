@@ -34,22 +34,39 @@
       {
         "from": "../frontend/dist",
         "to": "frontend",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "assets/icon.ico"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "assets/icon.icns"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "assets/icon.png"
     },
     "nsis": {
@@ -60,7 +77,8 @@
     }
   },
   "dependencies": {
-    "electron-updater": "^6.1.7"
+    "electron-updater": "^6.1.7",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@electron/packager": "^18.3.3",

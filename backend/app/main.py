@@ -15,6 +15,7 @@ from .settings import get_settings
 from .db import init_db, SessionLocal
 from .routers import api_router
 from .init_superuser import create_initial_superuser
+from .sio_server import get_sio_app
 
 
 settings = get_settings()
@@ -59,6 +60,14 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api")
+
+# Real-time channel (dashboard live updates, connector policy pushes, and the
+# client-app force-device-check / force-logout events used by Trust Policies).
+# NOTE: this mount previously didn't exist at all — sio_server.py's server was
+# fully wired (handlers, notify_* helpers) but never actually reachable, so no
+# Socket.IO event ever worked in production. Must be mounted before the catch-
+# all "/" static mount below, or that mount would shadow it.
+app.mount("/socket.io", get_sio_app())
 
 
 @app.get("/docs", include_in_schema=False)

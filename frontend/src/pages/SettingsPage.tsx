@@ -51,6 +51,7 @@ const SettingsPage: React.FC = () => {
       const res = await api.patch("/trust-policy/active", { entra_enabled: next });
       setEntraEnabled(!!res.data.entra_enabled);
       setAzureConnected(res.data.azure_connected ?? azureConnected);
+      api.post("/signal-rules/notify-check").catch(() => {});
       toast.success(next ? "Entra signals enabled" : "Entra signals disabled");
     } catch (error: any) {
       const detail = error?.response?.data?.detail;

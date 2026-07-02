@@ -75,6 +75,7 @@ backend/app/static/client/*.deb
 backend/app/static/client/*.rpm
 backend/app/static/client/*.tar.gz
 electron-client/release/
+client-app/release/*.zip
 
 backend/app/static/client/ModZero-win-portable-*/
 
