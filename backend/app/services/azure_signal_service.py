@@ -46,17 +46,21 @@ def _latest_signin(upn: str) -> Optional[dict]:
     """Return this user's most recent sign-in record, best-effort with caching.
 
     Cache is checked first; on a miss, Graph is fetched synchronously with a
-    20s timeout. The client-app device-check HTTP timeout is 45s so waiting up
-    to 20s here is safe. Once fetched the record is cached for 15 min so every
+    30s timeout. The client-app device-check HTTP timeout is 45s so waiting up
+    to 30s here is safe. Once fetched the record is cached for 15 min so every
     subsequent device check within that window is instant.
 
-    Confirmed on at least one real tenant: this endpoint can exceed even 15s,
-    despite Microsoft's own docs not calling out unusual latency for it — so
-    even 20s is not a guarantee, just a better empirical fit than the 5s this
-    was previously (and incorrectly) set to. On a tenant that's consistently
-    slower than this, Conditional Access OK / Trusted Location will keep
-    showing "Not Configured" — a real Graph-side latency characteristic, not
-    a bug in this function.
+    Confirmed on at least one real tenant: this endpoint exceeded even 20s
+    (server logs: "Read timed out. (read timeout=20)"), despite querying
+    top=1 filtered to a single user — data volume doesn't explain it, this
+    looks like an inherent characteristic of this specific beta endpoint on
+    this tenant/region. 30s is a pragmatic ceiling, not a guarantee: on a
+    tenant this slow, Conditional Access OK / Trusted Location may keep
+    showing "Not Configured" regardless of the timeout value. A real fix
+    would move this off the synchronous device-check path entirely (a
+    background refresh job reading from cache only) rather than keep
+    raising this number — flagged for follow-up if the timeout keeps not
+    being enough.
     """
     key = upn.lower()
     now = time.time()
@@ -64,7 +68,7 @@ def _latest_signin(upn: str) -> Optional[dict]:
     if hit is not None and (now - hit[0]) < _SIGNIN_TTL:
         return hit[1]
     try:
-        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=20)
+        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=30)
     except Exception as exc:  # noqa: BLE001
         log.warning("Sign-in fetch failed for %s: %s", upn, exc)
         logs = []
