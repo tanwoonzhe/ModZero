@@ -157,19 +157,43 @@ try {
 $o | ConvertTo-Json -Compress
 `;
 
+// Diagnostic log — collectWindowsPosture's catch previously swallowed every
+// failure silently, so when it broke there was no way to tell why (timeout?
+// PowerShell error? bad JSON?) without a debugger attached. Now it's written
+// to a small rolling file in userData so a report of "device check shows
+// all N/A" can actually be diagnosed from what the user sends back.
+function logDiagnostic(line: string): void {
+  try {
+    const p = path.join(app.getPath("userData"), "posture-debug.log");
+    const entry = `[${new Date().toISOString()}] ${line}\n`;
+    fs.appendFileSync(p, entry, "utf-8");
+    // Cap the file at ~200KB so it can't grow unbounded across many runs.
+    const stat = fs.statSync(p);
+    if (stat.size > 200_000) {
+      const tail = fs.readFileSync(p, "utf-8").slice(-100_000);
+      fs.writeFileSync(p, tail, "utf-8");
+    }
+  } catch {
+    /* logging must never break posture collection */
+  }
+}
+
 async function collectWindowsPosture(timeoutMs = 30000): Promise<WinPosture> {
   const empty: WinPosture = { firewall: null, antivirus: null, avAdvanced: null, disk: null, lock: null, osPatched: null };
   if (process.platform !== "win32") return empty;
   // -EncodedCommand (base64 UTF-16LE) sidesteps all quoting/escaping issues that
   // plague passing a multi-line script via -Command.
   const encoded = Buffer.from(PS_POSTURE_SCRIPT, "utf16le").toString("base64");
+  const startedAt = Date.now();
   try {
     const { stdout } = await execAsync(
       `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}`,
       { timeout: timeoutMs, encoding: "utf-8", maxBuffer: 1024 * 1024 },
     );
+    const elapsedMs = Date.now() - startedAt;
     const parsed = JSON.parse((stdout || "").trim());
     const asBool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
+    logDiagnostic(`posture script OK in ${elapsedMs}ms: ${stdout.trim()}`);
     return {
       firewall:   asBool(parsed.firewall),
       antivirus:  asBool(parsed.antivirus),
@@ -178,7 +202,13 @@ async function collectWindowsPosture(timeoutMs = 30000): Promise<WinPosture> {
       lock:       asBool(parsed.lock),
       osPatched:  asBool(parsed.osPatched),
     };
-  } catch {
+  } catch (e: any) {
+    const elapsedMs = Date.now() - startedAt;
+    const killed = e?.killed ? " (killed — likely timeout)" : "";
+    logDiagnostic(
+      `posture script FAILED after ${elapsedMs}ms${killed}: code=${e?.code} signal=${e?.signal} ` +
+      `message=${e?.message} stderr=${(e?.stderr || "").slice(0, 2000)} stdout=${(e?.stdout || "").slice(0, 2000)}`
+    );
     return empty;
   }
 }
@@ -227,6 +257,7 @@ export async function collectPosture(): Promise<PostureSignals> {
     win.firewall === null && win.antivirus === null && win.avAdvanced === null &&
     win.disk === null && win.lock === null && win.osPatched === null;
   if (process.platform === "win32" && allNull) {
+    logDiagnostic("first posture attempt returned all-null, retrying once");
     win = await collectWindowsPosture();
   }
   return {

@@ -56,7 +56,7 @@ def _latest_signin(upn: str) -> Optional[dict]:
     if hit is not None and (now - hit[0]) < _SIGNIN_TTL:
         return hit[1]
     try:
-        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=5)
+        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=15)
     except Exception as exc:  # noqa: BLE001
         log.warning("Sign-in fetch failed for %s: %s", upn, exc)
         logs = []
