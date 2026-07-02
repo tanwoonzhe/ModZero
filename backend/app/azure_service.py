@@ -387,6 +387,15 @@ class AzureGraphService:
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching risky users: {str(e)}")
             if hasattr(e, 'response') and e.response is not None:
+                # Graph's actual JSON error body carries the real reason (e.g.
+                # missing permission vs. Entra ID P2 license required for
+                # Identity Protection — riskyUsers is P2-gated even with the
+                # permission fully consented). str(e) alone only has the
+                # status code, not this — log it so a 403 is diagnosable.
+                try:
+                    logger.error(f"Graph error body: {e.response.text[:1000]}")
+                except Exception:  # noqa: BLE001
+                    pass
                 if e.response.status_code == 403:
                     logger.warning("Missing IdentityRiskyUser.Read.All permission")
                     # Must raise, not return [] — the caller (azure_signal_service.py)
