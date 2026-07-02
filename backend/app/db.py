@@ -90,6 +90,12 @@ def _run_migrations() -> None:
         ALTER TABLE device_trust_scores
           ADD COLUMN IF NOT EXISTS hard_deny_reason varchar(256)
         """,
+        # Client app auto device-check interval (hours). Scheduling config
+        # only — never contributes to the trust score. 0 = disabled.
+        """
+        ALTER TABLE trust_policy_config
+          ADD COLUMN IF NOT EXISTS auto_check_interval_hours integer NOT NULL DEFAULT 0
+        """,
     ]
     with engine.connect() as conn:
         for stmt in migrations:

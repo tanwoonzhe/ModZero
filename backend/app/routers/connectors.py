@@ -40,6 +40,7 @@ from ..models import (
 )
 from ..security import decode_access_token
 from ..settings import get_settings
+from ..sio_server import notify_connector_change
 
 router = APIRouter()
 
@@ -263,7 +264,7 @@ def _verify_connector_auth(request: Request, db: Session) -> Connector:
 
 @router.post("/connectors/enroll", status_code=201, response_model=EnrollResponse,
              tags=["connectors"])
-def enroll_connector(body: EnrollRequest, db: Session = Depends(get_db)):
+async def enroll_connector(body: EnrollRequest, db: Session = Depends(get_db)):
     """Exchange a one-time enroll token for permanent connector credentials."""
     token_hash = _hash_token(body.token)
 
@@ -307,6 +308,11 @@ def enroll_connector(body: EnrollRequest, db: Session = Depends(get_db)):
     enroll_token.used_at = datetime.now(timezone.utc)
     enroll_token.used_by_connector_id = connector_id
     db.commit()
+
+    try:
+        await notify_connector_change()
+    except Exception:  # noqa: BLE001
+        pass  # dashboard live-refresh is best-effort; never fail enrollment over it
 
     return EnrollResponse(
         connector_id=str(connector_id),
@@ -597,7 +603,7 @@ def list_connector_resources(
 
 @router.delete("/admin/connectors/{connector_id}", status_code=204,
                tags=["connectors-admin"])
-def delete_connector(
+async def delete_connector(
     connector_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
@@ -610,6 +616,10 @@ def delete_connector(
         raise HTTPException(status_code=404, detail="Connector not found")
     db.delete(connector)
     db.commit()
+    try:
+        await notify_connector_change()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ?�?�?� Token introspection ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�

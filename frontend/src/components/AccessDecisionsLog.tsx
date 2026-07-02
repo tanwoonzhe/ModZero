@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { FaCheck, FaTimes, FaSyncAlt, FaSearch } from "react-icons/fa";
 import api from "../api";
+import { useSocket } from "../hooks/useSocket";
 
 interface AccessLogRow {
   id: string;
@@ -53,6 +54,11 @@ const AccessDecisionsLog: React.FC = () => {
   };
 
   useEffect(() => { load(); }, []);
+
+  // Live refresh — access.py emits "access_attempt" (best-effort) whenever a
+  // new AccessRequestLog row is written, so this list stays current without
+  // a manual refresh or polling.
+  useSocket("access_attempt", () => { load(); });
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {

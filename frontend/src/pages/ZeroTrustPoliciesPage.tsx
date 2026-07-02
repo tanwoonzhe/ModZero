@@ -784,6 +784,7 @@ const ContextRulesTab: React.FC = () => {
   const [unknownDevicePenalty, setUnknownDevicePenalty] = useState(20);
   const [suspiciousIpPenalty, setSuspiciousIpPenalty]   = useState(15);
   const [requireKnownDevice, setRequireKnownDevice]     = useState(true);
+  const [autoCheckIntervalHours, setAutoCheckIntervalHours] = useState(0);
 
   useEffect(() => {
     api.get('/trust-policy/active')
@@ -796,6 +797,7 @@ const ContextRulesTab: React.FC = () => {
         setUnknownDevicePenalty(d.unknown_device_penalty ?? 20);
         setSuspiciousIpPenalty(d.suspicious_ip_penalty ?? 15);
         setRequireKnownDevice(d.require_known_device ?? true);
+        setAutoCheckIntervalHours(d.auto_check_interval_hours ?? 0);
       })
       .catch(() => setError('Failed to load context rules from backend.'))
       .finally(() => setLoading(false));
@@ -813,6 +815,7 @@ const ContextRulesTab: React.FC = () => {
         unknown_device_penalty: unknownDevicePenalty,
         suspicious_ip_penalty: suspiciousIpPenalty,
         require_known_device: requireKnownDevice,
+        auto_check_interval_hours: autoCheckIntervalHours,
       });
       api.post('/signal-rules/notify-check').catch(() => {});
       setSavedOk(true);
@@ -929,6 +932,22 @@ const ContextRulesTab: React.FC = () => {
           </div>
         )}
       </div>
+
+      <div className="px-6 pt-2 pb-2">
+        <div className="border border-dashed border-gray-200 dark:border-gray-700 rounded-lg px-4 divide-y divide-gray-100 dark:divide-gray-700">
+          {row(
+            'Auto Device Check Interval',
+            'Not a trust score signal — purely a schedule. Every N hours, all connected client apps automatically re-run a device check on their own, in addition to manual clicks, app startup, and pushes triggered by policy saves. Set to 0 to disable.',
+            <div className="flex items-center gap-2">
+              <input type="number" min={0} max={168} value={autoCheckIntervalHours}
+                onChange={e => setAutoCheckIntervalHours(Number(e.target.value))}
+                className="w-16 text-center text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+              <span className="text-xs text-gray-400">{autoCheckIntervalHours === 0 ? 'disabled' : 'hours'}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
         <p className="text-xs text-gray-400">
           These rules are stored in the backend database and applied by every trust score calculation (client app device check, resource access gate, dashboard).

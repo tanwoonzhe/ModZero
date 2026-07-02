@@ -11,11 +11,13 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from sqlalchemy import text
 
+import asyncio
+
 from .settings import get_settings
 from .db import init_db, SessionLocal
 from .routers import api_router
 from .init_superuser import create_initial_superuser
-from .sio_server import get_sio_app
+from .sio_server import get_sio_app, set_main_loop
 
 
 settings = get_settings()
@@ -117,9 +119,13 @@ def health() -> JSONResponse:
 
 
 @app.on_event("startup")
-def on_startup() -> None:
+async def on_startup() -> None:
     init_db()
     create_initial_superuser()
+    # Lets sync (`def`) route handlers — which FastAPI runs in a worker
+    # thread — schedule Socket.IO emits onto the loop that's actually
+    # driving the server. See sio_server.emit_threadsafe().
+    set_main_loop(asyncio.get_running_loop())
 
 
 # Serve compiled frontend if present (production / docker build)

@@ -1,7 +1,8 @@
 """Socket.IO server for real-time communication between controller, dashboard, connectors, and the client app."""
 
+import asyncio
 import logging
-from typing import Dict
+from typing import Coroutine, Dict, Optional
 
 import socketio
 
@@ -26,6 +27,33 @@ _connector_sessions: Dict[str, str] = {}
 _dashboard_sessions: set = set()
 # Track connected client-app sessions: sid -> user_id
 _client_sessions: Dict[str, str] = {}
+
+# ── Emitting from sync code ──────────────────────────────────────────────────
+# FastAPI runs `def` (sync) route handlers in a worker thread, not on the
+# event loop actually driving uvicorn/Socket.IO. `await sio.emit(...)` only
+# works from `async def` handlers; sync call sites need this instead.
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Called once from main.py's startup event, which does run on the loop."""
+    global _main_loop
+    _main_loop = loop
+
+
+def emit_threadsafe(coro: Coroutine) -> None:
+    """Schedule a `sio.emit(...)` coroutine from any thread, without blocking
+    the caller. Best-effort: a dashboard live-update failing must never break
+    the request that triggered it.
+    """
+    if _main_loop is None:
+        coro.close()
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(coro, _main_loop)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("emit_threadsafe failed: %s", exc)
+        coro.close()
 
 
 @sio.event
