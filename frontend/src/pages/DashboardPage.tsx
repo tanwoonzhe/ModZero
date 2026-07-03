@@ -252,7 +252,7 @@ const DashboardPage: React.FC = () => {
           <p className="text-sm text-gray-500 dark:text-gray-400">Resource policies, device profiles, context rules, and trust score weights.</p>
           <div className="mt-3 flex items-center gap-2">
             <span className="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">Active</span>
-            {stats.policiesEnforced > 0 && <span className="text-xs text-gray-400">{stats.policiesEnforced} policies</span>}
+            {stats.policiesEnforced > 0 && <span className="text-xs text-gray-400">{stats.policiesEnforced} resources</span>}
           </div>
         </Link>
       </div>

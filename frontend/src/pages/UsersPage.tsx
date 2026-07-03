@@ -455,7 +455,7 @@ const UsersPage: React.FC = () => {
       {activeTab === 'local' && (
         <div>
           {/* Summary stat cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
               <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">Total Users</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">{localUsers.length}</p>
@@ -467,11 +467,6 @@ const UsersPage: React.FC = () => {
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
               <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">With Devices</p>
               <p className="text-2xl font-bold text-purple-600">{localUsers.filter(u => deviceCountFor(u.user_id) > 0).length}</p>
-            </div>
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-              <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">Without MFA</p>
-              <p className="text-2xl font-bold text-yellow-600">—</p>
-              <p className="text-xs text-gray-400">Requires Graph</p>
             </div>
           </div>
 
