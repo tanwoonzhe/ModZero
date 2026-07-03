@@ -99,16 +99,31 @@
     .res-row .grow { flex: 1; }
     .res-row .decision { font-size: 12px; padding: 4px 10px; border-radius: 6px; }
 
-    .factor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 8px; }
-    .factor { padding: 10px 12px; background: #0b1220; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
-    .factor .f-name { color: var(--muted); margin-bottom: 4px; }
-    .factor .f-val { font-weight: 600; }
-    .factor .f-pts { color: var(--muted); font-size: 11px; margin-top: 2px; }
+    .factor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+    .factor {
+      padding: 10px 12px; background: #0b1220; border: 1px solid var(--border); border-radius: 8px; font-size: 12px;
+      cursor: pointer; transition: border-color .15s;
+    }
+    .factor:hover { border-color: #475569; }
     .factor.pass { border-color: rgba(16,185,129,.4); }
-    .factor.pass .f-val { color: #6ee7b7; }
     .factor.fail { border-color: rgba(239,68,68,.35); }
-    .factor.fail .f-val { color: #fca5a5; }
-    .factor.unknown .f-val { color: var(--muted); }
+    .f-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .f-name { color: var(--text); font-weight: 600; font-size: 12.5px; line-height: 1.4; }
+    .f-badges { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: 8px; }
+    .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 9.5px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase; white-space: nowrap; }
+    .pill-source-local   { background: rgba(148,163,184,.15); color: var(--muted); }
+    .pill-source-entra   { background: rgba(99,102,241,.18); color: #a5b4fc; }
+    .pill-status-pass    { background: rgba(16,185,129,.15); color: #6ee7b7; }
+    .pill-status-fail    { background: rgba(239,68,68,.15); color: #fca5a5; }
+    .pill-status-na      { background: rgba(148,163,184,.15); color: var(--muted); }
+    .pill-status-license { background: rgba(245,158,11,.15); color: #fcd34d; }
+    .f-chevron { color: var(--muted); font-size: 9px; transition: transform .15s; }
+    .factor.expanded .f-chevron { transform: rotate(180deg); }
+    .f-detail { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 11.5px; color: #cbd5e1; line-height: 1.55; }
+    .factor.expanded .f-detail { display: block; }
+    .f-detail p { margin: 0 0 6px; }
+    .f-detail p:last-child { margin-bottom: 0; }
+    .f-detail .f-admin { color: #fcd34d; }
 
     .decision-banner {
       display: flex; align-items: center; gap: 14px; padding: 14px 16px;
@@ -434,86 +449,135 @@
     $("refresh").addEventListener("click", () => M.heartbeatNow().then(tick));
     $("disconnect").addEventListener("click", () => M.disconnect());
 
+    // Labels mirror backend/app/services/signal_rule_defaults.py exactly (single
+    // source of formal, Title Case names across the admin console and this
+    // screen). Source (Local/Entra) and status are shown as badges instead of
+    // being baked into the name, so no name carries a parenthetical suffix.
     const FACTOR_LABELS = {
       firewall_enabled:        "Firewall Enabled",
       antivirus_enabled:       "Antivirus Enabled",
       av_advanced_protection:  "AV Advanced Protection",
-      disk_encryption_enabled: "Disk Encryption",
-      screen_lock_enabled:     "Screen Lock",
+      disk_encryption_enabled: "Disk Encryption Enabled",
+      screen_lock_enabled:     "Screen Lock Enabled",
       os_supported:            "OS Recently Patched",
       client_healthy:          "Client Version Supported",
       intune_compliant:        "Intune Compliant",
-      // Entra (Microsoft Graph) device factors — appear only when Entra is enabled
       entra_registered:        "Entra Registered",
       intune_managed:          "Intune Managed",
       intune_encrypted:        "Intune Encrypted",
     };
 
     const CONTEXT_LABELS = {
-      known_device:              "Known Device",
-      normal_access_time:        "Normal Access Time",
-      no_repeated_failed_login:  "No Failed Logins",
-      normal_ip:                 "Normal IP Address",
-      known_user_device_pair:    "Known User-Device Pair",
-      resource_pattern_normal:   "Resource Pattern Normal",
-      gateway_online:            "Gateway Online",
-      // Entra (Microsoft Graph) context signals — appear only when Entra is enabled
-      signin_risk_low:           "Sign-in Risk Low (Entra)",
-      trusted_location:          "Trusted Location (Entra)",
+      normal_access_time:         "Normal Access Time",
+      no_repeated_failed_login:   "No Repeated Failed Login",
+      normal_ip:                  "Normal / Not Blocked IP",
+      trusted_network:            "Trusted Network",
+      network_profile_check:      "Network Profile Check",
+      access_frequency_check:     "Access Frequency Check",
+      gateway_online:             "Gateway / Connector Online",
+      signin_risk_low:            "Sign-in Risk Low",
+      trusted_location:           "Trusted Location",
+      latest_signin_ip_match:     "Latest Sign-in IP Match",
+      signin_location_consistent: "Sign-in Location Consistent",
     };
 
     const IDENTITY_LABELS = {
-      account_enabled:   "Account Enabled (IdP)",
-      role_valid:        "Role Valid (IdP)",
-      recent_login:      "Recent Login",
-      low_failed_logins: "Low Failed Logins",
-      not_locked:        "Account Not Locked",
-      // Entra (Microsoft Graph) identity signals — appear only when Entra is enabled
-      mfa_registered:        "MFA Registered (Entra)",
-      identity_risk_low:     "Identity Risk Low (Entra)",
-      conditional_access_ok: "Conditional Access OK (Entra)",
+      low_failed_logins:         "Low Failed Login Count",
+      not_locked:                "Account Not Locked",
+      entra_linked:               "Entra Linked",
+      password_changed_recently: "Password Changed Recently",
+      account_enabled:           "Account Enabled",
+      role_valid:                "Role Valid",
+      mfa_registered:            "MFA Registered",
+      identity_risk_low:         "Identity Risk Low",
     };
 
-    function renderFactors(breakdown) {
-      const grid = $("factorGrid");
-      grid.innerHTML = "";
-      (breakdown || []).forEach((b) => {
-        // passed == null means N/A (not collected / not configured)
-        const isNA = b.passed == null;
-        const notConfigured = isNA && (b.status === "not_configured" || b.note === "not configured");
-        const cls = isNA ? "unknown" : b.passed ? "pass" : "fail";
-        const label = isNA ? (notConfigured ? "Not Configured" : "N/A") : b.passed ? "Pass ✓" : "Fail ✗";
-        const name = FACTOR_LABELS[b.factor] || b.factor.replace(/_/g, " ");
-        const note = b.note ? ` <span style="color:var(--muted);font-size:10px">(${b.note})</span>` : "";
-        const ptsText = isNA ? `—` : `+${b.points ?? 0} / ${b.max ?? "—"} pts`;
-        const el = document.createElement("div");
-        el.className = "factor " + cls;
-        el.innerHTML = `<div class="f-name">${name}${note}</div><div class="f-val">${label}</div><div class="f-pts">${ptsText}</div>`;
-        grid.appendChild(el);
-      });
+    // Per-signal detail shown only inside the expanded card: what it measures,
+    // a self-serve fix (shown on Fail), and an admin-facing note (shown on Fail
+    // or Not Configured/Needs License) when fixing it requires tenant-admin
+    // action. `license: true` marks signals gated behind Entra ID P2 (Identity
+    // Protection) so a benign "not configured" reads as "Needs P2 License"
+    // instead of the more alarming generic "Not Configured".
+    const SIGNAL_INFO = {
+      firewall_enabled:        { desc: "Windows Firewall must be enabled for all three network profiles (Domain, Private, Public).", fix: "Open Windows Security → Firewall & network protection and turn the firewall on for every profile." },
+      antivirus_enabled:       { desc: "An active, registered antivirus product must be running.", fix: "Turn on Windows Defender (or your organization's antivirus)." },
+      av_advanced_protection:  { desc: "Real-time / cloud-delivered protection must be enabled in your antivirus.", fix: "Enable real-time protection and cloud-delivered protection in Windows Security." },
+      disk_encryption_enabled: { desc: "The system drive must be encrypted (BitLocker or equivalent).", fix: "Enable device encryption from Windows Settings → Privacy & security → Device encryption." },
+      screen_lock_enabled:     { desc: "A screen lock with an idle timeout must be configured.", fix: "Set a lock-screen timeout under Windows Settings → Accounts → Sign-in options." },
+      os_supported:            { desc: "The operating system must have recent security updates installed.", fix: "Install pending updates via Windows Update." },
+      client_healthy:          { desc: "The ModZero client app must be on a supported version.", fix: "Update the ModZero client app to the latest release." },
+      intune_compliant:        { desc: "The device must be marked compliant by Microsoft Intune.", fix: "Resolve the compliance issues reported in the Company Portal app.", admin: "Requires Intune to be configured for this tenant and the device to be enrolled." },
+      entra_registered:        { desc: "This device's hostname must match a device registered in Microsoft Entra ID.", admin: "Device registration is managed by your Entra/IT administrator." },
+      intune_managed:          { desc: "This device's hostname must match a device enrolled in Microsoft Intune.", admin: "Device enrollment is managed by your Entra/IT administrator." },
+      intune_encrypted:        { desc: "Intune must report this device's disk as encrypted." },
+
+      low_failed_logins:         { desc: "Fewer failed login attempts than the configured limit in the current window." },
+      not_locked:                { desc: "The account must not be currently locked out.", fix: "Wait for the lockout to expire, or ask an admin to unlock the account." },
+      entra_linked:              { desc: "The local account must be linked to a Microsoft Entra account.", admin: "Only an administrator can link an account, under Users → Entra Users." },
+      password_changed_recently: { desc: "The account password must have been changed within the policy's max age.", fix: "Change your password from Settings → Change Password." },
+      account_enabled:           { desc: "The account must be enabled (not disabled) in Microsoft Entra ID.", admin: "Only an Entra/IT administrator can re-enable a disabled account." },
+      role_valid:                { desc: "The user must belong to at least one qualifying Entra group or directory role.", admin: "Add the user to a qualifying Entra group/role, or check the qualifying set under Trust Policies → Identity Rules → Role Valid → Configure (by default, any group/role membership qualifies)." },
+      mfa_registered:            { desc: "The user must have at least one MFA method registered in Entra.", fix: "Register an MFA method at aka.ms/mfasetup." },
+      identity_risk_low:         { desc: "Microsoft Entra ID Protection must report this user's risk level as none/low.", admin: "Requires a Microsoft Entra ID P2 license (Identity Protection) plus the app registration's IdentityRiskyUser.Read.All permission with admin consent.", license: true },
+
+      normal_access_time:         { desc: "The request must occur within the allowed access-hours window (08:00–20:00 by default)." },
+      no_repeated_failed_login:   { desc: "Fewer failed login attempts than the configured limit in the current window." },
+      normal_ip:                  { desc: "The source IP must not be on the admin-configured blocked-IP list." },
+      trusted_network:            { desc: "The source IP must fall inside an admin-configured trusted network/CIDR range.", admin: "Configured under Trust Policies → Context Rules → Trusted Networks." },
+      network_profile_check:      { desc: "Windows must classify the active network connection as Private or Domain, not Public.", fix: "Open Windows Settings → Network & Internet → your network → Network profile type, and set it to Private (or connect to a trusted network)." },
+      access_frequency_check:     { desc: "The number of access requests within the lookback window must stay under the configured limit." },
+      gateway_online:             { desc: "The ModZero connector/gateway serving this resource must be reachable." },
+      signin_risk_low:            { desc: "Microsoft Entra ID Protection must report this user's sign-in risk as none/low.", admin: "Requires a Microsoft Entra ID P2 license (Identity Protection) plus the app registration's IdentityRiskyUser.Read.All permission with admin consent.", license: true },
+      trusted_location:           { desc: "The user's most recent sign-in must originate from an Entra Conditional Access Named Location marked as trusted.", admin: "Requires Named Locations configured (and marked trusted) in Entra, plus the app registration's AuditLog.Read.All permission with admin consent." },
+      latest_signin_ip_match:     { desc: "This device check's source IP must match the IP Entra recorded for the user's most recent sign-in.", admin: "Requires the app registration's AuditLog.Read.All permission with admin consent, and at least one recent Entra sign-in record for this user." },
+      signin_location_consistent: { desc: "The user's two most recent sign-ins must originate from the same country.", admin: "Requires the app registration's AuditLog.Read.All permission with admin consent, and at least two recent Entra sign-in records for this user." },
+    };
+
+    function titleCase(key) {
+      return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
     }
 
-    // null result label: "Not Configured" when the backend says the signal has no
-    // tenant policy (benign), otherwise "N/A" (could not collect / transient).
-    function naLabel(b) {
-      return b.status === "not_configured" ? "Not Configured" : "N/A";
+    function statusOf(b, info) {
+      if (b.passed != null) return b.passed ? { cls: "pass", label: "Pass" } : { cls: "fail", label: "Fail" };
+      const notConfigured = b.status === "not_configured" || b.note === "not configured";
+      if (notConfigured && b.source === "entra" && info && info.license) {
+        return { cls: "license", label: "Needs P2 License" };
+      }
+      return { cls: "na", label: notConfigured ? "Not Configured" : "N/A" };
     }
 
-    function renderSignalGrid(breakdown, grid, labelMap) {
+    function renderSignalCards(breakdown, grid, labelMap) {
       grid.innerHTML = "";
       (breakdown || []).forEach((b) => {
-        const cls = b.passed == null ? "unknown" : b.passed ? "pass" : "fail";
-        const label = b.passed == null ? naLabel(b) : b.passed ? "Pass ✓" : "Fail ✗";
-        const name = labelMap[b.signal] || b.signal.replace(/_/g, " ");
-        const noteParts = [];
-        if (b.note) noteParts.push(b.note);
-        if (b.source && b.source !== "local") noteParts.push(`via ${b.source}`);
-        const noteHtml = noteParts.length
-          ? ` <span style="color:var(--muted);font-size:10px">(${noteParts.join(", ")})</span>`
-          : "";
+        const key = b.factor || b.signal;
+        const info = SIGNAL_INFO[key] || {};
+        const name = labelMap[key] || titleCase(key);
+        const source = b.source === "entra" ? "entra" : "local";
+        const { cls, label } = statusOf(b, info);
+        const isFail = cls === "fail";
+        const isOpenIssue = isFail || cls === "na" || cls === "license";
+
+        const detail = [];
+        detail.push(`<p><strong>Points:</strong> ${cls === "pass" || cls === "fail" ? `${b.points ?? 0} / ${b.max ?? "—"}` : "— (excluded from scoring)"}</p>`);
+        if (info.desc) detail.push(`<p>${info.desc}</p>`);
+        if (b.note) detail.push(`<p><strong>Reported reason:</strong> ${escapeHtml(b.note)}</p>`);
+        if (isFail && info.fix) detail.push(`<p><strong>How to fix:</strong> ${info.fix}</p>`);
+        if (isOpenIssue && info.admin) detail.push(`<p class="f-admin"><strong>Needs admin support:</strong> ${info.admin}</p>`);
+
         const el = document.createElement("div");
         el.className = "factor " + cls;
-        el.innerHTML = `<div class="f-name">${name}${noteHtml}</div><div class="f-val">${label}</div><div class="f-pts">+${b.points ?? 0} / ${b.max ?? "—"} pts</div>`;
+        el.innerHTML = `
+          <div class="f-head">
+            <div class="f-name">${name}</div>
+            <div class="f-badges">
+              <span class="pill pill-source-${source}">${source === "entra" ? "Entra" : "Local"}</span>
+              <span class="pill pill-status-${cls}">${label}</span>
+              <span class="f-chevron">&#9662;</span>
+            </div>
+          </div>
+          <div class="f-detail">${detail.join("")}</div>
+        `;
+        el.addEventListener("click", () => el.classList.toggle("expanded"));
         grid.appendChild(el);
       });
     }
@@ -555,9 +619,9 @@
         </div>
       `;
 
-      renderFactors(r.breakdown);
-      renderSignalGrid(r.context_breakdown  || [], $("contextGrid"),  CONTEXT_LABELS);
-      renderSignalGrid(r.identity_breakdown || [], $("identityGrid"), IDENTITY_LABELS);
+      renderSignalCards(r.breakdown           || [], $("factorGrid"),  FACTOR_LABELS);
+      renderSignalCards(r.context_breakdown   || [], $("contextGrid"), CONTEXT_LABELS);
+      renderSignalCards(r.identity_breakdown  || [], $("identityGrid"), IDENTITY_LABELS);
 
       // Show/hide breakdown sections
       $("contextBreakdownSection").style.display  = (r.context_breakdown  && r.context_breakdown.length)  ? "" : "none";
