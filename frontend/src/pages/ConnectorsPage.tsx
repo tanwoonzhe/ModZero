@@ -183,7 +183,11 @@ function SessionStatusBadge({ status }: { status: string }) {
   );
 }
 
-const RESOURCE_TYPES = ["web", "ssh", "rdp", "database", "api"];
+// Only "web" is actually implemented — the connector runtime only ever
+// HTTP-proxies (see connector_runtime/proxy.py), so ssh/rdp/database/api
+// were cosmetic labels with no behavioral effect. Trimmed to avoid
+// suggesting a capability that doesn't exist.
+const RESOURCE_TYPES = ["web"];
 
 const BLANK_RESOURCE = {
   name: "", description: "", resource_type: "web",
@@ -431,8 +435,9 @@ const ConnectorsPage: React.FC = () => {
   const [createdToken, setCreatedToken] = useState<TokenCreateResult | null>(null);
   const [deployTab, setDeployTab] = useState<"docker" | "linux">("docker");
 
-  // Route creation modal
+  // Route creation/edit modal
   const [showRouteModal, setShowRouteModal] = useState(false);
+  const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [routeForm, setRouteForm] = useState({
     name: "",
     network: "default",
@@ -441,6 +446,7 @@ const ConnectorsPage: React.FC = () => {
     target_port: 80,
     path_prefix: "",
     connector_id: "",
+    is_active: true,
   });
 
   // Resource CRUD
@@ -535,18 +541,46 @@ const ConnectorsPage: React.FC = () => {
     }
   };
 
-  const handleCreateRoute = async () => {
+  const resetRouteForm = () => {
+    setRouteForm({ name: "", network: "default", protocol: "http", target_host: "", target_port: 80, path_prefix: "", connector_id: "", is_active: true });
+    setEditingRouteId(null);
+  };
+
+  const openEditRoute = (r: ConnectorRoute) => {
+    setRouteForm({
+      name: r.name,
+      network: r.network,
+      protocol: r.protocol,
+      target_host: r.target_host,
+      target_port: r.target_port,
+      path_prefix: r.path_prefix,
+      connector_id: r.connector_id || "",
+      is_active: r.is_active,
+    });
+    setEditingRouteId(r.resource_id);
+    setShowRouteModal(true);
+  };
+
+  const handleSaveRoute = async () => {
     try {
-      await api.post("/admin/connectors/resources", {
-        ...routeForm,
-        connector_id: routeForm.connector_id || undefined,
-      });
-      toast.success("Route created");
+      if (editingRouteId) {
+        await api.put(`/admin/connectors/resources/${editingRouteId}`, {
+          ...routeForm,
+          connector_id: routeForm.connector_id || undefined,
+        });
+        toast.success("Route updated");
+      } else {
+        await api.post("/admin/connectors/resources", {
+          ...routeForm,
+          connector_id: routeForm.connector_id || undefined,
+        });
+        toast.success("Route created");
+      }
       setShowRouteModal(false);
-      setRouteForm({ name: "", network: "default", protocol: "http", target_host: "", target_port: 80, path_prefix: "", connector_id: "" });
+      resetRouteForm();
       fetchData();
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Failed to create route");
+      toast.error(err.response?.data?.detail || (editingRouteId ? "Failed to update route" : "Failed to create route"));
     }
   };
 
@@ -615,6 +649,12 @@ const ConnectorsPage: React.FC = () => {
   const onlineCount = connectors.filter(c => c.status === "online").length;
   const offlineCount = connectors.filter(c => c.status === "offline").length;
   const degradedCount = connectors.filter(c => c.status === "degraded").length;
+
+  const sortedTokens = [...tokens].sort((a, b) => {
+    if (a.status === "used" && b.status !== "used") return -1;
+    if (a.status !== "used" && b.status === "used") return 1;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
 
   const filteredResources = protectedResources.filter(
     (r) =>
@@ -861,7 +901,7 @@ const ConnectorsPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                {tokens.map(t => (
+                {sortedTokens.map(t => (
                   <tr key={t.token_id} className="hover:bg-gray-50 dark:hover:bg-gray-900">
                     <td className="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-300">{t.token_id.slice(0, 8)}...</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{t.network}</td>
@@ -908,7 +948,7 @@ const ConnectorsPage: React.FC = () => {
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">HTTP proxy routes registered on connectors</p>
             </div>
             <button
-              onClick={() => setShowRouteModal(true)}
+              onClick={() => { resetRouteForm(); setShowRouteModal(true); }}
               className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 flex items-center gap-1"
             >
               <FaPlus /> Add Route
@@ -947,13 +987,22 @@ const ConnectorsPage: React.FC = () => {
                       {r.is_active ? <FaCheck className="text-green-500" /> : <FaTimes className="text-red-500" />}
                     </td>
                     <td className="px-4 py-3">
-                      <button
-                        onClick={() => handleDeleteRoute(r.resource_id, r.name)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
-                        title="Delete route"
-                      >
-                        <FaTrash size={12} />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => openEditRoute(r)}
+                          className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded"
+                          title="Edit route"
+                        >
+                          <FaPencilAlt size={12} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteRoute(r.resource_id, r.name)}
+                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                          title="Delete route"
+                        >
+                          <FaTrash size={12} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1303,7 +1352,7 @@ const ConnectorsPage: React.FC = () => {
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-lg w-full">
             <div className="p-6 border-b border-gray-200 dark:border-gray-700">
               <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <FaCubes className="text-indigo-500" /> Add Proxy Route
+                <FaCubes className="text-indigo-500" /> {editingRouteId ? "Edit Proxy Route" : "Add Proxy Route"}
               </h2>
             </div>
             <div className="p-6 space-y-4">
@@ -1354,9 +1403,19 @@ const ConnectorsPage: React.FC = () => {
                   ))}
                 </select>
               </div>
+              {editingRouteId && (
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox" checked={routeForm.is_active}
+                    onChange={e => setRouteForm({ ...routeForm, is_active: e.target.checked })}
+                    className="w-4 h-4 text-indigo-600 rounded"
+                  />
+                  <span className="text-sm text-gray-700 dark:text-gray-300">Active</span>
+                </label>
+              )}
               <div className="flex gap-2 justify-end pt-2">
-                <button onClick={() => setShowRouteModal(false)} className="px-4 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300">Cancel</button>
-                <button onClick={handleCreateRoute} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700" disabled={!routeForm.name || !routeForm.target_host}>Create Route</button>
+                <button onClick={() => { setShowRouteModal(false); resetRouteForm(); }} className="px-4 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300">Cancel</button>
+                <button onClick={handleSaveRoute} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700" disabled={!routeForm.name || !routeForm.target_host}>{editingRouteId ? "Update Route" : "Create Route"}</button>
               </div>
             </div>
           </div>

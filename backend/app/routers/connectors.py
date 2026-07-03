@@ -129,6 +129,20 @@ class ResourceCreateRequest(BaseModel):
     path_prefix: str = ""
 
 
+class ResourceUpdateRequest(BaseModel):
+    """Full-replace update for a connector route — mirrors ResourceCreateRequest
+    (the edit form is pre-filled from the existing route, so every field is
+    always sent, same as create)."""
+    name: str
+    network: str = "default"
+    connector_id: Optional[str] = None
+    protocol: str = "http"
+    target_host: str
+    target_port: int = 80
+    path_prefix: str = ""
+    is_active: bool = True
+
+
 class ResourceOut(BaseModel):
     resource_id: uuid.UUID
     connector_id: Optional[uuid.UUID] = None
@@ -591,6 +605,61 @@ async def create_connector_resource(
     db.refresh(resource)
 
     await _push_policy_update_for_resource(db, resource)
+
+    return ResourceOut(
+        resource_id=resource.resource_id,
+        connector_id=resource.connector_id,
+        network=resource.network,
+        name=resource.name,
+        protocol=resource.protocol.value if hasattr(resource.protocol, 'value') else resource.protocol,
+        target_host=resource.target_host,
+        target_port=int(resource.target_port),
+        path_prefix=resource.path_prefix or "",
+        is_active=resource.is_active,
+        created_at=resource.created_at,
+    )
+
+
+@router.put("/admin/connectors/resources/{resource_id}", response_model=ResourceOut,
+            tags=["connectors-admin"])
+async def update_connector_resource(
+    resource_id: str,
+    body: ResourceUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """Update a connector route (proxy target)."""
+    resource = db.query(ConnectorResource).filter(
+        ConnectorResource.resource_id == resource_id
+    ).first()
+    if not resource:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    connector_id = None
+    if body.connector_id:
+        connector = db.query(Connector).filter(
+            Connector.connector_id == body.connector_id
+        ).first()
+        if not connector:
+            raise HTTPException(status_code=404, detail="Connector not found")
+        connector_id = connector.connector_id
+
+    resource.name = body.name
+    resource.network = body.network
+    resource.connector_id = connector_id
+    resource.protocol = ResourceProtocolEnum(body.protocol)
+    resource.target_host = body.target_host
+    resource.target_port = body.target_port
+    resource.path_prefix = body.path_prefix
+    resource.is_active = body.is_active
+    db.commit()
+    db.refresh(resource)
+
+    await _push_policy_update_for_resource(db, resource)
+    try:
+        await notify_connector_change()
+    except Exception:  # noqa: BLE001
+        pass
 
     return ResourceOut(
         resource_id=resource.resource_id,
