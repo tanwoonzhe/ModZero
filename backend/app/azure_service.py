@@ -336,7 +336,13 @@ class AzureGraphService:
             '$orderby': 'createdDateTime desc'
         }
         if upn:
-            params['$filter'] = f"userPrincipalName eq '{upn}'"
+            # Lowercase: userPrincipalName is case-insensitive by spec, but this
+            # endpoint's $filter eq is case-sensitive — and the casing Graph
+            # returns for the same UPN differs between /users (tenant's
+            # as-typed domain casing) and /auditLogs/signIns (lowercased),
+            # so filtering with a /users-sourced UPN verbatim silently
+            # matches zero records instead of erroring.
+            params['$filter'] = f"userPrincipalName eq '{upn.lower()}'"
 
         try:
             response = requests.get(url, headers=headers, params=params, timeout=timeout)
