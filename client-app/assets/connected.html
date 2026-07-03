@@ -506,10 +506,9 @@
       network_profile_check:      "Network Profile Check",
       access_frequency_check:     "Access Frequency Check",
       gateway_online:             "Gateway / Connector Online",
-      signin_risk_low:            "Sign-in Risk Low",
-      trusted_location:           "Trusted Location",
-      latest_signin_ip_match:     "Latest Sign-in IP Match",
-      signin_location_consistent: "Sign-in Location Consistent",
+      signin_risk_low:      "Sign-in Risk Low",
+      mfa_enforced_signin:  "MFA Enforced at Sign-in",
+      modern_auth_used:     "Modern Authentication Used",
     };
 
     const IDENTITY_LABELS = {
@@ -558,10 +557,9 @@
       network_profile_check:      { desc: "Windows must classify the active network connection as Private or Domain, not Public.", fix: "Open Windows Settings → Network & Internet → your network → Network profile type, and set it to Private (or connect to a trusted network)." },
       access_frequency_check:     { desc: "The number of access requests within the lookback window must stay under the configured limit." },
       gateway_online:             { desc: "The ModZero connector/gateway serving this resource must be reachable." },
-      signin_risk_low:            { desc: "Microsoft Entra ID Protection must report this user's sign-in risk as none/low.", admin: "Requires a Microsoft Entra ID P2 license (Identity Protection) plus the app registration's IdentityRiskyUser.Read.All permission with admin consent.", license: true },
-      trusted_location:           { desc: "The user's most recent sign-in must originate from an Entra Conditional Access Named Location marked as trusted.", admin: "Requires Named Locations configured (and marked trusted) in Entra, plus the app registration's AuditLog.Read.All permission with admin consent." },
-      latest_signin_ip_match:     { desc: "This device check's source IP must match the IP Entra recorded for the user's most recent sign-in.", admin: "Requires the app registration's AuditLog.Read.All permission with admin consent, and at least one recent Entra sign-in record for this user." },
-      signin_location_consistent: { desc: "The user's two most recent sign-ins must originate from the same country.", admin: "Requires the app registration's AuditLog.Read.All permission with admin consent, and at least two recent Entra sign-in records for this user." },
+      signin_risk_low:      { desc: "Microsoft Entra ID Protection must report this user's sign-in risk as none/low.", admin: "Requires a Microsoft Entra ID P2 license (Identity Protection) plus the app registration's IdentityRiskyUser.Read.All permission with admin consent.", license: true },
+      mfa_enforced_signin:  { desc: "MFA must have actually been required and satisfied on the user's most recent Entra sign-in.", fix: "Complete an MFA prompt on your next sign-in.", admin: "Requires the app registration's AuditLog.Read.All permission with admin consent, and at least one recent Entra sign-in record for this user." },
+      modern_auth_used:     { desc: "The client app on the user's most recent Entra sign-in must use modern authentication, not a legacy protocol (IMAP4, POP3, SMTP, Exchange ActiveSync, etc.).", fix: "Sign in through a modern client (browser or the Microsoft mobile/desktop app) instead of a legacy mail protocol.", admin: "Requires the app registration's AuditLog.Read.All permission with admin consent, and at least one recent Entra sign-in record for this user." },
     };
 
     function titleCase(key) {

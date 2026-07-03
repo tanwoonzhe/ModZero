@@ -43,15 +43,12 @@ _signin_cache: dict = {}  # upn(lower) -> (fetched_at, latest_record|None)
 
 
 def _recent_signins(upn: str) -> list[dict]:
-    """Return this user's 2 most recent sign-in records (newest first), best-effort with caching.
+    """Return this user's most recent sign-in record (newest first), best-effort with caching.
 
     Cache is checked first; on a miss, Graph is fetched synchronously with a
     30s timeout. The client-app device-check HTTP timeout is 45s so waiting up
-    to 30s here is safe. Once fetched the records are cached for 15 min so every
-    subsequent device check within that window is instant. Fetching top=2
-    instead of top=1 costs nothing extra (same query) and lets one fetch back
-    both Trusted Location / Latest Sign-in IP Match (need only the newest
-    record) and Sign-in Location Consistency (needs the two most recent).
+    to 30s here is safe. Once fetched the record is cached for 15 min so every
+    subsequent device check within that window is instant.
 
     Confirmed on at least one real tenant: this endpoint exceeded even 20s
     (server logs: "Read timed out. (read timeout=20)"), despite querying
@@ -70,7 +67,7 @@ def _recent_signins(upn: str) -> list[dict]:
     if hit is not None and (now - hit[0]) < _SIGNIN_TTL:
         return hit[1]
     try:
-        logs = azure_service.get_sign_in_logs(top=2, upn=upn, timeout=30)
+        logs = azure_service.get_sign_in_logs(top=1, upn=upn, timeout=30)
     except Exception as exc:  # noqa: BLE001
         log.warning("Sign-in fetch failed for %s: %s", upn, exc)
         logs = []
@@ -83,8 +80,8 @@ def _recent_signins(upn: str) -> list[dict]:
     if logs:
         first = logs[0]
         log.warning(
-            "Sign-in fetch for %s: %d record(s). newest: ipAddress=%r networkLocationDetails=%r location=%r",
-            upn, len(logs), first.get("ipAddress"), first.get("networkLocationDetails"), first.get("location"),
+            "Sign-in fetch for %s: %d record(s). newest: authenticationRequirement=%r clientAppUsed=%r",
+            upn, len(logs), first.get("authenticationRequirement"), first.get("clientAppUsed"),
         )
     else:
         log.warning("Sign-in fetch for %s: 0 records returned (no error raised)", upn)
@@ -111,9 +108,8 @@ class AzureSignals:
 
     # Context
     signin_risk_low:             Optional[bool] = None
-    trusted_location:            Optional[bool] = None
-    latest_signin_ip_match:      Optional[bool] = None
-    signin_location_consistent:  Optional[bool] = None
+    mfa_enforced_signin:         Optional[bool] = None
+    modern_auth_used:            Optional[bool] = None
 
     # Diagnostics (not scored)
     matched_entra_device:   Optional[str] = None
@@ -144,10 +140,9 @@ class AzureSignals:
 
     def context_kwargs(self) -> dict:
         return {
-            "signin_risk_low":             self.signin_risk_low,
-            "trusted_location":             self.trusted_location,
-            "latest_signin_ip_match":       self.latest_signin_ip_match,
-            "signin_location_consistent":   self.signin_location_consistent,
+            "signin_risk_low":        self.signin_risk_low,
+            "mfa_enforced_signin":    self.mfa_enforced_signin,
+            "modern_auth_used":       self.modern_auth_used,
         }
 
 
@@ -271,13 +266,19 @@ def _explicit_bool(value: Any) -> Optional[bool]:
     return value if isinstance(value, bool) else None
 
 
+# signIns.clientAppUsed values that represent modern-auth clients. Everything
+# else (Exchange ActiveSync, IMAP4, POP3, SMTP, Authenticated SMTP, etc.) is a
+# legacy authentication protocol — the same split Entra's own "block legacy
+# authentication" Conditional Access template uses.
+_MODERN_CLIENT_APPS = {"Browser", "Mobile Apps and Desktop clients"}
+
+
 # ── public entry point ─────────────────────────────────────────────────────────
 
 def collect_azure_signals(
     user: "User",
     device: Optional["Device"],
     valid_role_ids: Optional[list] = None,
-    source_ip: Optional[str] = None,
 ) -> AzureSignals:
     """Resolve all Entra signals for one (user, device). Never raises.
 
@@ -286,9 +287,6 @@ def collect_azure_signals(
     Valid passes only if the user belongs to one of these specific
     groups/roles. When empty/None, falls back to the original behaviour —
     any group or role membership counts.
-    source_ip: the requesting client's IP for this device check, used to
-    back the Latest Sign-in IP Match signal (compared against the newest
-    Entra sign-in record's ipAddress).
     """
     sig = AzureSignals()
 
@@ -368,9 +366,9 @@ def collect_azure_signals(
         except Exception as exc:  # noqa: BLE001
             log.warning("Sign-in risk (from riskyUsers) failed: %s", exc)
 
-        # Trusted location / IP match / location consistency, all derived from
-        # the 2 most recent sign-ins (best-effort, short timeout). Secondary
-        # signals; if signIns is unavailable they all become Not Configured.
+        # MFA enforcement / modern-auth usage, both derived from the user's
+        # most recent sign-in (best-effort, short timeout). Secondary
+        # signals; if signIns is unavailable they both become Not Configured.
         # (Conditional Access OK used to be derived from this same sign-in
         # fetch too, but was removed — conditionalAccessStatus only reflects
         # ENFORCED policies, so it never resolved on a tenant running CA in
@@ -380,45 +378,33 @@ def collect_azure_signals(
             recent = _recent_signins(upn) if upn else []
             latest = recent[0] if recent else None
             if latest is not None:
-                loc = latest.get("networkLocationDetails")
-                if isinstance(loc, list) and loc:
-                    types = {t for d in loc for t in (d.get("networkType") or "").split(",") if t}
-                    sig.trusted_location = "trustedNamedLocation" in types if types else None
-                    if not types:
-                        sig.na_reasons["trusted_location"] = "not_configured"
+                # MFA Enforced at Sign-in: was MFA actually required/satisfied
+                # on the most recent sign-in, as opposed to mfa_registered
+                # which only checks the user has a method registered.
+                auth_req = (latest.get("authenticationRequirement") or "").strip()
+                if auth_req:
+                    sig.mfa_enforced_signin = auth_req == "multiFactorAuthentication"
                 else:
-                    sig.na_reasons["trusted_location"] = "not_configured"
+                    sig.na_reasons["mfa_enforced_signin"] = "not_configured"
 
-                # Latest Sign-in IP Match: does this request's source IP match
-                # the IP Entra recorded for the user's most recent sign-in?
-                signin_ip = latest.get("ipAddress")
-                if signin_ip and source_ip:
-                    sig.latest_signin_ip_match = signin_ip == source_ip
+                # Modern Authentication Used: the client protocol on the most
+                # recent sign-in isn't a legacy authentication protocol
+                # (IMAP4/POP3/SMTP/Exchange ActiveSync/etc.), which bypass
+                # MFA and Conditional Access in many tenant configurations.
+                client_app = (latest.get("clientAppUsed") or "").strip()
+                if client_app:
+                    sig.modern_auth_used = client_app in _MODERN_CLIENT_APPS
                 else:
-                    sig.na_reasons["latest_signin_ip_match"] = "not_configured"
+                    sig.na_reasons["modern_auth_used"] = "not_configured"
             else:
                 # signIns unavailable — mark as not_configured so UI shows
                 # "Not Configured" rather than the error-like "N/A".
-                sig.na_reasons["trusted_location"] = "not_configured"
-                sig.na_reasons["latest_signin_ip_match"] = "not_configured"
-
-            # Sign-in Location Consistency: same country on the 2 most recent
-            # sign-ins. Needs a second record, so it's N/A more often than the
-            # single-record signals above (e.g. this device's first sign-in).
-            if len(recent) >= 2:
-                country_a = ((recent[0].get("location") or {}).get("countryOrRegion") or "").strip().lower()
-                country_b = ((recent[1].get("location") or {}).get("countryOrRegion") or "").strip().lower()
-                if country_a and country_b:
-                    sig.signin_location_consistent = country_a == country_b
-                else:
-                    sig.na_reasons["signin_location_consistent"] = "not_configured"
-            else:
-                sig.na_reasons["signin_location_consistent"] = "not_configured"
+                sig.na_reasons["mfa_enforced_signin"] = "not_configured"
+                sig.na_reasons["modern_auth_used"] = "not_configured"
         except Exception as exc:  # noqa: BLE001
             log.warning("Sign-in log lookup failed: %s", exc)
-            sig.na_reasons["trusted_location"] = "not_configured"
-            sig.na_reasons["latest_signin_ip_match"] = "not_configured"
-            sig.na_reasons["signin_location_consistent"] = "not_configured"
+            sig.na_reasons["mfa_enforced_signin"] = "not_configured"
+            sig.na_reasons["modern_auth_used"] = "not_configured"
     else:
         sig.notes.append("user not found in Entra")
 

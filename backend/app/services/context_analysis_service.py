@@ -16,15 +16,18 @@ defaults below, used if a rule row is somehow missing.
 
   Entra signals (optional overlay, N/A unless collected)
   Sign-in risk low             15
-  Trusted location             10
-  Latest sign-in IP match      10
-  Sign-in location consistent  10
+  MFA enforced at sign-in      10
+  Modern authentication used   10
 
 (known_device was removed — Device already has a permanent 1:1 owner in
 this data model, so "is this a known device" duplicated identity/enrolment
 checks elsewhere without adding a real signal. known_user_device_pair and
 resource_pattern_normal were removed earlier for the same reason: neither
-was ever wired to real data by any caller.)
+was ever wired to real data by any caller. trusted_location,
+latest_signin_ip_match and signin_location_consistent were removed because
+the beta signIns fields they depended on — networkLocationDetails and a
+second recent record — were empty on most real sign-ins, leaving them stuck
+on "Not Configured" far more often than they resolved.)
 
 Caller supplies the signals; this service computes the score + breakdown.
 """
@@ -51,10 +54,9 @@ _SIGNALS = [
 # Optional Entra (Microsoft Graph sign-in) context signals. N/A (None) unless
 # resolved from the latest sign-in log → excluded from earned + denominator.
 _AZURE_SIGNALS = [
-    {"signal": "signin_risk_low",             "max": 15},
-    {"signal": "trusted_location",            "max": 10},
-    {"signal": "latest_signin_ip_match",      "max": 10},
-    {"signal": "signin_location_consistent",  "max": 10},
+    {"signal": "signin_risk_low",      "max": 15},
+    {"signal": "mfa_enforced_signin",  "max": 10},
+    {"signal": "modern_auth_used",     "max": 10},
 ]
 
 _ALLOWED_START_HOUR = 8   # 08:00
@@ -99,9 +101,8 @@ class ContextSignals:
         access_frequency_count: Optional[int] = None,
         # Optional Entra sign-in context (None = not collected → N/A)
         signin_risk_low: Optional[bool] = None,
-        trusted_location: Optional[bool] = None,
-        latest_signin_ip_match: Optional[bool] = None,
-        signin_location_consistent: Optional[bool] = None,
+        mfa_enforced_signin: Optional[bool] = None,
+        modern_auth_used: Optional[bool] = None,
     ) -> None:
         self.request_time = request_time or datetime.datetime.now()
         self.failed_attempt_count = failed_attempt_count
@@ -112,9 +113,8 @@ class ContextSignals:
         self.network_profile = network_profile
         self.access_frequency_count = access_frequency_count
         self.signin_risk_low = signin_risk_low
-        self.trusted_location = trusted_location
-        self.latest_signin_ip_match = latest_signin_ip_match
-        self.signin_location_consistent = signin_location_consistent
+        self.mfa_enforced_signin = mfa_enforced_signin
+        self.modern_auth_used = modern_auth_used
 
 
 def score_context_signals(
@@ -189,10 +189,9 @@ def score_context_signals(
     }
 
     azure_values: dict[str, Optional[bool]] = {
-        "signin_risk_low":             signals.signin_risk_low,
-        "trusted_location":            signals.trusted_location,
-        "latest_signin_ip_match":      signals.latest_signin_ip_match,
-        "signin_location_consistent":  signals.signin_location_consistent,
+        "signin_risk_low":      signals.signin_risk_low,
+        "mfa_enforced_signin":  signals.mfa_enforced_signin,
+        "modern_auth_used":     signals.modern_auth_used,
     }
 
     earned = 0
@@ -290,9 +289,8 @@ def score_context_default(
     network_profile: Optional[str] = None,
     access_frequency_count: Optional[int] = None,
     signin_risk_low: Optional[bool] = None,
-    trusted_location: Optional[bool] = None,
-    latest_signin_ip_match: Optional[bool] = None,
-    signin_location_consistent: Optional[bool] = None,
+    mfa_enforced_signin: Optional[bool] = None,
+    modern_auth_used: Optional[bool] = None,
     include_azure: bool = False,
     na_reasons: Optional[dict] = None,
     rules: Optional[dict] = None,
@@ -313,9 +311,8 @@ def score_context_default(
         network_profile=network_profile,
         access_frequency_count=access_frequency_count,
         signin_risk_low=signin_risk_low,
-        trusted_location=trusted_location,
-        latest_signin_ip_match=latest_signin_ip_match,
-        signin_location_consistent=signin_location_consistent,
+        mfa_enforced_signin=mfa_enforced_signin,
+        modern_auth_used=modern_auth_used,
     )
     return score_context_signals(
         signals,

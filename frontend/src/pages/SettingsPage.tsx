@@ -270,7 +270,8 @@ const SettingsPage: React.FC = () => {
               <li>Device: Intune Managed</li>
               <li>Device: Intune Encrypted</li>
               <li>Context: Sign-in Risk Low</li>
-              <li>Context: Trusted Location</li>
+              <li>Context: MFA Enforced at Sign-in</li>
+              <li>Context: Modern Authentication Used</li>
             </ul>
             <p className="text-xs text-blue-700/80 dark:text-blue-300/70 mt-2">
               Credentials come from <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET</code>.

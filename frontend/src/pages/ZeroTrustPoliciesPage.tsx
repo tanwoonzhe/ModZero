@@ -73,10 +73,9 @@ const SIGNAL_DESCRIPTIONS: Record<string, string> = {
   access_frequency_check:     'This user has made no more than 20 access requests in the last 10 minutes',
   gateway_online:             'At least one Connector is currently online — a coarse "is the backend reachable" system-health check, not tied to a specific resource',
   // Context — entra
-  signin_risk_low:            'User is not flagged by Entra Identity Protection as a risky sign-in',
-  trusted_location:           'Sign-in originated from a Named Location configured as trusted in this tenant',
-  latest_signin_ip_match:     'This request\'s source IP matches the IP Entra recorded for the user\'s most recent sign-in',
-  signin_location_consistent: 'The user\'s 2 most recent Entra sign-ins originated from the same country',
+  signin_risk_low:      'User is not flagged by Entra Identity Protection as a risky sign-in',
+  mfa_enforced_signin:  'MFA was actually required and satisfied on the user\'s most recent Entra sign-in (not just registered)',
+  modern_auth_used:     'The client app on the user\'s most recent Entra sign-in used modern authentication, not a legacy protocol (IMAP/POP/SMTP/Exchange ActiveSync/etc.)',
 };
 
 interface GroupOrRole {

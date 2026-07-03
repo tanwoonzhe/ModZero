@@ -44,8 +44,7 @@ DEFAULT_SIGNAL_RULES: list[tuple[str, str, str, str, int]] = [
     ("context", "access_frequency_check",   "local", "Access Frequency Check",   10),
     ("context", "gateway_online",           "local", "Gateway / Connector Online", 5),
     # ── Context (entra) ──
-    ("context", "signin_risk_low",             "entra", "Sign-in Risk Low",             15),
-    ("context", "trusted_location",            "entra", "Trusted Location",             10),
-    ("context", "latest_signin_ip_match",      "entra", "Latest Sign-in IP Match",       10),
-    ("context", "signin_location_consistent",  "entra", "Sign-in Location Consistent",   10),
+    ("context", "signin_risk_low",      "entra", "Sign-in Risk Low",           15),
+    ("context", "mfa_enforced_signin",  "entra", "MFA Enforced at Sign-in",    10),
+    ("context", "modern_auth_used",     "entra", "Modern Authentication Used", 10),
 ]

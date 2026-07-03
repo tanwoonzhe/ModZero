@@ -34,7 +34,7 @@ router = APIRouter()
 
 
 def _maybe_collect_azure(
-    policy: TrustPolicyConfig, user: User, device: Device, source_ip: Optional[str],
+    policy: TrustPolicyConfig, user: User, device: Device,
 ) -> Optional[AzureSignals]:
     """Resolve Entra signals when the admin has enabled the integration.
 
@@ -43,7 +43,7 @@ def _maybe_collect_azure(
     """
     if not getattr(policy, "entra_enabled", False):
         return None
-    return collect_azure_signals(user, device, getattr(policy, "valid_role_ids", None), source_ip)
+    return collect_azure_signals(user, device, getattr(policy, "valid_role_ids", None))
 
 
 async def _enforce_hard_fails(
@@ -119,7 +119,7 @@ async def _score_and_persist(
     deny_immediately_* action) can't behave differently depending on which
     route the client happened to call.
     """
-    azure = _maybe_collect_azure(policy, current_user, device, source_ip)
+    azure = _maybe_collect_azure(policy, current_user, device)
 
     device_rules = get_signal_rules(db, "device")
     context_rules = get_signal_rules(db, "context")

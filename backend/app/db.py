@@ -178,9 +178,12 @@ def _cleanup_retired_signal_rules() -> None:
     """Remove signals deleted from the scoring engine because they always
     reported Pass with no real data behind them, or (conditional_access_ok)
     could never resolve on a tenant running Conditional Access in Report-only
-    mode. Also relabel two signals whose meaning changed, but only rows still
-    holding their original default label so an admin's own edit is never
-    clobbered."""
+    mode, or (trusted_location/latest_signin_ip_match/signin_location_consistent)
+    depended on beta signIns fields (networkLocationDetails, a second recent
+    record) that were empty on most real sign-ins and left them stuck on "Not
+    Configured". Also relabel two signals whose meaning changed, but only rows
+    still holding their original default label so an admin's own edit is
+    never clobbered."""
     from sqlalchemy import text
 
     with engine.connect() as conn:
@@ -196,6 +199,10 @@ def _cleanup_retired_signal_rules() -> None:
         ))
         conn.execute(text(
             "DELETE FROM signal_rules WHERE module = 'context' AND signal_key = 'known_device'"
+        ))
+        conn.execute(text(
+            "DELETE FROM signal_rules WHERE module = 'context' AND signal_key IN "
+            "('trusted_location', 'latest_signin_ip_match', 'signin_location_consistent')"
         ))
         conn.execute(text(
             "UPDATE signal_rules SET label = 'OS Recently Patched' "
