@@ -300,6 +300,14 @@ def request_access(
 
     resource_out = schemas.ProtectedResourceOut.model_validate(resource)
 
+    # Effective minimum trust score: the higher of the resource's own
+    # threshold and the global Trust Policies access threshold. A resource
+    # can only raise the bar above the global default, never lower it below —
+    # otherwise a lax per-resource setting would silently undercut the
+    # admin's global floor.
+    from ..routers.trust_policy import get_or_create_policy as _get_or_create_policy
+    effective_min_score = max(resource.minimum_trust_score, _get_or_create_policy(db).default_threshold)
+
     # 0a. Entra identity hard gate: when Entra is enabled and Graph EXPLICITLY
     # reports the account as disabled, deny outright — a high trust score must
     # never compensate for a disabled account. Unknown/error → no gate.
@@ -317,7 +325,7 @@ def request_access(
         return schemas.AccessDecisionOut(
             decision="deny",
             reason="Account is disabled in Entra — access denied",
-            required_score=resource.minimum_trust_score,
+            required_score=effective_min_score,
             resource=resource_out,
         )
 
@@ -339,7 +347,7 @@ def request_access(
         return schemas.AccessDecisionOut(
             decision="deny",
             reason="Account has no valid role assigned — access denied",
-            required_score=resource.minimum_trust_score,
+            required_score=effective_min_score,
             resource=resource_out,
         )
 
@@ -357,7 +365,7 @@ def request_access(
         return schemas.AccessDecisionOut(
             decision="deny",
             reason="Client app access is disabled for this account",
-            required_score=resource.minimum_trust_score,
+            required_score=effective_min_score,
             resource=resource_out,
         )
 
@@ -375,7 +383,7 @@ def request_access(
         return schemas.AccessDecisionOut(
             decision="deny",
             reason="This resource requires an Entra-linked identity",
-            required_score=resource.minimum_trust_score,
+            required_score=effective_min_score,
             resource=resource_out,
         )
 
@@ -393,7 +401,7 @@ def request_access(
         return schemas.AccessDecisionOut(
             decision="deny",
             reason="Resource is disabled",
-            required_score=resource.minimum_trust_score,
+            required_score=effective_min_score,
             resource=resource_out,
         )
 
@@ -413,7 +421,7 @@ def request_access(
             return schemas.AccessDecisionOut(
                 decision="deny",
                 reason="Device not found",
-                required_score=resource.minimum_trust_score,
+                required_score=effective_min_score,
                 resource=resource_out,
             )
         if current_user.role != RoleEnum.ADMIN and device.user_id != current_user.user_id:
@@ -429,7 +437,7 @@ def request_access(
             return schemas.AccessDecisionOut(
                 decision="deny",
                 reason="Device does not belong to user",
-                required_score=resource.minimum_trust_score,
+                required_score=effective_min_score,
                 resource=resource_out,
             )
 
@@ -448,7 +456,7 @@ def request_access(
         return schemas.AccessDecisionOut(
             decision="deny",
             reason="No trust score available for device",
-            required_score=resource.minimum_trust_score,
+            required_score=effective_min_score,
             resource=resource_out,
         )
 
@@ -467,26 +475,26 @@ def request_access(
             decision="deny",
             reason=score.hard_deny_reason or "Denied by a signal configured to deny resource access immediately. Run a new device check to clear this.",
             trust_score=score.total_score,
-            required_score=resource.minimum_trust_score,
+            required_score=effective_min_score,
             resource=resource_out,
         )
 
     # 4. Trust score too low
-    if score.total_score < resource.minimum_trust_score:
+    if score.total_score < effective_min_score:
         _log(
             db,
             user_id=current_user.user_id,
             device_id=score.device_id,
             resource_id=resource.id,
             decision="deny",
-            reason=f"trust_score_below_minimum ({score.total_score} < {resource.minimum_trust_score})",
+            reason=f"trust_score_below_minimum ({score.total_score} < {effective_min_score})",
             trust_score=score.total_score,
         )
         return schemas.AccessDecisionOut(
             decision="deny",
-            reason=f"Trust score {score.total_score} below required {resource.minimum_trust_score}",
+            reason=f"Trust score {score.total_score} below required {effective_min_score}",
             trust_score=score.total_score,
-            required_score=resource.minimum_trust_score,
+            required_score=effective_min_score,
             resource=resource_out,
         )
 
@@ -512,7 +520,7 @@ def request_access(
                 decision="deny",
                 reason="Device is not Intune compliant",
                 trust_score=score.total_score,
-                required_score=resource.minimum_trust_score,
+                required_score=effective_min_score,
                 resource=resource_out,
             )
 
@@ -535,7 +543,7 @@ def request_access(
                 decision="deny",
                 reason=f"Connector is {label} — access denied",
                 trust_score=score.total_score,
-                required_score=resource.minimum_trust_score,
+                required_score=effective_min_score,
                 resource=resource_out,
             )
         # Resolve the actual Connector row for session binding
@@ -623,7 +631,7 @@ def request_access(
             decision="deny",
             reason=f"Tunnel required but not ready: {tunnel_eval['tunnel_reason']}",
             trust_score=score.total_score,
-            required_score=resource.minimum_trust_score,
+            required_score=effective_min_score,
             resource=resource_out,
             connector_id=online_connector.connector_id if online_connector else None,
             access_mode="denied",
@@ -638,7 +646,7 @@ def request_access(
 
     # ── Allow path — write rich AccessRequestLog row directly ────────────────
     decision = "allow"
-    reason = f"trust_score_meets_minimum ({score.total_score} >= {resource.minimum_trust_score})"
+    reason = f"trust_score_meets_minimum ({score.total_score} >= {effective_min_score})"
     log = AccessRequestLog(
         user_id=current_user.user_id,
         device_id=score.device_id,
@@ -728,9 +736,9 @@ def request_access(
 
     return schemas.AccessDecisionOut(
         decision=decision,
-        reason=f"Trust score {score.total_score} meets required {resource.minimum_trust_score}",
+        reason=f"Trust score {score.total_score} meets required {effective_min_score}",
         trust_score=score.total_score,
-        required_score=resource.minimum_trust_score,
+        required_score=effective_min_score,
         resource=resource_out,
         session_id=session.id if session else None,
         access_token=token_plain,
