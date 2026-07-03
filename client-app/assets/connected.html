@@ -99,31 +99,51 @@
     .res-row .grow { flex: 1; }
     .res-row .decision { font-size: 12px; padding: 4px 10px; border-radius: 6px; }
 
-    .factor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+    .factor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
     .factor {
-      padding: 10px 12px; background: #0b1220; border: 1px solid var(--border); border-radius: 8px; font-size: 12px;
-      cursor: pointer; transition: border-color .15s;
+      height: 92px; padding: 10px 12px; background: #0b1220; border: 1px solid var(--border); border-radius: 8px;
+      display: flex; flex-direction: column; justify-content: space-between;
+      cursor: pointer; transition: border-color .15s, background .15s;
     }
-    .factor:hover { border-color: #475569; }
+    .factor:hover { border-color: #475569; background: #0d1526; }
     .factor.pass { border-color: rgba(16,185,129,.4); }
     .factor.fail { border-color: rgba(239,68,68,.35); }
     .f-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-    .f-name { color: var(--text); font-weight: 600; font-size: 12.5px; line-height: 1.4; }
-    .f-badges { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: 8px; }
-    .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 9.5px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase; white-space: nowrap; }
+    .f-name { color: var(--text); font-weight: 600; font-size: 12px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 9.5px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase; white-space: nowrap; flex-shrink: 0; }
     .pill-source-local   { background: rgba(148,163,184,.15); color: var(--muted); }
     .pill-source-entra   { background: rgba(99,102,241,.18); color: #a5b4fc; }
     .pill-status-pass    { background: rgba(16,185,129,.15); color: #6ee7b7; }
     .pill-status-fail    { background: rgba(239,68,68,.15); color: #fca5a5; }
     .pill-status-na      { background: rgba(148,163,184,.15); color: var(--muted); }
     .pill-status-license { background: rgba(245,158,11,.15); color: #fcd34d; }
-    .f-chevron { color: var(--muted); font-size: 9px; transition: transform .15s; }
-    .factor.expanded .f-chevron { transform: rotate(180deg); }
-    .f-detail { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 11.5px; color: #cbd5e1; line-height: 1.55; }
-    .factor.expanded .f-detail { display: block; }
-    .f-detail p { margin: 0 0 6px; }
-    .f-detail p:last-child { margin-bottom: 0; }
-    .f-detail .f-admin { color: #fcd34d; }
+    .f-status { font-size: 17px; font-weight: 700; letter-spacing: .2px; }
+    .f-status-pass    { color: #6ee7b7; }
+    .f-status-fail    { color: #fca5a5; }
+    .f-status-na      { color: var(--muted); }
+    .f-status-license { color: #fcd34d; }
+
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(2,6,23,.6); z-index: 200;
+      display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal-box {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+      padding: 20px; width: 100%; max-width: 440px; max-height: 80vh; overflow-y: auto;
+      box-shadow: 0 24px 60px rgba(0,0,0,.45);
+    }
+    .modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .modal-title { font-size: 15px; font-weight: 700; color: var(--text); line-height: 1.35; }
+    .modal-close {
+      background: transparent; border: 0; color: var(--muted); font-size: 22px; line-height: 1;
+      cursor: pointer; padding: 0 2px; flex-shrink: 0;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal-badges { display: flex; gap: 6px; margin-bottom: 14px; }
+    .modal-body p { margin: 0 0 8px; font-size: 12.5px; color: #cbd5e1; line-height: 1.55; }
+    .modal-body p:last-child { margin-bottom: 0; }
+    .modal-body .f-admin { color: #fcd34d; }
 
     .decision-banner {
       display: flex; align-items: center; gap: 14px; padding: 14px 16px;
@@ -354,6 +374,17 @@
 
   <div id="toast" class="toast"></div>
 
+  <div id="signalModal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        <div class="modal-title" id="modalTitle"></div>
+        <button class="modal-close" id="modalClose" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-badges" id="modalBadges"></div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
   <script>
     const $ = (id) => document.getElementById(id);
     const M = window.modzero;
@@ -569,18 +600,35 @@
         el.innerHTML = `
           <div class="f-head">
             <div class="f-name">${name}</div>
-            <div class="f-badges">
-              <span class="pill pill-source-${source}">${source === "entra" ? "Entra" : "Local"}</span>
-              <span class="pill pill-status-${cls}">${label}</span>
-              <span class="f-chevron">&#9662;</span>
-            </div>
+            <span class="pill pill-source-${source}">${source === "entra" ? "Entra" : "Local"}</span>
           </div>
-          <div class="f-detail">${detail.join("")}</div>
+          <div class="f-status f-status-${cls}">${label}</div>
         `;
-        el.addEventListener("click", () => el.classList.toggle("expanded"));
+        el.addEventListener("click", () => openSignalModal({ name, source, cls, label, detailHtml: detail.join("") }));
         grid.appendChild(el);
       });
     }
+
+    // ── Signal detail popup — an in-tab modal overlay, not a native window ──
+    function openSignalModal({ name, source, cls, label, detailHtml }) {
+      $("modalTitle").textContent = name;
+      $("modalBadges").innerHTML = `
+        <span class="pill pill-source-${source}">${source === "entra" ? "Entra" : "Local"}</span>
+        <span class="pill pill-status-${cls}">${label}</span>
+      `;
+      $("modalBody").innerHTML = detailHtml;
+      $("signalModal").classList.remove("hidden");
+    }
+    function closeSignalModal() {
+      $("signalModal").classList.add("hidden");
+    }
+    $("modalClose").addEventListener("click", closeSignalModal);
+    $("signalModal").addEventListener("click", (e) => {
+      if (e.target.id === "signalModal") closeSignalModal();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeSignalModal();
+    });
 
     function showScore(r) {
       $("postureResultPanel").style.display = "";
