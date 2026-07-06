@@ -62,6 +62,9 @@ login.json
 .env.local
 .env.*.local
 
+# Self-signed TLS material (generated per-deployment, never committed)
+/certs/
+
 # Tauri
 client/src-tauri/target/
 

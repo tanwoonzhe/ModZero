@@ -20,6 +20,7 @@ Safety:
 
 import datetime as _dt
 import html as html_mod
+import os
 import secrets as _secrets
 import socketserver
 import threading
@@ -32,6 +33,14 @@ import requests
 
 from .client import ControllerClient
 from .logging_utils import info, ok
+
+# Optional CA bundle (PEM) for verifying https upstreams whose cert isn't in
+# the public trust store — e.g. a privately-issued or self-signed cert on an
+# internal-only resource reachable solely through this connector. Unset by
+# default, which keeps normal public-CA verification (verify=True) for any
+# https upstream; only requests to https targets get this treatment, and only
+# when a deployer has explicitly opted in by setting the path.
+CONNECTOR_CA_BUNDLE = os.environ.get("CONNECTOR_CA_BUNDLE")
 
 HOP_BY_HOP = {
     "connection", "keep-alive", "transfer-encoding", "upgrade",
@@ -399,6 +408,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 timeout=UPSTREAM_TIMEOUT,
                 stream=True,
                 allow_redirects=False,
+                verify=CONNECTOR_CA_BUNDLE if (protocol == "https" and CONNECTOR_CA_BUNDLE) else True,
             )
         except requests.exceptions.Timeout:
             self._html(504, _denied_page("upstream_timeout"))

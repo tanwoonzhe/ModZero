@@ -89,6 +89,24 @@ services:
     networks:
       - private-net
 
+  # ── Demo TLS terminator ──────────────────────────────────────────
+  # Lets a ConnectorResource route use protocol=https against the AlphaTechs
+  # demo target (a host-level plain-HTTP process on 127.0.0.1:8088, which has
+  # no TLS listener of its own). Terminates TLS with a self-signed cert
+  # (generate via legacy/scripts/gen-selfsigned-cert.sh -> ../certs/) and
+  # forwards to the host in plain HTTP. Point the route at
+  # target_host=127.0.0.1, target_port=8446, protocol=https.
+  demo-tls:
+    image: nginx:alpine
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ../certs:/etc/nginx/certs:ro
+      - ../deploy/demo-tls.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8446:443"
+    restart: unless-stopped
+
   # ── ModZero Connector ──────────────────────────────────────────
   # Set MODZERO_ENROLL_TOKEN in .env before starting the connector.
   # Start order: 1) docker compose up -d db backend frontend intranet
