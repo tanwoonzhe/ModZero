@@ -91,20 +91,25 @@ services:
 
   # ── Demo TLS terminator ──────────────────────────────────────────
   # Lets a ConnectorResource route use protocol=https against the AlphaTechs
-  # demo target (a host-level plain-HTTP process on 127.0.0.1:8088, which has
-  # no TLS listener of its own). Terminates TLS with a self-signed cert
-  # (generate via legacy/scripts/gen-selfsigned-cert.sh -> ../certs/) and
-  # forwards to the host in plain HTTP. Point the route at
+  # demo target (a host-level plain-HTTP process bound to 127.0.0.1:8088
+  # only, which has no TLS listener of its own). Terminates TLS with a
+  # self-signed cert (generate via legacy/scripts/gen-selfsigned-cert.sh ->
+  # ../certs/) and forwards to the host in plain HTTP. Point the route at
   # target_host=127.0.0.1, target_port=8446, protocol=https.
+  #
+  # network_mode: host (not a bridge + port mapping) because the demo target
+  # is bound to loopback only — a container on the default bridge can't reach
+  # a host-loopback-only service even via host.docker.internal/host-gateway,
+  # since that resolves to the bridge gateway IP, not 127.0.0.1. Host
+  # networking puts this container in the host's own network namespace, so
+  # 127.0.0.1:8088 means the same thing here as it does on the host. Binds
+  # 8446 directly (not 443, which the host's own nginx already occupies).
   demo-tls:
     image: nginx:alpine
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    network_mode: host
     volumes:
       - ../certs:/etc/nginx/certs:ro
       - ../deploy/demo-tls.conf:/etc/nginx/conf.d/default.conf:ro
-    ports:
-      - "8446:443"
     restart: unless-stopped
 
   # ── ModZero Connector ──────────────────────────────────────────
