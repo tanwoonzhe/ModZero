@@ -17,7 +17,7 @@ import hashlib
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
@@ -123,7 +123,7 @@ class ResourceCreateRequest(BaseModel):
     name: str
     network: str = "default"
     connector_id: Optional[str] = None
-    protocol: str = "http"
+    protocol: Literal["http", "https"] = "http"
     target_host: str
     target_port: int = 80
     path_prefix: str = ""
@@ -136,7 +136,7 @@ class ResourceUpdateRequest(BaseModel):
     name: str
     network: str = "default"
     connector_id: Optional[str] = None
-    protocol: str = "http"
+    protocol: Literal["http", "https"] = "http"
     target_host: str
     target_port: int = 80
     path_prefix: str = ""

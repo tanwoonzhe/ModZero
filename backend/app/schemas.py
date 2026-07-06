@@ -604,6 +604,10 @@ class ProtectedResourceOut(ProtectedResourceBase):
     updated_at: datetime
     # Computed from linked connector heartbeat — populated by the router, not from ORM
     connector_status: Optional[str] = None
+    # Computed from the linked ConnectorResource's protocol/host/port — the actual
+    # address traffic is proxied to. Falls back to internal_address when no
+    # connector is linked, so it never drifts from what "Edit Proxy Route" set.
+    resolved_address: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

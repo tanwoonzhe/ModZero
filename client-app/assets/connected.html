@@ -391,6 +391,26 @@
 
     // Entra integration status, learned from the latest Device Check response.
     let entraEnabled = null;
+
+    // Blocks "Request Access" while a device check is in flight — either the manual
+    // "Run Device Check" click, the startup auto-run, or a backend-pushed
+    // force_device_check — so users can't request access against a stale trust score.
+    let deviceCheckRunning = false;
+    function setDeviceCheckRunning(running) {
+      deviceCheckRunning = running;
+      document.querySelectorAll('#resList button[data-rid]').forEach((btn) => {
+        if (btn.dataset.busy === "access") return; // an in-flight access request owns its own state
+        if (running) {
+          btn.dataset.busy = "devicecheck";
+          btn.disabled = true;
+          btn.textContent = "Blocked — Device Check running";
+        } else if (btn.dataset.busy === "devicecheck") {
+          delete btn.dataset.busy;
+          btn.disabled = false;
+          btn.textContent = "Request Access";
+        }
+      });
+    }
     function renderEntraStatus() {
       const el = $("entraStatus");
       if (!el) return;
@@ -678,6 +698,7 @@
       const btn = $("btnRunCheck");
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span>Collecting…';
+      setDeviceCheckRunning(true);
       try {
         const { result } = await M.runDeviceCheck();
         if (!result.ok) {
@@ -692,6 +713,7 @@
       } finally {
         btn.disabled = false;
         btn.textContent = "Run Device Check";
+        setDeviceCheckRunning(false);
       }
     });
 
@@ -716,7 +738,7 @@
     function renderResource(res) {
       const row = document.createElement("div");
       row.className = "res-row";
-      const addrLine = [res.public_name, res.internal_address].filter(Boolean);
+      const addrLine = [res.public_name, res.resolved_address || res.internal_address].filter(Boolean);
 
       // Connector status badge
       let connBadge = "";
@@ -744,13 +766,15 @@
           ${addrLine.length ? `<div class="meta" style="font-family:monospace;font-size:11px;color:var(--muted)">${addrLine.map(v => escapeHtml(v)).join(" → ")}</div>` : ""}
           <div class="meta" id="dec-${res.id}"></div>
         </div>
-        <button class="primary" data-rid="${res.id}">Request Access</button>
+        <button class="primary" data-rid="${res.id}"${deviceCheckRunning ? ' disabled data-busy="devicecheck"' : ""}>${deviceCheckRunning ? "Blocked — Device Check running" : "Request Access"}</button>
       `;
       row.querySelector("button").addEventListener("click", (e) => requestAccess(res.id, res.name, e.currentTarget));
       $("resList").appendChild(row);
     }
 
     async function requestAccess(resourceId, resourceName, btn) {
+      if (deviceCheckRunning) return; // guards the rare click that beats the disabled-state paint
+      btn.dataset.busy = "access";
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span>Requesting&hellip;';
       try {
@@ -795,8 +819,17 @@
       } catch (e) {
         toast("err", String(e?.message || e));
       } finally {
-        btn.disabled = false;
-        btn.textContent = "Request Access";
+        delete btn.dataset.busy;
+        if (deviceCheckRunning) {
+          // A device check started while this request was in flight — re-block it
+          // instead of leaving it clickable against a score that's about to change.
+          btn.dataset.busy = "devicecheck";
+          btn.disabled = true;
+          btn.textContent = "Blocked — Device Check running";
+        } else {
+          btn.disabled = false;
+          btn.textContent = "Request Access";
+        }
       }
     }
 
@@ -905,8 +938,10 @@
       M.onPushEvent((payload) => {
         if (!payload || typeof payload !== "object") return;
         if (payload.type === "force_device_check") {
+          setDeviceCheckRunning(true);
           toast("warn", "Trust policy updated — running a new device check…");
         } else if (payload.type === "device_check_result") {
+          setDeviceCheckRunning(false);
           tick();
           toast("ok", "Device check complete — trust score updated");
         } else if (payload.type === "force_logout") {

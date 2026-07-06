@@ -60,9 +60,25 @@ def _connector_status(db: Session, connector_resource_id: Optional[UUID]) -> Opt
     return "online"
 
 
+def _resolved_address(resource: ProtectedResource, db: Session) -> Optional[str]:
+    """Address actually used for proxying: derived from the linked ConnectorResource's
+    protocol/host/port when set, so it can never drift from what "Edit Proxy Route" saved.
+    Falls back to the free-text internal_address when no connector is linked."""
+    if resource.connector_resource_id:
+        cr = db.query(ConnectorResource).filter(
+            ConnectorResource.resource_id == resource.connector_resource_id
+        ).first()
+        if cr:
+            protocol = cr.protocol.value if hasattr(cr.protocol, "value") else (cr.protocol or "http")
+            path = cr.path_prefix or ""
+            return f"{protocol}://{cr.target_host}:{cr.target_port}{path}"
+    return resource.internal_address
+
+
 def _enrich(resource: ProtectedResource, db: Session) -> schemas.ProtectedResourceOut:
     out = schemas.ProtectedResourceOut.model_validate(resource)
     out.connector_status = _connector_status(db, resource.connector_resource_id)
+    out.resolved_address = _resolved_address(resource, db)
     return out
 
 
