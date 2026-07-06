@@ -868,6 +868,18 @@ def introspect_access_session(
         if not latest_report or not latest_report.intune_compliant:
             return schemas.AccessIntrospectResponse(active=False, reason="intune_required")
 
+    # URL-token bootstrap is single-use. The first browser to present the
+    # token from the URL gets an HttpOnly cookie at the connector; every
+    # subsequent URL-token attempt (a copied/stolen access_url on another
+    # browser or machine, which has no client app and no live trust
+    # monitoring) is rejected. Checked last so a temporarily-denied request
+    # (e.g. trust score dip) never burns the single use. Steady-state
+    # cookie-backed introspects send bootstrap=False and are unaffected.
+    if body.bootstrap:
+        if session.url_bootstrap_used:
+            return schemas.AccessIntrospectResponse(active=False, reason="access_link_already_used")
+        session.url_bootstrap_used = True
+
     # Update last_used_at
     session.last_used_at = now
     db.commit()

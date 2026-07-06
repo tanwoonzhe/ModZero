@@ -75,6 +75,8 @@ REASON_MESSAGES: dict = {
     "launch_code_expired":        "This access link has expired. Please request access again in ModZero Client.",
     "launch_code_not_found":      "Invalid access link. Please request access again in ModZero Client.",
     "connector_mismatch":         "This session is bound to a different connector.",
+    "access_link_already_used":   "This access link was already used in another browser. Open ModZero Client on your enrolled device and request access again.",
+    "legacy_route_disabled":      "This access method has been retired for security reasons.",
 }
 
 
@@ -202,9 +204,17 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self._handle_gateway(session_id, forward_path, parsed.query)
             return
 
-        # Legacy /access/ routes (kept for backward compatibility)
+        # Legacy /access/ routes: token-in-URL on every request, which would
+        # let a copied URL sidestep the /r/ gateway's single-use bootstrap by
+        # rewriting it into the legacy form. Off unless explicitly re-enabled.
         if len(parts) < 2 or parts[0] != "access":
             self._html(404, _denied_page("route_not_found", "This path is not served by the ModZero connector."))
+            return
+        if os.environ.get("MODZERO_ENABLE_LEGACY_ROUTES") != "1":
+            self._html(410, _denied_page(
+                "legacy_route_disabled",
+                "Token-in-URL access links are disabled. Open ModZero Client and use Open in Browser.",
+            ))
             return
 
         session_id = parts[1]
@@ -308,7 +318,10 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         qs_params = parse_qs(query_string)
         token_qp = (qs_params.get("token") or [None])[0]
         if token_qp:
-            result = client.introspect(session_id, token_qp)
+            # bootstrap=True: URL tokens mint a cookie session exactly once —
+            # a copied access_url replayed from another browser/machine after
+            # the first open gets access_link_already_used instead of access.
+            result = client.introspect(session_id, token_qp, bootstrap=True)
             if result is None:
                 self._html(502, _denied_page("backend_unreachable", "Backend unreachable. Try again shortly."))
                 return
@@ -497,9 +510,10 @@ class ProxyServer:
         self._thread.start()
         bind = self.host or "0.0.0.0"
         ok(f"Proxy server →")
-        info(f"   gateway (new): http://{bind}:{self.port}/launch/{{code}} → /r/{{session_id}}/")
-        info(f"   legacy (old) : http://{bind}:{self.port}/access/{{session_id}}/proxy/{{path}}?token={{token}}")
-        info("Gateway mode active — HttpOnly cookie, no token in browser URL.")
+        info(f"   gateway: http://{bind}:{self.port}/launch/{{code}} → /r/{{session_id}}/")
+        legacy_on = os.environ.get("MODZERO_ENABLE_LEGACY_ROUTES") == "1"
+        info(f"   legacy token-in-URL routes: {'ENABLED' if legacy_on else 'disabled'}")
+        info("Gateway mode active — HttpOnly cookie, single-use URL bootstrap.")
 
     def stop(self) -> None:
         if self._httpd is not None:

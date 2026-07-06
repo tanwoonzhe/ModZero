@@ -708,6 +708,11 @@ class AccessSessionOut(BaseModel):
 class AccessIntrospectRequest(BaseModel):
     session_id: UUID
     access_token: str
+    # True when the token arrived in the URL (?token= fallback / legacy routes)
+    # rather than from the connector's cookie store. URL bootstraps are
+    # single-use: the first one wins, later ones are rejected so a copied
+    # access_url cannot be replayed from another browser or machine.
+    bootstrap: bool = False
 
 
 class AccessIntrospectResponse(BaseModel):

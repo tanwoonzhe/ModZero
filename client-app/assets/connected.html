@@ -789,24 +789,22 @@
         const score = d.trust_score == null ? "&mdash;" : Math.round(d.trust_score);
         if (d.decision === "allow") {
           const exp = d.expires_at ? new Date(d.expires_at).toLocaleTimeString() : "&mdash;";
-          // access_url carries a reusable token valid for the whole 15-min session.
-          // It works in ANY browser and supports re-opening (multi-open); the connector
-          // strips the token from the address bar via a redirect on first load.
-          // We deliberately do NOT use launch_url: its one-time code rotates the session
-          // token on the backend, which would silently invalidate this shareable link
-          // (the "Chrome works but Edge says no_session" bug). One mechanism = one token.
+          // access_url's URL token is SINGLE-USE: the first browser to open it
+          // gets an HttpOnly cookie at the connector and the token is consumed
+          // server-side. Re-opening in the SAME browser keeps working (cookie),
+          // but the URL replayed anywhere else — another browser, another
+          // machine with no client app — gets access_link_already_used. That's
+          // why there is deliberately no "Copy Link" button: the sanctioned
+          // path is opening the default browser on THIS enrolled device.
           const accessUrl = d.access_url || "";
           const openBtn = accessUrl
             ? `<button class="btn-sm" onclick='openAccessUrl(${JSON.stringify(accessUrl)})'>Open in Browser</button>`
-            : "";
-          const copyBtn = accessUrl
-            ? `<button class="btn-sm" style="margin-left:4px;background:var(--border);color:var(--text)" onclick='copyAccessUrl(${JSON.stringify(accessUrl)})'>&#9645; Copy Link</button>`
             : "";
           target.innerHTML =
             `<span class="badge ok">ALLOW</span> ` +
             `${escapeHtml(d.reason || "")} (score ${score} / required ${d.required_score ?? 0})<br>` +
             `<span class="badge neutral">Session expires ${exp}</span>` +
-            openBtn + copyBtn;
+            openBtn;
           toast("ok", `ALLOW: ${d.reason}`);
           saveLastDecision(resourceName || resourceId, "allow", d.trust_score, d.reason || "Score meets requirement");
         } else {
@@ -841,14 +839,6 @@
       }
     }
 
-    async function copyAccessUrl(url) {
-      try {
-        await navigator.clipboard.writeText(url);
-        toast("ok", "Link copied — paste into any browser while the session is active (15 min)");
-      } catch (e) {
-        toast("err", "Could not copy to clipboard: " + String(e?.message || e));
-      }
-    }
 
     $("btnReloadRes").addEventListener("click", loadResources);
 

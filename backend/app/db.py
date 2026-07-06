@@ -134,6 +134,11 @@ def _run_migrations() -> None:
         ALTER TABLE posture_reports
           ADD COLUMN IF NOT EXISTS network_profile varchar(32)
         """,
+        # Single-use flag for the token-in-URL browser bootstrap (see AccessSession).
+        """
+        ALTER TABLE access_sessions
+          ADD COLUMN IF NOT EXISTS url_bootstrap_used boolean DEFAULT false
+        """,
     ]
     with engine.connect() as conn:
         for stmt in migrations:

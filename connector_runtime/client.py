@@ -75,13 +75,17 @@ class ControllerClient:
 
     # ── Introspect ──────────────────────────────────────────────────────────
     def introspect(self, session_id: str, access_token: str,
-                   timeout: int = 8) -> Optional[dict]:
+                   timeout: int = 8, bootstrap: bool = False) -> Optional[dict]:
+        """bootstrap=True marks a token that came from the URL (not our cookie
+        store); the backend allows exactly one such use per session, so a
+        copied access_url can't be replayed from another browser/machine."""
         url = f"{self.backend}/api/connectors/access/introspect"
         try:
             r = requests.post(
                 url,
                 headers=self._auth_headers(),
-                json={"session_id": session_id, "access_token": access_token},
+                json={"session_id": session_id, "access_token": access_token,
+                      "bootstrap": bootstrap},
                 timeout=timeout,
             )
             return r.json()

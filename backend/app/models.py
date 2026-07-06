@@ -1612,6 +1612,11 @@ class AccessSession(Base):
     launch_code_hash: str = Column(String(64), nullable=True)
     launch_code_expires_at: datetime = Column(DateTime(timezone=True), nullable=True)
     launch_code_used: bool = Column(Boolean, default=False, nullable=True)
+    # The token-in-URL access_url may bootstrap a browser cookie session exactly
+    # once. Without this the URL is a bearer credential: anyone who copies it can
+    # open the resource from any machine for the whole session TTL, with no
+    # client app (and therefore no live trust monitoring) on that machine.
+    url_bootstrap_used: bool = Column(Boolean, default=False, nullable=True)
 
     def __repr__(self) -> str:
         return f"<AccessSession {self.id} status={self.status}>"

@@ -701,8 +701,10 @@ def request_access(
         if _proxy_base:
             # launch_url: one-time code, opens in default browser, sets HttpOnly cookie
             launch_url = f"{_proxy_base}/launch/{_launch_code}"
-            # access_url: token-in-URL, works in any browser while session is active
-            # The /r/ gateway accepts ?token= as a fallback when no cookie is present.
+            # access_url: token-in-URL, single-use bootstrap. The /r/ gateway
+            # accepts ?token= once per session to mint an HttpOnly cookie for
+            # that browser; replaying the URL elsewhere is rejected
+            # (access_link_already_used) — see introspect's bootstrap check.
             access_url = f"{_proxy_base}/r/{session.id}/?token={token_plain}"
         else:
             launch_url = None
