@@ -156,10 +156,16 @@ def score_context_signals(
         normal_ip = True  # assume ok if unknown
 
     signal_notes: dict[str, str] = {}
+    # Signals whose N/A is "admin hasn't configured this yet" (benign, expected)
+    # rather than "we couldn't collect the data" (a gap). The UI renders the
+    # former as "Not Configured" and the latter as "N/A", matching how the
+    # Entra signals already distinguish the two.
+    signal_status: dict[str, str] = {}
 
     if not signals.trusted_networks:
         trusted_network: Optional[bool] = None
         signal_notes["trusted_network"] = "no trusted networks configured"
+        signal_status["trusted_network"] = "not_configured"
     elif not signals.source_ip:
         trusted_network = None
         signal_notes["trusted_network"] = "source IP not available"
@@ -212,10 +218,13 @@ def score_context_signals(
             continue
         val = signal_values.get(sig, True)
         if val is None:
-            breakdown.append({
+            na_entry = {
                 "signal": sig, "passed": None, "points": 0, "max": max_pts,
                 "module": "context_analysis", "note": signal_notes.get(sig, "not collected"),
-            })
+            }
+            if sig in signal_status:
+                na_entry["status"] = signal_status[sig]
+            breakdown.append(na_entry)
             continue
         passed = bool(val)
         pts = max_pts if passed else 0
